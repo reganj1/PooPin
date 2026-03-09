@@ -14,6 +14,10 @@ interface RestroomMapProps {
 interface RestroomFeatureProperties {
   id: string;
   name: string;
+  address: string;
+  overall_rating: number;
+  smell_rating: number;
+  cleanliness_rating: number;
 }
 
 const SOURCE_ID = "restrooms-source";
@@ -37,11 +41,17 @@ const toFeatureCollection = (restrooms: NearbyBathroom[]): FeatureCollection<Poi
         },
         properties: {
           id: restroom.id,
-          name: restroom.name
+          name: restroom.name,
+          address: restroom.address,
+          overall_rating: restroom.ratings.overall,
+          smell_rating: restroom.ratings.smell,
+          cleanliness_rating: restroom.ratings.cleanliness
         }
       }))
   };
 };
+
+const toDisplayRating = (value: number) => (value > 0 ? value.toFixed(1) : "N/A");
 
 export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
   const router = useRouter();
@@ -49,6 +59,8 @@ export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapboxRef = useRef<typeof mapboxgl | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
+  const popupRef = useRef<mapboxgl.Popup | null>(null);
+  const activePopupRestroomIdRef = useRef<string | null>(null);
   const hasBoundLayerEventsRef = useRef(false);
   const clickHandlerRef = useRef<((event: mapboxgl.MapLayerMouseEvent) => void) | null>(null);
   const mouseEnterHandlerRef = useRef<(() => void) | null>(null);
@@ -92,6 +104,9 @@ export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
     return () => {
       cancelled = true;
       setIsMapReady(false);
+      activePopupRestroomIdRef.current = null;
+      popupRef.current?.remove();
+      popupRef.current = null;
 
       const map = mapRef.current;
       if (map) {
@@ -187,10 +202,75 @@ export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
     if (!hasBoundLayerEventsRef.current) {
       const clickHandler = (event: mapboxgl.MapLayerMouseEvent) => {
         const feature = event.features?.[0];
-        const restroomId = feature?.properties?.id;
-        if (typeof restroomId === "string") {
-          router.push(`/restroom/${restroomId}`);
+        if (!feature || feature.geometry.type !== "Point") {
+          return;
         }
+
+        const properties = feature.properties as RestroomFeatureProperties | undefined;
+        if (!properties) {
+          return;
+        }
+
+        const { id, name, address, overall_rating, smell_rating, cleanliness_rating } = properties;
+        if (!id || !name || !address) {
+          return;
+        }
+
+        if (activePopupRestroomIdRef.current === id) {
+          router.push(`/restroom/${id}`);
+          return;
+        }
+
+        popupRef.current?.remove();
+
+        const popupContent = document.createElement("div");
+        popupContent.className = "min-w-[210px] space-y-2 p-1";
+
+        const title = document.createElement("p");
+        title.className = "text-sm font-semibold text-slate-900";
+        title.textContent = name;
+        popupContent.appendChild(title);
+
+        const addressLine = document.createElement("p");
+        addressLine.className = "text-xs text-slate-600";
+        addressLine.textContent = address;
+        popupContent.appendChild(addressLine);
+
+        const ratingsLine = document.createElement("p");
+        ratingsLine.className = "text-xs text-slate-700";
+        ratingsLine.textContent = `Overall ${toDisplayRating(overall_rating)} • Smell ${toDisplayRating(smell_rating)} • Clean ${toDisplayRating(cleanliness_rating)}`;
+        popupContent.appendChild(ratingsLine);
+
+        const detailButton = document.createElement("button");
+        detailButton.type = "button";
+        detailButton.className =
+          "inline-flex rounded-md border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50";
+        detailButton.textContent = "Open restroom";
+        detailButton.addEventListener("click", () => {
+          router.push(`/restroom/${id}`);
+        });
+        popupContent.appendChild(detailButton);
+
+        const popup = new mapbox.Popup({
+          closeButton: false,
+          offset: 14,
+          maxWidth: "260px"
+        })
+          .setLngLat(feature.geometry.coordinates as [number, number])
+          .setDOMContent(popupContent)
+          .addTo(map);
+
+        popup.on("close", () => {
+          if (popupRef.current === popup) {
+            popupRef.current = null;
+          }
+          if (activePopupRestroomIdRef.current === id) {
+            activePopupRestroomIdRef.current = null;
+          }
+        });
+
+        popupRef.current = popup;
+        activePopupRestroomIdRef.current = id;
       };
 
       const mouseEnterHandler = () => {
@@ -212,6 +292,9 @@ export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
     }
 
     if (markerData.features.length === 0) {
+      popupRef.current?.remove();
+      popupRef.current = null;
+      activePopupRestroomIdRef.current = null;
       map.easeTo({ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, duration: 0 });
       return;
     }
