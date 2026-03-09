@@ -2,9 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RatingPills } from "@/components/restroom/RatingPills";
 import { RestroomTags } from "@/components/restroom/RestroomTags";
+import { PhotoUploadForm } from "@/components/restroom/PhotoUploadForm";
+import { RestroomPhotoGallery } from "@/components/restroom/RestroomPhotoGallery";
 import { ReviewList } from "@/components/review/ReviewList";
 import { ReviewForm } from "@/components/review/ReviewForm";
 import { ReviewSummary } from "@/components/review/ReviewSummary";
+import { getApprovedBathroomPhotosData } from "@/lib/data/photos";
 import { getBathroomByIdData, getBathroomReviewsData } from "@/lib/data/restrooms";
 import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
 import { getRestroomDetailLocationLine, getRestroomDisplayName, getRestroomSourceLabel } from "@/lib/utils/restroomPresentation";
@@ -59,6 +62,7 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
   const displayName = getRestroomDisplayName(restroom);
   const locationLine = getRestroomDetailLocationLine(restroom);
   const sourceLabel = getRestroomSourceLabel(restroom.source);
+  const approvedPhotos = await getApprovedBathroomPhotosData(restroom.id);
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
@@ -105,6 +109,17 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
           </p>
           <p className="mt-1 text-xs text-slate-500">Map pin detail will be linked here once live Mapbox rendering is added.</p>
         </div>
+      </section>
+
+      <section className="mt-6">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Photos</h2>
+            <p className="mt-1 text-sm text-slate-500">Only approved photos are shown publicly.</p>
+          </div>
+          <PhotoUploadForm bathroomId={restroom.id} />
+        </div>
+        <RestroomPhotoGallery photos={approvedPhotos} />
       </section>
 
       <section className="mt-6">

@@ -27,8 +27,8 @@
 - [x] Surface review outputs with human-readable chips/summaries and add lightweight review safety checks.
 - [x] Add OSM/Overpass restroom seed pipeline with deterministic source IDs and existing dedupe safeguards.
 - [x] Improve OSM restroom naming/address presentation quality for clearer map/list/detail readability.
+- [x] Add moderation-first restroom photo uploads (Supabase Storage + pending review + approved-only public gallery).
 - [x] Document product scope and local run instructions.
 
 ## Next Suggested Tasks
-- [ ] Add image upload to Supabase Storage.
 - [ ] Add basic filtering (open now, accessible, public only).
