@@ -15,6 +15,7 @@
 - [x] Add lightweight restroom marker popups with key ratings and detail action.
 - [x] Add homepage “Use my location” support for map centering and distance-based re-sorting.
 - [x] Add distinct current-location marker when near-me location is granted.
+- [x] Add lightweight homepage filter and sort controls (public/accessibility/baby-station, closest/best-rated).
 - [x] Document product scope and local run instructions.
 
 ## Next Suggested Tasks

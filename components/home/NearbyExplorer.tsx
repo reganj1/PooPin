@@ -14,6 +14,14 @@ interface Coordinate {
   lng: number;
 }
 
+type SortMode = "closest" | "best_rated";
+
+interface FilterState {
+  publicOnly: boolean;
+  accessible: boolean;
+  babyStation: boolean;
+}
+
 const roundToOne = (value: number) => Math.round(value * 10) / 10;
 const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
 
@@ -49,8 +57,14 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [userLocation, setUserLocation] = useState<Coordinate | null>(null);
   const [geoError, setGeoError] = useState<string | null>(null);
   const [isLocating, setIsLocating] = useState(false);
+  const [sortMode, setSortMode] = useState<SortMode>("closest");
+  const [filters, setFilters] = useState<FilterState>({
+    publicOnly: false,
+    accessible: false,
+    babyStation: false
+  });
 
-  const restrooms = useMemo(() => {
+  const restroomsWithDistance = useMemo(() => {
     if (!userLocation) {
       return initialRestrooms;
     }
@@ -59,9 +73,45 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       .map((restroom) => ({
         ...restroom,
         distanceMiles: roundToOne(haversineDistanceMiles(userLocation, { lat: restroom.lat, lng: restroom.lng }))
-      }))
-      .sort((a, b) => a.distanceMiles - b.distanceMiles);
+      }));
   }, [initialRestrooms, userLocation]);
+
+  const restrooms = useMemo(() => {
+    const filtered = restroomsWithDistance.filter((restroom) => {
+      if (filters.publicOnly && restroom.access_type !== "public") {
+        return false;
+      }
+      if (filters.accessible && !restroom.is_accessible) {
+        return false;
+      }
+      if (filters.babyStation && !restroom.has_baby_station) {
+        return false;
+      }
+      return true;
+    });
+
+    if (sortMode === "best_rated") {
+      return [...filtered].sort((a, b) => {
+        if (b.ratings.overall !== a.ratings.overall) {
+          return b.ratings.overall - a.ratings.overall;
+        }
+        if (b.ratings.reviewCount !== a.ratings.reviewCount) {
+          return b.ratings.reviewCount - a.ratings.reviewCount;
+        }
+        return a.distanceMiles - b.distanceMiles;
+      });
+    }
+
+    return [...filtered].sort((a, b) => a.distanceMiles - b.distanceMiles);
+  }, [filters, restroomsWithDistance, sortMode]);
+
+  const listHelperText = useMemo(() => {
+    const sourceText = userLocation ? "your location" : "default city center";
+    if (sortMode === "best_rated") {
+      return `Filtered results sorted by best rated. Distance still shown from ${sourceText}.`;
+    }
+    return `Filtered results sorted by closest distance from ${sourceText}.`;
+  }, [sortMode, userLocation]);
 
   const handleUseMyLocation = () => {
     setGeoError(null);
@@ -120,7 +170,77 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         <div className="lg:sticky lg:top-20 lg:self-start">
           <MapPanel restrooms={restrooms} userLocation={userLocation} />
         </div>
-        <RestroomList restrooms={restrooms} />
+
+        <div className="space-y-3">
+          <section className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <fieldset>
+                <legend className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Filters</legend>
+                <div className="space-y-1.5">
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={filters.publicOnly}
+                      onChange={(event) =>
+                        setFilters((current) => ({
+                          ...current,
+                          publicOnly: event.target.checked
+                        }))
+                      }
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                    Public only
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={filters.accessible}
+                      onChange={(event) =>
+                        setFilters((current) => ({
+                          ...current,
+                          accessible: event.target.checked
+                        }))
+                      }
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                    Accessible
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={filters.babyStation}
+                      onChange={(event) =>
+                        setFilters((current) => ({
+                          ...current,
+                          babyStation: event.target.checked
+                        }))
+                      }
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                    Baby station
+                  </label>
+                </div>
+              </fieldset>
+
+              <div>
+                <label htmlFor="sort-mode" className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Sort
+                </label>
+                <select
+                  id="sort-mode"
+                  value={sortMode}
+                  onChange={(event) => setSortMode(event.target.value as SortMode)}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                >
+                  <option value="closest">Closest</option>
+                  <option value="best_rated">Best rated</option>
+                </select>
+              </div>
+            </div>
+          </section>
+
+          <RestroomList restrooms={restrooms} helperText={listHelperText} />
+        </div>
       </section>
     </>
   );
