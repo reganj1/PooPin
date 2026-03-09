@@ -22,6 +22,10 @@
 - [x] Keep nearby list aligned with current map viewport/my-location context and preserve WC marker styling with hover emphasis.
 - [x] Polish desktop homepage layout and copy for a cleaner, product-ready map/list experience.
 - [x] Refine desktop UI toward a premium consumer map/list product feel (navigation, hierarchy, controls, and cards).
+- [x] Redesign review submission UX with overall-star-first flow and optional quick-pick detail ratings mapped to existing schema.
+- [x] Refine review form details into a lightweight "what stood out" flow with progressive optional categories.
+- [x] Surface review outputs with human-readable chips/summaries and add lightweight review safety checks.
+- [x] Add OSM/Overpass restroom seed pipeline with deterministic source IDs and existing dedupe safeguards.
 - [x] Document product scope and local run instructions.
 
 ## Next Suggested Tasks

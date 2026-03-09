@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "seed:import:restrooms": "tsx scripts/import-restrooms.ts"
+    "seed:import:restrooms": "tsx scripts/import-restrooms.ts",
+    "seed:fetch:osm": "tsx scripts/fetch-osm-restrooms.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

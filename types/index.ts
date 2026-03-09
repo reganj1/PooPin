@@ -11,7 +11,7 @@ export type BathroomPlaceType =
 
 export type BathroomAccessType = "public" | "customer_only" | "code_required" | "staff_assisted";
 
-export type BathroomSource = "user" | "google_places" | "city_open_data" | "partner" | "other";
+export type BathroomSource = "user" | "google_places" | "city_open_data" | "openstreetmap" | "partner" | "other";
 
 export type ModerationStatus = "active" | "pending" | "flagged" | "removed";
 

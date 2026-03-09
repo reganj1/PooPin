@@ -4,6 +4,7 @@ import { RatingPills } from "@/components/restroom/RatingPills";
 import { RestroomTags } from "@/components/restroom/RestroomTags";
 import { ReviewList } from "@/components/review/ReviewList";
 import { ReviewForm } from "@/components/review/ReviewForm";
+import { ReviewSummary } from "@/components/review/ReviewSummary";
 import { getBathroomByIdData, getBathroomReviewsData } from "@/lib/data/restrooms";
 
 interface RestroomDetailPageProps {
@@ -71,6 +72,12 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
       <section className="mt-6">
         <ReviewForm bathroomId={restroom.id} />
       </section>
+
+      {reviews.length > 0 ? (
+        <section className="mt-6">
+          <ReviewSummary reviews={reviews} />
+        </section>
+      ) : null}
 
       <section className="mt-6">
         <h2 className="mb-3 text-lg font-semibold text-slate-900">Recent reviews ({reviews.length})</h2>

@@ -1,0 +1,748 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.10 2d4cfc48",
+  "osm3s": {
+    "timestamp_osm_base": "2026-03-09T20:42:43Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+    {
+      "type": "node",
+      "id": 317081556,
+      "lat": 37.7843325,
+      "lon": -122.4078294,
+      "tags": {
+        "amenity": "toilets",
+        "fee": "no",
+        "level": "0",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 377909484,
+      "lat": 37.7876864,
+      "lon": -122.4074419,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "check_date": "2025-11-08",
+        "fee": "no",
+        "portable": "no",
+        "toilets:disposal": "flush",
+        "toilets:handwashing": "yes",
+        "toilets:position": "seated",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 417233587,
+      "lat": 37.7723588,
+      "lon": -122.4476402,
+      "tags": {
+        "access": "yes",
+        "addr:postcode": "94117",
+        "amenity": "toilets",
+        "changing_table": "yes",
+        "check_date": "2024-11-16",
+        "drinking_water": "yes",
+        "ele": "106.591064",
+        "fee": "no",
+        "level": "0",
+        "name": "Panhandle Toilets",
+        "opening_hours": "08:00-17:30",
+        "operator": "San Francisco Park & Recreation",
+        "portable": "no",
+        "source": "survey",
+        "toilets:disposal": "flush",
+        "toilets:handwashing": "yes",
+        "toilets:position": "urinal;seated",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 432827778,
+      "lat": 37.784031,
+      "lon": -122.4124442,
+      "tags": {
+        "amenity": "toilets"
+      }
+    },
+    {
+      "type": "node",
+      "id": 1309649654,
+      "lat": 37.768544,
+      "lon": -122.4279014,
+      "tags": {
+        "access": "yes",
+        "addr:street": "Market Street",
+        "amenity": "toilets",
+        "check_date": "2023-10-14",
+        "fee": "no",
+        "note": "in front of safeway",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 1309649655,
+      "lat": 37.7628117,
+      "lon": -122.434741,
+      "tags": {
+        "addr:street": "Market Street",
+        "amenity": "toilets",
+        "note": "by chevron station"
+      }
+    },
+    {
+      "type": "node",
+      "id": 2064757156,
+      "lat": 37.7684543,
+      "lon": -122.4535696,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "changing_table": "no",
+        "check_date": "2025-12-11",
+        "drinking_water": "yes",
+        "fee": "yes",
+        "female": "yes",
+        "level": "0",
+        "male": "yes",
+        "toilets:disposal": "flush",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 3257706565,
+      "lat": 37.7828967,
+      "lon": -122.4011944,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "check_date": "2025-11-17",
+        "drinking_water": "no",
+        "fee": "no",
+        "opening_hours": "09:00-17:00",
+        "supervised": "no",
+        "toilets:disposal": "flush",
+        "toilets:position": "seated;urinal",
+        "unisex": "yes",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 3931486668,
+      "lat": 37.7759784,
+      "lon": -122.427519,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "fee": "no",
+        "opening_hours": "08:00-17:30",
+        "operator": "SFRPD"
+      }
+    },
+    {
+      "type": "node",
+      "id": 6194001386,
+      "lat": 37.7845929,
+      "lon": -122.4038063,
+      "tags": {
+        "amenity": "toilets",
+        "opening_hours": "Mo-Sa 07:00-22:00; Su 08:00-22:00",
+        "operator": "Target",
+        "toilets:disposal": "flush"
+      }
+    },
+    {
+      "type": "node",
+      "id": 6693595722,
+      "lat": 37.7850838,
+      "lon": -122.4290459,
+      "tags": {
+        "amenity": "toilets",
+        "level": "1",
+        "repeat_on": "2"
+      }
+    },
+    {
+      "type": "node",
+      "id": 8395167118,
+      "lat": 37.7695442,
+      "lon": -122.4344603,
+      "tags": {
+        "access": "yes",
+        "addr:housenumber": "50",
+        "addr:street": "Scott Street",
+        "amenity": "toilets",
+        "check_date": "2026-01-24",
+        "fee": "no",
+        "level": "0",
+        "toilets:disposal": "flush",
+        "unisex": "yes",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 8889608955,
+      "lat": 37.7623939,
+      "lon": -122.4187832,
+      "tags": {
+        "amenity": "toilets",
+        "toilets:disposal": "flush"
+      }
+    },
+    {
+      "type": "node",
+      "id": 9200292432,
+      "lat": 37.7847481,
+      "lon": -122.4321865,
+      "tags": {
+        "amenity": "toilets",
+        "drinking_water": "yes",
+        "fee": "no",
+        "female": "yes",
+        "level": "1",
+        "male": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 9225712936,
+      "lat": 37.7802637,
+      "lon": -122.4130609,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "brand": "Mid-Market Pit Stop",
+        "brand:website": "https://sfpublicworks.org/pitstop",
+        "check_date": "2025-01-14",
+        "fee": "no",
+        "level": "0",
+        "opening_hours": "24/7",
+        "unisex": "yes",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 9456812862,
+      "lat": 37.7838927,
+      "lon": -122.4029557,
+      "tags": {
+        "amenity": "toilets",
+        "indoor": "yes",
+        "level": "0",
+        "toilets:disposal": "flush",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 9596443258,
+      "lat": 37.7787681,
+      "lon": -122.4170192,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "check_date": "2022-10-05",
+        "name": "Civic Center Pit Stop",
+        "opening_hours": "Mo-Su 07:00-19:00",
+        "operator": "San Francisco Public Works",
+        "operator:wikidata": "Q7413995",
+        "unisex": "yes",
+        "url": "https://sfpublicworks.wixsite.com/pitstop",
+        "website": "https://www.sfpublicworks.org/pitstop"
+      }
+    },
+    {
+      "type": "node",
+      "id": 9735505811,
+      "lat": 37.7855573,
+      "lon": -122.4180834,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "unisex": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 10080967975,
+      "lat": 37.7844469,
+      "lon": -122.4074118,
+      "tags": {
+        "access": "permit",
+        "amenity": "toilets",
+        "description": "Powell Street BART restroom",
+        "fee": "no",
+        "layer": "-1",
+        "level": "-1",
+        "note:access": "In the paid area of BART",
+        "url": "https://bartable.bart.gov/featured/restrooms-powell-street-station-have-reopened"
+      }
+    },
+    {
+      "type": "node",
+      "id": 10252456318,
+      "lat": 37.7828934,
+      "lon": -122.4011604,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "check_date": "2025-11-17",
+        "drinking_water": "no",
+        "fee": "no",
+        "opening_hours": "09:00-17:00",
+        "supervised": "no",
+        "toilets:disposal": "flush",
+        "unisex": "yes",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 10585161530,
+      "lat": 37.7662136,
+      "lon": -122.4561553,
+      "tags": {
+        "amenity": "toilets",
+        "check_date": "2025-07-20",
+        "female": "no",
+        "male": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 10585161535,
+      "lat": 37.7662105,
+      "lon": -122.4558563,
+      "tags": {
+        "amenity": "toilets",
+        "check_date": "2025-07-20",
+        "female": "yes",
+        "male": "no"
+      }
+    },
+    {
+      "type": "node",
+      "id": 10832810391,
+      "lat": 37.7700512,
+      "lon": -122.4595851,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "check_date": "2023-04-22",
+        "fee": "no",
+        "level": "0",
+        "portable": "no",
+        "toilets:disposal": "flush",
+        "toilets:handwashing": "yes",
+        "toilets:position": "seated;urinal"
+      }
+    },
+    {
+      "type": "node",
+      "id": 10859142581,
+      "lat": 37.7848814,
+      "lon": -122.4017916,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "changing_table": "no",
+        "check_date": "2023-04-30",
+        "description": "These are below the stairs and accessible through a set of doors at street level.",
+        "fixme": "Add opening hours",
+        "level": "0",
+        "toilets:disposal": "flush",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 12405811909,
+      "lat": 37.7839985,
+      "lon": -122.4376519,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "fee": "no",
+        "female": "yes",
+        "level": "0",
+        "male": "no",
+        "portable": "no",
+        "toilets:disposal": "flush"
+      }
+    },
+    {
+      "type": "node",
+      "id": 12405811918,
+      "lat": 37.7839977,
+      "lon": -122.4376769,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "changing_table": "yes",
+        "fee": "no",
+        "female": "no",
+        "level": "0",
+        "male": "yes",
+        "portable": "no",
+        "toilets:disposal": "flush",
+        "toilets:handwashing": "yes",
+        "toilets:position": "seated;urinal",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 12838486458,
+      "lat": 37.7635139,
+      "lon": -122.4587016,
+      "tags": {
+        "access": "permissive",
+        "amenity": "toilets",
+        "changing_table": "yes",
+        "fee": "no",
+        "gender_segregated": "yes",
+        "level:ref": "B1",
+        "toilets:disposal": "flush",
+        "toilets:handwashing": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 12908603132,
+      "lat": 37.7701758,
+      "lon": -122.4510767,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "changing_table": "yes",
+        "fee": "no",
+        "gender_segregated": "no",
+        "level": "1",
+        "level:ref": "2",
+        "portable": "no",
+        "toilets:disposal": "flush",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 13111164183,
+      "lat": 37.7793606,
+      "lon": -122.4158357,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "check_date": "2025-08-31",
+        "fee": "no",
+        "female": "yes",
+        "gender_segregated": "yes",
+        "level": "-1",
+        "level:ref": "1",
+        "male": "no",
+        "portable": "yes",
+        "toilets:disposal": "flush",
+        "toilets:handwashing": "no"
+      }
+    },
+    {
+      "type": "node",
+      "id": 13111164184,
+      "lat": 37.7793509,
+      "lon": -122.4158914,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "check_date": "2025-08-31",
+        "fee": "no",
+        "female": "no",
+        "gender_segregated": "yes",
+        "level": "-1",
+        "level:ref": "1",
+        "male": "yes",
+        "portable": "no",
+        "toilets:disposal": "flush",
+        "toilets:handwashing": "yes",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 13111181567,
+      "lat": 37.779359,
+      "lon": -122.4158492,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "check_date": "2025-08-31",
+        "fee": "no",
+        "female": "yes",
+        "gender_segregated": "yes",
+        "level": "-1",
+        "level:ref": "1",
+        "male": "no",
+        "portable": "yes",
+        "toilets:disposal": "flush",
+        "toilets:handwashing": "no"
+      }
+    },
+    {
+      "type": "node",
+      "id": 13111181568,
+      "lat": 37.7793493,
+      "lon": -122.4159049,
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "check_date": "2025-08-31",
+        "fee": "no",
+        "female": "no",
+        "gender_segregated": "yes",
+        "level": "-1",
+        "level:ref": "1",
+        "male": "yes",
+        "portable": "no",
+        "toilets:disposal": "flush",
+        "toilets:handwashing": "yes",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 13128930108,
+      "lat": 37.7788961,
+      "lon": -122.4190879,
+      "tags": {
+        "addr:unit": "123",
+        "amenity": "toilets",
+        "changing_table": "no",
+        "fee": "no",
+        "gender_segregated": "yes",
+        "level:ref": "1",
+        "note:access": "Passing through a City Hall checkpoint is necessary to reach this toilet.",
+        "portable": "no",
+        "toilets:disposal": "flush",
+        "toilets:handwashing": "yes",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "way",
+      "id": 38026627,
+      "center": {
+        "lat": 37.7637588,
+        "lon": -122.4385085
+      },
+      "tags": {
+        "amenity": "toilets",
+        "building": "yes"
+      }
+    },
+    {
+      "type": "way",
+      "id": 112433951,
+      "center": {
+        "lat": 37.7681892,
+        "lon": -122.458923
+      },
+      "tags": {
+        "amenity": "toilets",
+        "building": "yes",
+        "changing_table": "yes",
+        "check_date": "2026-01-13",
+        "drinking_water": "yes",
+        "fee": "no",
+        "female": "yes",
+        "height": "5",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "way",
+      "id": 261268625,
+      "center": {
+        "lat": 37.7822999,
+        "lon": -122.4356736
+      },
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "building": "yes",
+        "changing_table": "yes",
+        "description": "Raymond Kimbell Playground Restroom",
+        "fee": "no",
+        "height": "3",
+        "opening_hours": "08:00-17:30",
+        "operator": "San Francisco Recreation & Park Department",
+        "operator:short": "SFRPD",
+        "operator:website": "https://sfrecpark.org/",
+        "operator:wikidata": "Q14683875",
+        "operator:wikipedia": "en:San Francisco Recreation & Parks Department",
+        "toilets:disposal": "flush",
+        "unisex": "yes",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "way",
+      "id": 383641690,
+      "center": {
+        "lat": 37.7767597,
+        "lon": -122.4060285
+      },
+      "tags": {
+        "addr:housenumber": "55",
+        "addr:street": "Sherman Street",
+        "amenity": "toilets",
+        "building": "yes"
+      }
+    },
+    {
+      "type": "way",
+      "id": 389112749,
+      "center": {
+        "lat": 37.7760346,
+        "lon": -122.4343849
+      },
+      "tags": {
+        "amenity": "toilets",
+        "building": "yes"
+      }
+    },
+    {
+      "type": "way",
+      "id": 408445907,
+      "center": {
+        "lat": 37.7607902,
+        "lon": -122.4277513
+      },
+      "tags": {
+        "access": "yes",
+        "addr:housenumber": "598",
+        "addr:street": "Dolores Street",
+        "amenity": "toilets",
+        "building": "yes",
+        "name": "Dolores Park Public Restroom",
+        "opening_hours": "06:00-22:00",
+        "operator": "SF Recreation and Parks Department",
+        "toilets:disposal": "flush",
+        "unisex": "yes",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "way",
+      "id": 551838082,
+      "center": {
+        "lat": 37.7766239,
+        "lon": -122.4339211
+      },
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "building": "yes",
+        "building:levels": "1",
+        "changing_table": "yes",
+        "fee": "no",
+        "roof:shape": "flat",
+        "toilets:disposal": "flush",
+        "toilets:handwashing": "yes",
+        "unisex": "yes",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "way",
+      "id": 960650356,
+      "center": {
+        "lat": 37.7779953,
+        "lon": -122.4577164
+      },
+      "tags": {
+        "amenity": "toilets",
+        "building": "yes",
+        "fee": "no"
+      }
+    },
+    {
+      "type": "way",
+      "id": 996461012,
+      "center": {
+        "lat": 37.78507,
+        "lon": -122.4317704
+      },
+      "tags": {
+        "amenity": "toilets",
+        "fee": "no",
+        "indoor": "yes",
+        "level": "0"
+      }
+    },
+    {
+      "type": "way",
+      "id": 996750992,
+      "center": {
+        "lat": 37.7853138,
+        "lon": -122.430347
+      },
+      "tags": {
+        "amenity": "toilets",
+        "drinking_water": "yes",
+        "fee": "no",
+        "female": "yes",
+        "indoor": "room",
+        "level": "1",
+        "male": "yes",
+        "opening_hours": "Mo-Su 10:00+",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "way",
+      "id": 1057034240,
+      "center": {
+        "lat": 37.7805195,
+        "lon": -122.4258386
+      },
+      "tags": {
+        "amenity": "toilets",
+        "building": "yes",
+        "fee": "no",
+        "toilets:disposal": "flush",
+        "unisex": "yes",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "way",
+      "id": 1478730200,
+      "center": {
+        "lat": 37.7649433,
+        "lon": -122.4200726
+      },
+      "tags": {
+        "access": "yes",
+        "amenity": "toilets",
+        "building": "toilets",
+        "building:levels": "1",
+        "check_date": "2026-02-13",
+        "fee": "no",
+        "name": "Mission Pit Stop",
+        "opening_hours": "24/7",
+        "operator": "JCDecaux",
+        "supervised": "yes",
+        "toilets:disposal": "flush",
+        "wheelchair": "yes"
+      }
+    }
+  ]
+}
