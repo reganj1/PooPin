@@ -2,6 +2,7 @@ import { Bathroom, NearbyBathroom, Review } from "@/types";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import {
   getBathroomById as getMockBathroomById,
+  getBathroomsInBounds as getMockBathroomsInBounds,
   getBathroomReviews as getMockBathroomReviews,
   getNearbyBathrooms as getMockNearbyBathrooms
 } from "@/lib/mock/restrooms";
@@ -59,6 +60,13 @@ interface ReviewRow {
   visit_time: string | null;
   created_at: string;
   status: string;
+}
+
+export interface BathroomBounds {
+  minLat: number;
+  maxLat: number;
+  minLng: number;
+  maxLng: number;
 }
 
 const roundToOne = (value: number) => Math.round(value * 10) / 10;
@@ -297,4 +305,56 @@ export async function getBathroomReviewsData(bathroomId: string): Promise<Review
   }
 
   return ((reviewRows ?? []) as ReviewRow[]).map(toReview).filter((row): row is Review => row !== null);
+}
+
+export async function getBathroomsInBoundsData(
+  bounds: BathroomBounds,
+  limit = 300,
+  origin: { lat: number; lng: number } = DEFAULT_ORIGIN
+): Promise<NearbyBathroom[]> {
+  const supabase = getSupabaseServerClient();
+  if (!supabase) {
+    return getMockBathroomsInBounds(bounds, limit, origin);
+  }
+
+  const { data: bathroomRows, error: bathroomError } = await supabase
+    .from("bathrooms")
+    .select("*")
+    .eq("status", ACTIVE_STATUS)
+    .gte("lat", bounds.minLat)
+    .lte("lat", bounds.maxLat)
+    .gte("lng", bounds.minLng)
+    .lte("lng", bounds.maxLng)
+    .limit(limit);
+
+  if (bathroomError || !bathroomRows) {
+    console.warn("[Poopin] Supabase bounds bathroom query failed, using mock data.", bathroomError?.message);
+    return getMockBathroomsInBounds(bounds, limit, origin);
+  }
+
+  const bathrooms = (bathroomRows as BathroomRow[]).map(toBathroom).filter((row): row is Bathroom => row !== null);
+
+  if (bathrooms.length === 0) {
+    return [];
+  }
+
+  const bathroomIds = bathrooms.map((bathroom) => bathroom.id);
+
+  const { data: reviewRows, error: reviewError } = await supabase
+    .from("reviews")
+    .select("*")
+    .in("bathroom_id", bathroomIds)
+    .eq("status", ACTIVE_STATUS);
+
+  if (reviewError) {
+    console.warn("[Poopin] Supabase bounds review query failed, using mock data.", reviewError.message);
+    return getMockBathroomsInBounds(bounds, limit, origin);
+  }
+
+  const reviews = ((reviewRows ?? []) as ReviewRow[]).map(toReview).filter((row): row is Review => row !== null);
+  const ratingsMap = buildRatingMap(reviews);
+
+  return bathrooms
+    .map((bathroom) => toNearbyBathroom(bathroom, ratingsMap, origin))
+    .sort((a, b) => a.distanceMiles - b.distanceMiles);
 }

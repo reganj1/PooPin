@@ -493,6 +493,29 @@ export const getNearbyBathrooms = (
     .slice(0, limit);
 };
 
+export const getBathroomsInBounds = (
+  bounds: { minLat: number; maxLat: number; minLng: number; maxLng: number },
+  limit = 300,
+  origin: { lat: number; lng: number } = DEFAULT_ORIGIN
+): NearbyBathroom[] => {
+  return mockBathrooms
+    .filter(
+      (bathroom) =>
+        bathroom.status === "active" &&
+        bathroom.lat >= bounds.minLat &&
+        bathroom.lat <= bounds.maxLat &&
+        bathroom.lng >= bounds.minLng &&
+        bathroom.lng <= bounds.maxLng
+    )
+    .map((bathroom) => ({
+      ...bathroom,
+      distanceMiles: roundToOne(haversineDistanceMiles(origin, { lat: bathroom.lat, lng: bathroom.lng })),
+      ratings: getRatingsForBathroom(bathroom.id)
+    }))
+    .sort((a, b) => a.distanceMiles - b.distanceMiles)
+    .slice(0, limit);
+};
+
 export const getBathroomById = (id: string): NearbyBathroom | undefined => {
   const bathroom = mockBathrooms.find((item) => item.id === id && item.status === "active");
   if (!bathroom) {

@@ -17,6 +17,7 @@
 - [x] Add distinct current-location marker when near-me location is granted.
 - [x] Add lightweight homepage filter and sort controls (public/accessibility/baby-station, closest/best-rated).
 - [x] Add repeatable restroom seed import script for JSON/CSV with dedupe safeguards.
+- [x] Split homepage map/list data strategies with viewport-based map pin loading.
 - [x] Document product scope and local run instructions.
 
 ## Next Suggested Tasks

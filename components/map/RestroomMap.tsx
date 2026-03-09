@@ -13,6 +13,12 @@ interface RestroomMapProps {
     lat: number;
     lng: number;
   } | null;
+  onViewportBoundsChange?: (bounds: {
+    minLat: number;
+    maxLat: number;
+    minLng: number;
+    maxLng: number;
+  }) => void;
 }
 
 interface RestroomFeatureProperties {
@@ -85,7 +91,10 @@ const toUserLocationFeatureCollection = (
 
 const toDisplayRating = (value: number) => (value > 0 ? value.toFixed(1) : "N/A");
 
-export function RestroomMap({ restrooms, accessToken, userLocation = null }: RestroomMapProps) {
+const getLocationKey = (location: { lat: number; lng: number } | null) =>
+  location ? `${location.lat.toFixed(5)}:${location.lng.toFixed(5)}` : "";
+
+export function RestroomMap({ restrooms, accessToken, userLocation = null, onViewportBoundsChange }: RestroomMapProps) {
   const router = useRouter();
   const [isMapReady, setIsMapReady] = useState(false);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -94,6 +103,8 @@ export function RestroomMap({ restrooms, accessToken, userLocation = null }: Res
   const popupRef = useRef<mapboxgl.Popup | null>(null);
   const activePopupRestroomIdRef = useRef<string | null>(null);
   const hasBoundLayerEventsRef = useRef(false);
+  const hasInitializedCameraRef = useRef(false);
+  const previousLocationKeyRef = useRef<string>("");
   const clickHandlerRef = useRef<((event: mapboxgl.MapLayerMouseEvent) => void) | null>(null);
   const mouseEnterHandlerRef = useRef<(() => void) | null>(null);
   const mouseLeaveHandlerRef = useRef<(() => void) | null>(null);
@@ -176,6 +187,8 @@ export function RestroomMap({ restrooms, accessToken, userLocation = null }: Res
       }
 
       hasBoundLayerEventsRef.current = false;
+      hasInitializedCameraRef.current = false;
+      previousLocationKeyRef.current = "";
       clickHandlerRef.current = null;
       mouseEnterHandlerRef.current = null;
       mouseLeaveHandlerRef.current = null;
@@ -374,16 +387,48 @@ export function RestroomMap({ restrooms, accessToken, userLocation = null }: Res
       popupRef.current?.remove();
       popupRef.current = null;
       activePopupRestroomIdRef.current = null;
-      if (userLocation && isValidCoordinate(userLocation.lat, userLocation.lng)) {
-        map.easeTo({ center: [userLocation.lng, userLocation.lat], zoom: 13, duration: 700 });
-      } else {
-        map.easeTo({ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, duration: 0 });
-      }
+    }
+  }, [isMapReady, markerData, restrooms.length, router, userLocationData]);
+
+  useEffect(() => {
+    if (!isMapReady) {
       return;
     }
 
-    if (userLocation && isValidCoordinate(userLocation.lat, userLocation.lng)) {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const currentLocationKey = getLocationKey(userLocation);
+    const hasLocationChanged = previousLocationKeyRef.current !== currentLocationKey;
+    previousLocationKeyRef.current = currentLocationKey;
+
+    if (userLocation && isValidCoordinate(userLocation.lat, userLocation.lng) && hasLocationChanged) {
       map.easeTo({ center: [userLocation.lng, userLocation.lat], zoom: 13, duration: 700 });
+      hasInitializedCameraRef.current = true;
+      return;
+    }
+
+    if (hasInitializedCameraRef.current) {
+      return;
+    }
+
+    if (markerData.features.length === 0) {
+      map.easeTo({ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, duration: 0 });
+      hasInitializedCameraRef.current = true;
+      return;
+    }
+
+    if (markerData.features.length === 1) {
+      const [lng, lat] = markerData.features[0].geometry.coordinates;
+      map.easeTo({ center: [lng, lat], zoom: 14, duration: 700 });
+      hasInitializedCameraRef.current = true;
+      return;
+    }
+
+    const mapbox = mapboxRef.current;
+    if (!mapbox) {
       return;
     }
 
@@ -392,18 +437,45 @@ export function RestroomMap({ restrooms, accessToken, userLocation = null }: Res
       bounds.extend(feature.geometry.coordinates as [number, number]);
     });
 
-    if (markerData.features.length === 1) {
-      const [lng, lat] = markerData.features[0].geometry.coordinates;
-      map.easeTo({ center: [lng, lat], zoom: 14, duration: 700 });
-      return;
-    }
-
     map.fitBounds(bounds, {
       padding: 48,
       maxZoom: 14,
       duration: 700
     });
-  }, [isMapReady, markerData, restrooms.length, router, userLocation, userLocationData]);
+    hasInitializedCameraRef.current = true;
+  }, [isMapReady, markerData, userLocation]);
+
+  useEffect(() => {
+    if (!isMapReady || !onViewportBoundsChange) {
+      return;
+    }
+
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const emitBounds = () => {
+      const bounds = map.getBounds();
+      if (!bounds) {
+        return;
+      }
+
+      onViewportBoundsChange({
+        minLat: bounds.getSouth(),
+        maxLat: bounds.getNorth(),
+        minLng: bounds.getWest(),
+        maxLng: bounds.getEast()
+      });
+    };
+
+    map.on("moveend", emitBounds);
+    emitBounds();
+
+    return () => {
+      map.off("moveend", emitBounds);
+    };
+  }, [isMapReady, onViewportBoundsChange]);
 
   return <div ref={mapContainerRef} className="h-full w-full" />;
 }

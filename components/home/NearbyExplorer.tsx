@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { MapPanel } from "@/components/map/MapPanel";
 import { RestroomList } from "@/components/restroom/RestroomList";
 import { NearbyBathroom } from "@/types";
@@ -14,12 +14,23 @@ interface Coordinate {
   lng: number;
 }
 
+interface MapBounds {
+  minLat: number;
+  maxLat: number;
+  minLng: number;
+  maxLng: number;
+}
+
 type SortMode = "closest" | "best_rated";
 
 interface FilterState {
   publicOnly: boolean;
   accessible: boolean;
   babyStation: boolean;
+}
+
+interface BoundsApiResponse {
+  restrooms: NearbyBathroom[];
 }
 
 const roundToOne = (value: number) => Math.round(value * 10) / 10;
@@ -53,6 +64,9 @@ const toGeoErrorMessage = (error: GeolocationPositionError) => {
   }
 };
 
+const toBoundsKey = (bounds: MapBounds) =>
+  `${bounds.minLat.toFixed(4)}:${bounds.maxLat.toFixed(4)}:${bounds.minLng.toFixed(4)}:${bounds.maxLng.toFixed(4)}`;
+
 export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [userLocation, setUserLocation] = useState<Coordinate | null>(null);
   const [geoError, setGeoError] = useState<string | null>(null);
@@ -63,21 +77,24 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     accessible: false,
     babyStation: false
   });
+  const [mapRestrooms, setMapRestrooms] = useState<NearbyBathroom[]>(initialRestrooms);
 
-  const restroomsWithDistance = useMemo(() => {
+  const latestBoundsKeyRef = useRef<string>("");
+  const isBoundsFetchInFlightRef = useRef(false);
+
+  const listBaseRestrooms = useMemo(() => {
     if (!userLocation) {
       return initialRestrooms;
     }
 
-    return [...initialRestrooms]
-      .map((restroom) => ({
-        ...restroom,
-        distanceMiles: roundToOne(haversineDistanceMiles(userLocation, { lat: restroom.lat, lng: restroom.lng }))
-      }));
+    return [...initialRestrooms].map((restroom) => ({
+      ...restroom,
+      distanceMiles: roundToOne(haversineDistanceMiles(userLocation, { lat: restroom.lat, lng: restroom.lng }))
+    }));
   }, [initialRestrooms, userLocation]);
 
-  const restrooms = useMemo(() => {
-    const filtered = restroomsWithDistance.filter((restroom) => {
+  const listRestrooms = useMemo(() => {
+    const filtered = listBaseRestrooms.filter((restroom) => {
       if (filters.publicOnly && restroom.access_type !== "public") {
         return false;
       }
@@ -103,7 +120,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     return [...filtered].sort((a, b) => a.distanceMiles - b.distanceMiles);
-  }, [filters, restroomsWithDistance, sortMode]);
+  }, [filters, listBaseRestrooms, sortMode]);
 
   const listHelperText = useMemo(() => {
     const sourceText = userLocation ? "your location" : "default city center";
@@ -143,6 +160,44 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     );
   };
 
+  const handleViewportBoundsChange = useCallback((bounds: MapBounds) => {
+    const nextBoundsKey = toBoundsKey(bounds);
+    if (latestBoundsKeyRef.current === nextBoundsKey || isBoundsFetchInFlightRef.current) {
+      return;
+    }
+
+    latestBoundsKeyRef.current = nextBoundsKey;
+    isBoundsFetchInFlightRef.current = true;
+
+    const params = new URLSearchParams({
+      minLat: bounds.minLat.toString(),
+      maxLat: bounds.maxLat.toString(),
+      minLng: bounds.minLng.toString(),
+      maxLng: bounds.maxLng.toString(),
+      limit: "400"
+    });
+
+    void fetch(`/api/restrooms/bounds?${params.toString()}`)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Failed to fetch map bounds restrooms.");
+        }
+
+        const payload = (await response.json()) as BoundsApiResponse;
+        if (!Array.isArray(payload.restrooms)) {
+          throw new Error("Invalid map bounds response.");
+        }
+
+        setMapRestrooms(payload.restrooms);
+      })
+      .catch(() => {
+        // Keep previous map dataset on bounds fetch failure.
+      })
+      .finally(() => {
+        isBoundsFetchInFlightRef.current = false;
+      });
+  }, []);
+
   return (
     <>
       <section className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -168,7 +223,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
       <section className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <div className="lg:sticky lg:top-20 lg:self-start">
-          <MapPanel restrooms={restrooms} userLocation={userLocation} />
+          <MapPanel restrooms={mapRestrooms} userLocation={userLocation} onViewportBoundsChange={handleViewportBoundsChange} />
         </div>
 
         <div className="space-y-3">
@@ -239,7 +294,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
             </div>
           </section>
 
-          <RestroomList restrooms={restrooms} helperText={listHelperText} />
+          <RestroomList restrooms={listRestrooms} helperText={listHelperText} />
         </div>
       </section>
     </>

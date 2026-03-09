@@ -8,9 +8,15 @@ interface MapPanelProps {
     lat: number;
     lng: number;
   } | null;
+  onViewportBoundsChange?: (bounds: {
+    minLat: number;
+    maxLat: number;
+    minLng: number;
+    maxLng: number;
+  }) => void;
 }
 
-export function MapPanel({ restrooms, userLocation = null }: MapPanelProps) {
+export function MapPanel({ restrooms, userLocation = null, onViewportBoundsChange }: MapPanelProps) {
   if (!isMapboxConfigured) {
     return (
       <section className="h-[320px] rounded-2xl border border-dashed border-slate-300 bg-slate-100/80 p-5 sm:h-[420px]">
@@ -41,7 +47,12 @@ export function MapPanel({ restrooms, userLocation = null }: MapPanelProps) {
 
   return (
     <section className="h-[320px] overflow-hidden rounded-2xl border border-slate-200 bg-white sm:h-[420px]">
-      <RestroomMap restrooms={restrooms} accessToken={MAPBOX_ACCESS_TOKEN} userLocation={userLocation} />
+      <RestroomMap
+        restrooms={restrooms}
+        accessToken={MAPBOX_ACCESS_TOKEN}
+        userLocation={userLocation}
+        onViewportBoundsChange={onViewportBoundsChange}
+      />
     </section>
   );
 }
