@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type mapboxgl from "mapbox-gl";
 import type { FeatureCollection, Point } from "geojson";
 import { NearbyBathroom } from "@/types";
+import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
 
 interface RestroomMapProps {
   restrooms: NearbyBathroom[];
@@ -391,6 +392,9 @@ export function RestroomMap({
         ratingsLine.textContent = `Overall ${toDisplayRating(overall_rating)} • Smell ${toDisplayRating(smell_rating)} • Clean ${toDisplayRating(cleanliness_rating)}`;
         popupContent.appendChild(ratingsLine);
 
+        const actions = document.createElement("div");
+        actions.className = "flex items-center gap-2";
+
         const detailButton = document.createElement("button");
         detailButton.type = "button";
         detailButton.className =
@@ -399,14 +403,26 @@ export function RestroomMap({
         detailButton.addEventListener("click", () => {
           router.push(`/restroom/${id}`);
         });
-        popupContent.appendChild(detailButton);
+        actions.appendChild(detailButton);
+
+        const [featureLng, featureLat] = feature.geometry.coordinates as [number, number];
+        const navigateLink = document.createElement("a");
+        navigateLink.href = getGoogleMapsDirectionsUrl(featureLat, featureLng);
+        navigateLink.target = "_blank";
+        navigateLink.rel = "noopener noreferrer";
+        navigateLink.className =
+          "inline-flex items-center gap-1 rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-800";
+        navigateLink.textContent = "↗ Navigate";
+        actions.appendChild(navigateLink);
+
+        popupContent.appendChild(actions);
 
         const popup = new mapbox.Popup({
           closeButton: false,
           offset: 14,
           maxWidth: "260px"
         })
-          .setLngLat(feature.geometry.coordinates as [number, number])
+          .setLngLat([featureLng, featureLat])
           .setDOMContent(popupContent)
           .addTo(map);
 

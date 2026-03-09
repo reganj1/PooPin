@@ -6,6 +6,7 @@ import { ReviewList } from "@/components/review/ReviewList";
 import { ReviewForm } from "@/components/review/ReviewForm";
 import { ReviewSummary } from "@/components/review/ReviewSummary";
 import { getBathroomByIdData, getBathroomReviewsData } from "@/lib/data/restrooms";
+import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
 
 interface RestroomDetailPageProps {
   params: Promise<{
@@ -22,6 +23,29 @@ const formatDate = (value: string) =>
     year: "numeric"
   }).format(new Date(value));
 
+function NavigateIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" className={className}>
+      <path
+        d="M18 2 9.5 10.5"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M18 2 12.7 17.1l-3-6.8L3 7.3z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.7"
+      />
+    </svg>
+  );
+}
+
 export default async function RestroomDetailPage({ params }: RestroomDetailPageProps) {
   const { id } = await params;
   const restroom = await getBathroomByIdData(id);
@@ -30,6 +54,7 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
   }
 
   const reviews = await getBathroomReviewsData(restroom.id);
+  const navigateHref = getGoogleMapsDirectionsUrl(restroom.lat, restroom.lng);
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
@@ -50,9 +75,20 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
               Added {formatDate(restroom.created_at)} • {restroom.distanceMiles.toFixed(1)} mi from city center
             </p>
           </div>
-          <Link href="#add-review" className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700">
-            Write a review
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href={navigateHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+            >
+              <NavigateIcon className="h-4 w-4" />
+              Navigate
+            </a>
+            <Link href="#add-review" className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700">
+              Write a review
+            </Link>
+          </div>
         </div>
 
         <div className="mt-4 flex flex-col gap-3">
