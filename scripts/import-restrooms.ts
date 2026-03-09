@@ -76,12 +76,16 @@ const isGenericOsmName = (value: string) => {
   return [
     "public restroom",
     "public restrooms",
+    "public washroom",
+    "public washrooms",
     "restroom",
     "restrooms",
     "public toilet",
     "public toilets",
     "toilet",
     "toilets",
+    "washroom",
+    "washrooms",
     "bathroom",
     "bathrooms",
     "wc"
@@ -744,14 +748,15 @@ const toImportRecord = (row: RawRecord, options: ImportOptions): ImportBathroomR
   const city = parseString(getValue(row, ["city", "addr:city", "town", "municipality"])) ?? options.defaultCity;
   const state = parseString(getValue(row, ["state", "state_code", "province", "addr:state"])) ?? options.defaultState;
 
+  const explicitOsmName = parseString(getValue(row, ["name", "name:en"]));
   const parsedName = parseString(
     getValue(row, ["name", "name:en", "restroom_name", "facility_name", "site_name", "location_name"])
   );
   const name =
     source === "openstreetmap"
-      ? !parsedName || isGenericOsmName(parsedName)
-        ? buildOsmFallbackName(row, city)
-        : parsedName
+      ? explicitOsmName && !isGenericOsmName(explicitOsmName)
+        ? explicitOsmName
+        : buildOsmFallbackName(row, city)
       : parsedName;
   if (!name) {
     return null;

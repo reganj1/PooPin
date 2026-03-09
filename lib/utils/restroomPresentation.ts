@@ -12,19 +12,23 @@ const DEFAULT_RESTROOM_NAME = "Public Restroom";
 const GENERIC_OSM_NAMES = new Set([
   "public restroom",
   "public restrooms",
+  "public washroom",
+  "public washrooms",
   "restroom",
   "restrooms",
   "public toilet",
   "public toilets",
   "toilet",
   "toilets",
+  "washroom",
+  "washrooms",
   "bathroom",
   "bathrooms",
   "wc",
   "toiletten"
 ]);
 const GENERIC_OSM_NAME_WITH_CONTEXT_PATTERN =
-  /^(public restroom|public restrooms|restroom|restrooms|public toilet|public toilets|toilet|toilets|bathroom|bathrooms|wc)\s*(?:-|—|:)\s*(.+)$/i;
+  /^(public restroom|public restrooms|public washroom|public washrooms|restroom|restrooms|public toilet|public toilets|toilet|toilets|washroom|washrooms|bathroom|bathrooms|wc)\s*(?:-|—|:)\s*(.+)$/i;
 
 const COORDINATE_FALLBACK_PATTERN = /^approximate location\s*\(/i;
 const RAW_COORDINATE_PATTERN = /^-?\d{1,3}(?:\.\d+)?\s*,\s*-?\d{1,3}(?:\.\d+)?$/;
@@ -199,7 +203,7 @@ export const getRestroomDisplayName = (restroom: RestroomPresentationInput) => {
 };
 
 export const getRestroomCardSubtitle = (restroom: RestroomPresentationInput) => {
-  return withMaxLength(buildLocationLine(restroom, false), 62);
+  return withMaxLength(buildLocationLine(restroom, true), 66);
 };
 
 export const getRestroomDetailLocationLine = (restroom: RestroomPresentationInput) => {
@@ -207,5 +211,5 @@ export const getRestroomDetailLocationLine = (restroom: RestroomPresentationInpu
 };
 
 export const getRestroomPopupAddress = (restroom: RestroomPresentationInput) => {
-  return withMaxLength(buildLocationLine(restroom, false), 56);
+  return withMaxLength(buildLocationLine(restroom, true), 60);
 };
