@@ -13,6 +13,8 @@
 - [x] Replace map placeholder with real Mapbox map + restroom pins + marker navigation.
 - [x] Add review submission form on restroom detail with Supabase insert + refresh.
 - [x] Add lightweight restroom marker popups with key ratings and detail action.
+- [x] Add homepage “Use my location” support for map centering and distance-based re-sorting.
+- [x] Add distinct current-location marker when near-me location is granted.
 - [x] Document product scope and local run instructions.
 
 ## Next Suggested Tasks

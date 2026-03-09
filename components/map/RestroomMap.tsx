@@ -9,6 +9,10 @@ import { NearbyBathroom } from "@/types";
 interface RestroomMapProps {
   restrooms: NearbyBathroom[];
   accessToken: string;
+  userLocation?: {
+    lat: number;
+    lng: number;
+  } | null;
 }
 
 interface RestroomFeatureProperties {
@@ -23,6 +27,9 @@ interface RestroomFeatureProperties {
 const SOURCE_ID = "restrooms-source";
 const MARKER_LAYER_ID = "restrooms-marker-layer";
 const LABEL_LAYER_ID = "restrooms-label-layer";
+const USER_SOURCE_ID = "user-location-source";
+const USER_RING_LAYER_ID = "user-location-ring-layer";
+const USER_DOT_LAYER_ID = "user-location-dot-layer";
 const DEFAULT_CENTER: [number, number] = [-122.4194, 37.7749];
 const DEFAULT_ZOOM = 12;
 
@@ -51,9 +58,34 @@ const toFeatureCollection = (restrooms: NearbyBathroom[]): FeatureCollection<Poi
   };
 };
 
+const toUserLocationFeatureCollection = (
+  userLocation: { lat: number; lng: number } | null
+): FeatureCollection<Point, Record<string, never>> => {
+  if (!userLocation || !isValidCoordinate(userLocation.lat, userLocation.lng)) {
+    return {
+      type: "FeatureCollection",
+      features: []
+    };
+  }
+
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: [userLocation.lng, userLocation.lat]
+        },
+        properties: {}
+      }
+    ]
+  };
+};
+
 const toDisplayRating = (value: number) => (value > 0 ? value.toFixed(1) : "N/A");
 
-export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
+export function RestroomMap({ restrooms, accessToken, userLocation = null }: RestroomMapProps) {
   const router = useRouter();
   const [isMapReady, setIsMapReady] = useState(false);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -67,6 +99,7 @@ export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
   const mouseLeaveHandlerRef = useRef<(() => void) | null>(null);
 
   const markerData = useMemo(() => toFeatureCollection(restrooms), [restrooms]);
+  const userLocationData = useMemo(() => toUserLocationFeatureCollection(userLocation), [userLocation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,8 +159,17 @@ export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
         if (map.getLayer(MARKER_LAYER_ID)) {
           map.removeLayer(MARKER_LAYER_ID);
         }
+        if (map.getLayer(USER_DOT_LAYER_ID)) {
+          map.removeLayer(USER_DOT_LAYER_ID);
+        }
+        if (map.getLayer(USER_RING_LAYER_ID)) {
+          map.removeLayer(USER_RING_LAYER_ID);
+        }
         if (map.getSource(SOURCE_ID)) {
           map.removeSource(SOURCE_ID);
+        }
+        if (map.getSource(USER_SOURCE_ID)) {
+          map.removeSource(USER_SOURCE_ID);
         }
 
         map.remove();
@@ -195,6 +237,43 @@ export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
         },
         paint: {
           "text-color": "#ffffff"
+        }
+      });
+    }
+
+    const existingUserSource = map.getSource(USER_SOURCE_ID);
+    if (existingUserSource) {
+      (existingUserSource as mapboxgl.GeoJSONSource).setData(userLocationData);
+    } else {
+      map.addSource(USER_SOURCE_ID, {
+        type: "geojson",
+        data: userLocationData
+      });
+    }
+
+    if (!map.getLayer(USER_RING_LAYER_ID)) {
+      map.addLayer({
+        id: USER_RING_LAYER_ID,
+        type: "circle",
+        source: USER_SOURCE_ID,
+        paint: {
+          "circle-color": "#2563eb",
+          "circle-opacity": 0.2,
+          "circle-radius": 12
+        }
+      });
+    }
+
+    if (!map.getLayer(USER_DOT_LAYER_ID)) {
+      map.addLayer({
+        id: USER_DOT_LAYER_ID,
+        type: "circle",
+        source: USER_SOURCE_ID,
+        paint: {
+          "circle-color": "#2563eb",
+          "circle-radius": 5,
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 2
         }
       });
     }
@@ -295,7 +374,16 @@ export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
       popupRef.current?.remove();
       popupRef.current = null;
       activePopupRestroomIdRef.current = null;
-      map.easeTo({ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, duration: 0 });
+      if (userLocation && isValidCoordinate(userLocation.lat, userLocation.lng)) {
+        map.easeTo({ center: [userLocation.lng, userLocation.lat], zoom: 13, duration: 700 });
+      } else {
+        map.easeTo({ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, duration: 0 });
+      }
+      return;
+    }
+
+    if (userLocation && isValidCoordinate(userLocation.lat, userLocation.lng)) {
+      map.easeTo({ center: [userLocation.lng, userLocation.lat], zoom: 13, duration: 700 });
       return;
     }
 
@@ -315,7 +403,7 @@ export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
       maxZoom: 14,
       duration: 700
     });
-  }, [isMapReady, markerData, restrooms.length, router]);
+  }, [isMapReady, markerData, restrooms.length, router, userLocation, userLocationData]);
 
   return <div ref={mapContainerRef} className="h-full w-full" />;
 }

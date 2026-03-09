@@ -1,5 +1,4 @@
-import { MapPanel } from "@/components/map/MapPanel";
-import { RestroomList } from "@/components/restroom/RestroomList";
+import { NearbyExplorer } from "@/components/home/NearbyExplorer";
 import { getNearbyBathroomsData } from "@/lib/data/restrooms";
 
 export const dynamic = "force-dynamic";
@@ -18,12 +17,7 @@ export default async function HomePage() {
         </p>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-        <div className="lg:sticky lg:top-20 lg:self-start">
-          <MapPanel restrooms={restrooms} />
-        </div>
-        <RestroomList restrooms={restrooms} />
-      </section>
+      <NearbyExplorer initialRestrooms={restrooms} />
     </main>
   );
 }
