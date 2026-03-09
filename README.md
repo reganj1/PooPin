@@ -39,9 +39,10 @@ Poopin is a startup MVP web app for discovering and rating public restrooms, wit
 ## Current MVP Routes
 - `/` homepage with responsive map/list layout (Supabase-first with mock fallback)
 - `/restroom/[id]` restroom detail (Supabase-first with mock fallback)
-- `/add` add-restroom form with React Hook Form + Zod (mock submit)
+- `/add` add-restroom form with React Hook Form + Zod + Supabase insert
 
 ## Notes
 - Map gracefully falls back to a setup placeholder when Mapbox token is missing.
 - Restroom reads are Supabase-first for homepage/detail when env vars are configured.
 - If Supabase env vars are missing (or read queries fail), homepage/detail automatically fall back to typed mock data.
+- Add-restroom submits directly to Supabase when configured and shows graceful errors when not.

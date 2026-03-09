@@ -1,6 +1,8 @@
 "use client";
 
 import { type ReactNode, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import {
@@ -9,8 +11,8 @@ import {
   bathroomCreateSchema,
   bathroomPlaceTypeOptions
 } from "@/lib/validations/bathroom";
-import { submitAddRestroomMock, type AddRestroomMockResult } from "@/lib/mock/addRestroom";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { insertBathroom, toAddRestroomErrorMessage } from "@/lib/supabase/bathrooms";
 
 const placeTypeLabel: Record<(typeof bathroomPlaceTypeOptions)[number], string> = {
   park: "Park",
@@ -66,7 +68,10 @@ function Field({ label, htmlFor, error, children }: FieldProps) {
 }
 
 export function AddRestroomForm() {
-  const [submitResult, setSubmitResult] = useState<AddRestroomMockResult | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitSuccessId, setSubmitSuccessId] = useState<string | null>(null);
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  const router = useRouter();
   const supabaseClient = useMemo(() => getSupabaseBrowserClient(), []);
   const isSupabaseConfigured = Boolean(supabaseClient);
 
@@ -81,16 +86,36 @@ export function AddRestroomForm() {
   });
 
   const onSubmit = async (values: BathroomCreateInput) => {
-    const result = await submitAddRestroomMock(values);
-    setSubmitResult(result);
+    setSubmitError(null);
+    setSubmitSuccessId(null);
+    setIsRedirecting(false);
 
-    console.groupCollapsed("[Poopin] add-restroom payload (mock)");
-    console.log("Supabase client configured:", isSupabaseConfigured);
-    console.log("Payload for future DB insert:", values);
-    console.log("Mock submission result:", result);
-    console.groupEnd();
+    if (!supabaseClient) {
+      setSubmitError("Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+      return;
+    }
 
-    reset({ ...defaultValues, city: values.city, state: values.state, lat: values.lat, lng: values.lng });
+    try {
+      const result = await insertBathroom(supabaseClient, values);
+
+      console.groupCollapsed("[Poopin] add-restroom payload (supabase)");
+      console.log("Payload inserted:", values);
+      console.log("Supabase insert result:", result);
+      console.groupEnd();
+
+      if (result.canReadDetail) {
+        setSubmitSuccessId(result.bathroomId);
+        setIsRedirecting(true);
+        router.push(`/restroom/${result.bathroomId}`);
+        return;
+      }
+
+      setSubmitSuccessId(result.bathroomId);
+      reset({ ...defaultValues, city: values.city, state: values.state, lat: values.lat, lng: values.lng });
+    } catch (error) {
+      console.error("[Poopin] add-restroom insert failed", error);
+      setSubmitError(toAddRestroomErrorMessage(error));
+    }
   };
 
   return (
@@ -99,33 +124,45 @@ export function AddRestroomForm() {
         <p className="text-sm font-semibold uppercase tracking-wide text-brand-600">Submit A Restroom</p>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">Add a restroom</h1>
         <p className="mt-2 text-sm text-slate-600">
-          This form currently submits to a local mock handler. Payload is logged clearly for future Supabase insert
-          wiring.
+          This form inserts directly into Supabase `bathrooms` when configured.
         </p>
       </div>
 
       {!isSupabaseConfigured ? (
         <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-          Supabase environment variables are missing, so this form submits to local mock storage only.
+          Supabase environment variables are missing, so insert is unavailable until configured.
         </div>
       ) : (
         <div className="mb-5 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-800">
-          Supabase is configured, but this pass still routes submissions through the local mock handler.
+          Supabase is configured. New restroom submissions will be inserted into the `bathrooms` table.
         </div>
       )}
 
-      {submitResult ? (
+      {submitError ? (
+        <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{submitError}</div>
+      ) : null}
+
+      {submitSuccessId ? (
         <div className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-          <p className="text-sm font-semibold text-emerald-700">Restroom submitted locally.</p>
-          <p className="mt-1 text-xs text-emerald-700">
-            Submission id: <span className="font-semibold">{submitResult.submissionId}</span>
+          <p className="text-sm font-semibold text-emerald-700">
+            {isRedirecting ? "Restroom submitted. Redirecting to detail..." : "Restroom submitted successfully."}
           </p>
           <p className="mt-1 text-xs text-emerald-700">
-            Submitted at: <span className="font-semibold">{new Date(submitResult.submittedAt).toLocaleString()}</span>
+            Restroom id: <span className="font-semibold">{submitSuccessId}</span>
           </p>
-          <pre className="mt-3 overflow-x-auto rounded-lg bg-white p-3 text-xs text-slate-700">
-{JSON.stringify(submitResult.payload, null, 2)}
-          </pre>
+
+          {!isRedirecting ? (
+            <p className="mt-2 text-xs text-emerald-700">
+              Insert succeeded, but automatic detail redirect was skipped because read access could not be confirmed.
+            </p>
+          ) : null}
+
+          <Link
+            href={`/restroom/${submitSuccessId}`}
+            className="mt-3 inline-flex rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            Open restroom detail
+          </Link>
         </div>
       ) : null}
 
@@ -258,7 +295,12 @@ export function AddRestroomForm() {
           </button>
           <button
             type="button"
-            onClick={() => reset(defaultValues)}
+            onClick={() => {
+              reset(defaultValues);
+              setSubmitError(null);
+              setSubmitSuccessId(null);
+              setIsRedirecting(false);
+            }}
             disabled={isSubmitting}
             className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >

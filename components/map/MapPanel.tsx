@@ -1,5 +1,6 @@
 import { NearbyBathroom } from "@/types";
-import { isMapboxConfigured } from "@/lib/mapbox/config";
+import { MAPBOX_ACCESS_TOKEN, isMapboxConfigured } from "@/lib/mapbox/config";
+import { RestroomMap } from "@/components/map/RestroomMap";
 
 interface MapPanelProps {
   restrooms: NearbyBathroom[];
@@ -35,24 +36,8 @@ export function MapPanel({ restrooms }: MapPanelProps) {
   }
 
   return (
-    <section className="h-[320px] rounded-2xl border border-slate-200 bg-gradient-to-br from-brand-50 to-white p-5 sm:h-[420px]">
-      <div className="flex h-full flex-col justify-between">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-wide text-brand-600">Mapbox Ready</p>
-          <h2 className="mt-2 text-2xl font-semibold text-slate-900">Live map is enabled</h2>
-          <p className="mt-2 max-w-lg text-sm text-slate-600">
-            Token detected. In the next iteration, plug in a Mapbox map component and render clustered restroom pins.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 text-sm text-slate-700 sm:grid-cols-3">
-          {restrooms.slice(0, 6).map((restroom) => (
-            <div key={restroom.id} className="rounded-lg border border-slate-200 bg-white/90 px-2 py-1.5">
-              {restroom.name}
-            </div>
-          ))}
-        </div>
-      </div>
+    <section className="h-[320px] overflow-hidden rounded-2xl border border-slate-200 bg-white sm:h-[420px]">
+      <RestroomMap restrooms={restrooms} accessToken={MAPBOX_ACCESS_TOKEN} />
     </section>
   );
 }
