@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type mapboxgl from "mapbox-gl";
 import { NearbyBathroom } from "@/types";
@@ -23,6 +23,7 @@ const isValidCoordinate = (lat: number, lng: number) => Number.isFinite(lat) && 
 
 export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
   const router = useRouter();
+  const [isMapReady, setIsMapReady] = useState(false);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapboxRef = useRef<typeof mapboxgl | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -61,6 +62,9 @@ export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
       });
 
       map.addControl(new mapbox.NavigationControl(), "top-right");
+      map.on("load", () => {
+        setIsMapReady(true);
+      });
       mapRef.current = map;
     };
 
@@ -68,6 +72,7 @@ export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
 
     return () => {
       cancelled = true;
+      setIsMapReady(false);
       clearMarkers();
       if (mapRef.current) {
         mapRef.current.remove();
@@ -78,6 +83,10 @@ export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
   }, [accessToken]);
 
   useEffect(() => {
+    if (!isMapReady) {
+      return;
+    }
+
     const map = mapRef.current;
     const mapbox = mapboxRef.current;
     if (!map || !mapbox) {
@@ -96,6 +105,10 @@ export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
       clearMarkers();
 
       const validRestrooms = restrooms.filter((restroom) => isValidCoordinate(restroom.lat, restroom.lng));
+      if (process.env.NODE_ENV !== "production" && validRestrooms.length !== restrooms.length) {
+        console.warn("[Poopin] Some restrooms have invalid coordinates and were skipped for map markers.");
+      }
+
       if (validRestrooms.length === 0) {
         map.easeTo({ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, duration: 0 });
         return;
@@ -106,8 +119,14 @@ export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
       validRestrooms.forEach((restroom) => {
         const element = document.createElement("button");
         element.type = "button";
-        element.className =
-          "h-4 w-4 rounded-full border-2 border-white bg-brand-500 shadow-[0_0_0_1px_rgba(15,37,74,0.18)] transition hover:scale-110";
+        element.className = "transition hover:scale-110";
+        element.style.width = "18px";
+        element.style.height = "18px";
+        element.style.borderRadius = "9999px";
+        element.style.border = "2px solid #ffffff";
+        element.style.background = "#1876f2";
+        element.style.boxShadow = "0 0 0 1px rgba(15, 37, 74, 0.22)";
+        element.style.cursor = "pointer";
         element.setAttribute("aria-label", `Open ${restroom.name}`);
 
         const handleClick = () => {
@@ -136,16 +155,12 @@ export function RestroomMap({ restrooms, accessToken }: RestroomMapProps) {
       });
     };
 
-    if (map.loaded()) {
-      applyMarkers();
-    } else {
-      map.once("load", applyMarkers);
-    }
+    applyMarkers();
 
     return () => {
       clearMarkers();
     };
-  }, [restrooms, router]);
+  }, [isMapReady, restrooms, router]);
 
   return <div ref={mapContainerRef} className="h-full w-full" />;
 }
