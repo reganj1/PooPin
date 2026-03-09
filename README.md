@@ -26,12 +26,22 @@ Poopin is a startup MVP web app for discovering and rating public restrooms, wit
    ```
 5. Open [http://localhost:3000](http://localhost:3000).
 
+## Supabase Setup (Optional, Recommended Next)
+1. Create a Supabase project in the dashboard.
+2. Apply the schema from `supabase/migrations/20260308220000_initial_schema.sql`:
+   - Option A: paste it into Supabase SQL Editor and run.
+   - Option B: use Supabase CLI migrations if you already use the CLI workflow.
+3. In project settings, copy:
+   - `Project URL` -> `NEXT_PUBLIC_SUPABASE_URL`
+   - `anon public key` -> `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+4. Add these to `.env.local` and restart `npm run dev`.
+
 ## Current MVP Routes
-- `/` homepage with responsive map/list layout
-- `/restroom/[id]` restroom detail using mock data
-- `/add` placeholder page for add-restroom flow
+- `/` homepage with responsive map/list layout (Supabase-first with mock fallback)
+- `/restroom/[id]` restroom detail (Supabase-first with mock fallback)
+- `/add` add-restroom form with React Hook Form + Zod (mock submit)
 
 ## Notes
 - Map gracefully falls back to a setup placeholder when Mapbox token is missing.
-- Data is currently mock-first and strongly typed.
-- Supabase migration scaffold lives under `supabase/migrations/` for the next integration pass.
+- Restroom reads are Supabase-first for homepage/detail when env vars are configured.
+- If Supabase env vars are missing (or read queries fail), homepage/detail automatically fall back to typed mock data.

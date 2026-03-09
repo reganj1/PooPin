@@ -1,9 +1,11 @@
 import { MapPanel } from "@/components/map/MapPanel";
 import { RestroomList } from "@/components/restroom/RestroomList";
-import { getNearbyBathrooms } from "@/lib/mock/restrooms";
+import { getNearbyBathroomsData } from "@/lib/data/restrooms";
 
-export default function HomePage() {
-  const restrooms = getNearbyBathrooms();
+export const dynamic = "force-dynamic";
+
+export default async function HomePage() {
+  const restrooms = await getNearbyBathroomsData();
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">

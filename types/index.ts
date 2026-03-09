@@ -29,7 +29,7 @@ export interface Bathroom {
   is_gender_neutral: boolean;
   is_accessible: boolean;
   requires_purchase: boolean;
-  created_by: string;
+  created_by: string | null;
   created_at: string;
   status: ModerationStatus;
   source: BathroomSource;
@@ -39,7 +39,7 @@ export interface Bathroom {
 export interface Review {
   id: string;
   bathroom_id: string;
-  user_id: string;
+  user_id: string | null;
   overall_rating: number;
   smell_rating: number;
   cleanliness_rating: number;
@@ -54,7 +54,7 @@ export interface Review {
 export interface Photo {
   id: string;
   bathroom_id: string;
-  user_id: string;
+  user_id: string | null;
   storage_path: string;
   created_at: string;
   status: ModerationStatus;
@@ -63,7 +63,7 @@ export interface Photo {
 export interface Report {
   id: string;
   bathroom_id: string;
-  user_id: string;
+  user_id: string | null;
   reason: string;
   created_at: string;
 }

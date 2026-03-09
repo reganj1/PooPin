@@ -3,13 +3,15 @@ import { notFound } from "next/navigation";
 import { RatingPills } from "@/components/restroom/RatingPills";
 import { RestroomTags } from "@/components/restroom/RestroomTags";
 import { ReviewList } from "@/components/review/ReviewList";
-import { getBathroomById, getBathroomReviews } from "@/lib/mock/restrooms";
+import { getBathroomByIdData, getBathroomReviewsData } from "@/lib/data/restrooms";
 
 interface RestroomDetailPageProps {
   params: Promise<{
     id: string;
   }>;
 }
+
+export const dynamic = "force-dynamic";
 
 const formatDate = (value: string) =>
   new Intl.DateTimeFormat("en-US", {
@@ -20,12 +22,12 @@ const formatDate = (value: string) =>
 
 export default async function RestroomDetailPage({ params }: RestroomDetailPageProps) {
   const { id } = await params;
-  const restroom = getBathroomById(id);
+  const restroom = await getBathroomByIdData(id);
   if (!restroom) {
     notFound();
   }
 
-  const reviews = getBathroomReviews(restroom.id);
+  const reviews = await getBathroomReviewsData(restroom.id);
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-8">

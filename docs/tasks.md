@@ -6,14 +6,15 @@
 - [x] Add mock restroom and review dataset.
 - [x] Build responsive homepage with map placeholder and nearby list.
 - [x] Build restroom detail page from mock data.
-- [x] Add placeholder `/add` page.
+- [x] Replace `/add` placeholder with a working add-restroom form (React Hook Form + Zod + mock submit).
 - [x] Add starter Supabase migration scaffold.
+- [x] Add Supabase read path for homepage + detail with graceful mock fallback.
 - [x] Document product scope and local run instructions.
 
 ## Next Suggested Tasks
 - [ ] Add Mapbox map component and live pins.
-- [ ] Add add-restroom form with React Hook Form + Zod.
-- [ ] Wire Supabase tables and read paths.
+- [ ] Connect add-restroom form submit to Supabase `bathrooms` insert.
+- [ ] Add Supabase seed script for local/demo startup data.
 - [ ] Add review submission flow.
 - [ ] Add image upload to Supabase Storage.
 - [ ] Add basic filtering (open now, accessible, public only).
