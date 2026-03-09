@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { RatingPills } from "@/components/restroom/RatingPills";
 import { RestroomTags } from "@/components/restroom/RestroomTags";
 import { ReviewList } from "@/components/review/ReviewList";
+import { ReviewForm } from "@/components/review/ReviewForm";
 import { getBathroomByIdData, getBathroomReviewsData } from "@/lib/data/restrooms";
 
 interface RestroomDetailPageProps {
@@ -48,8 +49,8 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
               Added {formatDate(restroom.created_at)} • {restroom.distanceMiles.toFixed(1)} mi from city center
             </p>
           </div>
-          <Link href="/add" className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700">
-            Add review (soon)
+          <Link href="#add-review" className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700">
+            Write a review
           </Link>
         </div>
 
@@ -65,6 +66,10 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
           </p>
           <p className="mt-1 text-xs text-slate-500">Map pin detail will be linked here once live Mapbox rendering is added.</p>
         </div>
+      </section>
+
+      <section className="mt-6">
+        <ReviewForm bathroomId={restroom.id} />
       </section>
 
       <section className="mt-6">

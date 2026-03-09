@@ -11,10 +11,10 @@
 - [x] Add Supabase read path for homepage + detail with graceful mock fallback.
 - [x] Connect add-restroom form submit to Supabase `bathrooms` insert with graceful errors.
 - [x] Replace map placeholder with real Mapbox map + restroom pins + marker navigation.
+- [x] Add review submission form on restroom detail with Supabase insert + refresh.
 - [x] Document product scope and local run instructions.
 
 ## Next Suggested Tasks
 - [ ] Add Supabase seed script for local/demo startup data.
-- [ ] Add review submission flow.
 - [ ] Add image upload to Supabase Storage.
 - [ ] Add basic filtering (open now, accessible, public only).
