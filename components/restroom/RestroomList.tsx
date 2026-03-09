@@ -4,9 +4,16 @@ import { RestroomCard } from "@/components/restroom/RestroomCard";
 interface RestroomListProps {
   restrooms: NearbyBathroom[];
   helperText?: string;
+  highlightedRestroomId?: string | null;
+  onRestroomHoverChange?: (restroomId: string | null) => void;
 }
 
-export function RestroomList({ restrooms, helperText = "Sorted by distance from your default city center location." }: RestroomListProps) {
+export function RestroomList({
+  restrooms,
+  helperText = "Sorted by distance from your default city center location.",
+  highlightedRestroomId = null,
+  onRestroomHoverChange
+}: RestroomListProps) {
   return (
     <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
       <div className="mb-4 flex items-end justify-between">
@@ -23,7 +30,12 @@ export function RestroomList({ restrooms, helperText = "Sorted by distance from 
       ) : (
         <div className="space-y-3">
           {restrooms.map((restroom) => (
-            <RestroomCard key={restroom.id} restroom={restroom} />
+            <RestroomCard
+              key={restroom.id}
+              restroom={restroom}
+              isHighlighted={highlightedRestroomId === restroom.id}
+              onHoverChange={(isHovering) => onRestroomHoverChange?.(isHovering ? restroom.id : null)}
+            />
           ))}
         </div>
       )}

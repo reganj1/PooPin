@@ -8,6 +8,8 @@ interface MapPanelProps {
     lat: number;
     lng: number;
   } | null;
+  hoveredRestroomId?: string | null;
+  onFocusedRestroomIdChange?: (restroomId: string | null) => void;
   onViewportBoundsChange?: (bounds: {
     minLat: number;
     maxLat: number;
@@ -16,7 +18,13 @@ interface MapPanelProps {
   }) => void;
 }
 
-export function MapPanel({ restrooms, userLocation = null, onViewportBoundsChange }: MapPanelProps) {
+export function MapPanel({
+  restrooms,
+  userLocation = null,
+  hoveredRestroomId = null,
+  onFocusedRestroomIdChange,
+  onViewportBoundsChange
+}: MapPanelProps) {
   if (!isMapboxConfigured) {
     return (
       <section className="h-[320px] rounded-2xl border border-dashed border-slate-300 bg-slate-100/80 p-5 sm:h-[420px]">
@@ -51,6 +59,8 @@ export function MapPanel({ restrooms, userLocation = null, onViewportBoundsChang
         restrooms={restrooms}
         accessToken={MAPBOX_ACCESS_TOKEN}
         userLocation={userLocation}
+        hoveredRestroomId={hoveredRestroomId}
+        onFocusedRestroomIdChange={onFocusedRestroomIdChange}
         onViewportBoundsChange={onViewportBoundsChange}
       />
     </section>

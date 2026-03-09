@@ -18,6 +18,8 @@
 - [x] Add lightweight homepage filter and sort controls (public/accessibility/baby-station, closest/best-rated).
 - [x] Add repeatable restroom seed import script for JSON/CSV with dedupe safeguards.
 - [x] Split homepage map/list data strategies with viewport-based map pin loading.
+- [x] Sync homepage list-hover and map-pin highlight states for easier pin/card matching.
+- [x] Keep nearby list aligned with current map viewport/my-location context and preserve WC marker styling with hover emphasis.
 - [x] Document product scope and local run instructions.
 
 ## Next Suggested Tasks

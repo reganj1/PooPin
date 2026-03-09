@@ -33,6 +33,8 @@ interface BoundsApiResponse {
   restrooms: NearbyBathroom[];
 }
 
+const DEFAULT_CITY_CENTER: Coordinate = { lat: 37.7749, lng: -122.4194 };
+const LIST_LIMIT = 20;
 const roundToOne = (value: number) => Math.round(value * 10) / 10;
 const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
 
@@ -71,6 +73,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [userLocation, setUserLocation] = useState<Coordinate | null>(null);
   const [geoError, setGeoError] = useState<string | null>(null);
   const [isLocating, setIsLocating] = useState(false);
+  const [listHoveredRestroomId, setListHoveredRestroomId] = useState<string | null>(null);
+  const [mapFocusedRestroomId, setMapFocusedRestroomId] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("closest");
   const [filters, setFilters] = useState<FilterState>({
     publicOnly: false,
@@ -78,20 +82,18 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     babyStation: false
   });
   const [mapRestrooms, setMapRestrooms] = useState<NearbyBathroom[]>(initialRestrooms);
+  const [viewportCenter, setViewportCenter] = useState<Coordinate>(DEFAULT_CITY_CENTER);
 
   const latestBoundsKeyRef = useRef<string>("");
-  const isBoundsFetchInFlightRef = useRef(false);
+  const activeBoundsRequestIdRef = useRef(0);
+  const distanceOrigin = userLocation ?? viewportCenter;
 
   const listBaseRestrooms = useMemo(() => {
-    if (!userLocation) {
-      return initialRestrooms;
-    }
-
-    return [...initialRestrooms].map((restroom) => ({
+    return [...mapRestrooms].map((restroom) => ({
       ...restroom,
-      distanceMiles: roundToOne(haversineDistanceMiles(userLocation, { lat: restroom.lat, lng: restroom.lng }))
+      distanceMiles: roundToOne(haversineDistanceMiles(distanceOrigin, { lat: restroom.lat, lng: restroom.lng }))
     }));
-  }, [initialRestrooms, userLocation]);
+  }, [distanceOrigin, mapRestrooms]);
 
   const listRestrooms = useMemo(() => {
     const filtered = listBaseRestrooms.filter((restroom) => {
@@ -108,27 +110,32 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     });
 
     if (sortMode === "best_rated") {
-      return [...filtered].sort((a, b) => {
-        if (b.ratings.overall !== a.ratings.overall) {
-          return b.ratings.overall - a.ratings.overall;
-        }
-        if (b.ratings.reviewCount !== a.ratings.reviewCount) {
-          return b.ratings.reviewCount - a.ratings.reviewCount;
-        }
-        return a.distanceMiles - b.distanceMiles;
-      });
+      return [...filtered]
+        .sort((a, b) => {
+          if (b.ratings.overall !== a.ratings.overall) {
+            return b.ratings.overall - a.ratings.overall;
+          }
+          if (b.ratings.reviewCount !== a.ratings.reviewCount) {
+            return b.ratings.reviewCount - a.ratings.reviewCount;
+          }
+          return a.distanceMiles - b.distanceMiles;
+        })
+        .slice(0, LIST_LIMIT);
     }
 
-    return [...filtered].sort((a, b) => a.distanceMiles - b.distanceMiles);
+    return [...filtered].sort((a, b) => a.distanceMiles - b.distanceMiles).slice(0, LIST_LIMIT);
   }, [filters, listBaseRestrooms, sortMode]);
 
   const listHelperText = useMemo(() => {
-    const sourceText = userLocation ? "your location" : "default city center";
+    const sourceText = userLocation ? "your location" : "the current map center";
+    const areaText = userLocation ? "current map area around you" : "currently visible map area";
     if (sortMode === "best_rated") {
-      return `Filtered results sorted by best rated. Distance still shown from ${sourceText}.`;
+      return `Showing ${areaText}. Sorted by best rated with distance from ${sourceText}.`;
     }
-    return `Filtered results sorted by closest distance from ${sourceText}.`;
+    return `Showing ${areaText}. Sorted by closest distance from ${sourceText}.`;
   }, [sortMode, userLocation]);
+
+  const highlightedListRestroomId = listHoveredRestroomId ?? mapFocusedRestroomId;
 
   const handleUseMyLocation = () => {
     setGeoError(null);
@@ -161,13 +168,20 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   };
 
   const handleViewportBoundsChange = useCallback((bounds: MapBounds) => {
+    const center = {
+      lat: (bounds.minLat + bounds.maxLat) / 2,
+      lng: (bounds.minLng + bounds.maxLng) / 2
+    };
+    setViewportCenter(center);
+
     const nextBoundsKey = toBoundsKey(bounds);
-    if (latestBoundsKeyRef.current === nextBoundsKey || isBoundsFetchInFlightRef.current) {
+    if (latestBoundsKeyRef.current === nextBoundsKey) {
       return;
     }
 
     latestBoundsKeyRef.current = nextBoundsKey;
-    isBoundsFetchInFlightRef.current = true;
+    const requestId = activeBoundsRequestIdRef.current + 1;
+    activeBoundsRequestIdRef.current = requestId;
 
     const params = new URLSearchParams({
       minLat: bounds.minLat.toString(),
@@ -188,13 +202,12 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           throw new Error("Invalid map bounds response.");
         }
 
-        setMapRestrooms(payload.restrooms);
+        if (requestId === activeBoundsRequestIdRef.current) {
+          setMapRestrooms(payload.restrooms);
+        }
       })
       .catch(() => {
         // Keep previous map dataset on bounds fetch failure.
-      })
-      .finally(() => {
-        isBoundsFetchInFlightRef.current = false;
       });
   }, []);
 
@@ -223,7 +236,13 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
       <section className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <div className="lg:sticky lg:top-20 lg:self-start">
-          <MapPanel restrooms={mapRestrooms} userLocation={userLocation} onViewportBoundsChange={handleViewportBoundsChange} />
+          <MapPanel
+            restrooms={mapRestrooms}
+            userLocation={userLocation}
+            hoveredRestroomId={listHoveredRestroomId}
+            onFocusedRestroomIdChange={setMapFocusedRestroomId}
+            onViewportBoundsChange={handleViewportBoundsChange}
+          />
         </div>
 
         <div className="space-y-3">
@@ -294,7 +313,12 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
             </div>
           </section>
 
-          <RestroomList restrooms={listRestrooms} helperText={listHelperText} />
+          <RestroomList
+            restrooms={listRestrooms}
+            helperText={listHelperText}
+            highlightedRestroomId={highlightedListRestroomId}
+            onRestroomHoverChange={setListHoveredRestroomId}
+          />
         </div>
       </section>
     </>

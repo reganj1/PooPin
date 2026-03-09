@@ -2,18 +2,28 @@ import Link from "next/link";
 import { NearbyBathroom } from "@/types";
 import { RatingPills } from "@/components/restroom/RatingPills";
 import { RestroomTags } from "@/components/restroom/RestroomTags";
+import { cn } from "@/lib/utils/cn";
 
 interface RestroomCardProps {
   restroom: NearbyBathroom;
+  isHighlighted?: boolean;
+  onHoverChange?: (isHovering: boolean) => void;
 }
 
 const toPlaceLabel = (value: string) => value.replaceAll("_", " ");
 
-export function RestroomCard({ restroom }: RestroomCardProps) {
+export function RestroomCard({ restroom, isHighlighted = false, onHoverChange }: RestroomCardProps) {
   return (
     <Link
       href={`/restroom/${restroom.id}`}
-      className="group block rounded-2xl border border-slate-200 bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md"
+      onMouseEnter={() => onHoverChange?.(true)}
+      onMouseLeave={() => onHoverChange?.(false)}
+      onFocus={() => onHoverChange?.(true)}
+      onBlur={() => onHoverChange?.(false)}
+      className={cn(
+        "group block rounded-2xl border border-slate-200 bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md",
+        isHighlighted && "border-brand-400 ring-2 ring-brand-100"
+      )}
     >
       <div className="flex items-start justify-between gap-4">
         <div>
