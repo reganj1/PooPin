@@ -62,6 +62,25 @@ const normalizeName = (value: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
+const normalizeLabel = (value: string) => value.trim().replace(/\s+/g, " ");
+
+const isGenericOsmName = (value: string) => {
+  const normalized = normalizeLabel(value).toLowerCase();
+  return [
+    "public restroom",
+    "public restrooms",
+    "restroom",
+    "restrooms",
+    "public toilet",
+    "public toilets",
+    "toilet",
+    "toilets",
+    "bathroom",
+    "bathrooms",
+    "wc"
+  ].includes(normalized);
+};
+
 const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
 
 const haversineDistanceMiles = (origin: { lat: number; lng: number }, point: { lat: number; lng: number }) => {
@@ -354,7 +373,15 @@ const inferFormat = (inputPath: string): "json" | "csv" => {
   return "json";
 };
 
-const buildAddress = (row: RawRecord, fallbackCity: string, lat: number, lng: number): string => {
+const withMaxLength = (value: string, max = 42) => {
+  if (value.length <= max) {
+    return value;
+  }
+
+  return `${value.slice(0, max - 1).trimEnd()}…`;
+};
+
+const buildAddress = (row: RawRecord, fallbackCity: string): string => {
   const fullAddress = parseString(getValue(row, ["address", "street_address", "street", "location", "location_address", "cross_street", "addr:full"]));
   if (fullAddress) {
     return fullAddress;
@@ -371,7 +398,26 @@ const buildAddress = (row: RawRecord, fallbackCity: string, lat: number, lng: nu
     return `${neighborhood}, ${fallbackCity}`;
   }
 
-  return `Approximate location (${lat.toFixed(5)}, ${lng.toFixed(5)})`;
+  return fallbackCity ? `Near ${fallbackCity}` : "Near current area";
+};
+
+const buildOsmFallbackName = (row: RawRecord, fallbackCity: string) => {
+  const streetName = parseString(getValue(row, ["addr:street", "road", "street_name"]));
+  if (streetName) {
+    return `${DEFAULT_OSM_NAME} — ${withMaxLength(normalizeLabel(streetName))}`;
+  }
+
+  const neighborhood = parseString(getValue(row, ["addr:suburb", "neighbourhood", "neighborhood", "district", "quarter"]));
+  if (neighborhood) {
+    return `${DEFAULT_OSM_NAME} — ${withMaxLength(normalizeLabel(neighborhood))}`;
+  }
+
+  const referencePlace = parseString(getValue(row, ["operator", "brand", "network"]));
+  if (referencePlace) {
+    return `${DEFAULT_OSM_NAME} — ${withMaxLength(normalizeLabel(referencePlace))}`;
+  }
+
+  return fallbackCity ? `${DEFAULT_OSM_NAME} — Near ${withMaxLength(normalizeLabel(fallbackCity), 26)}` : DEFAULT_OSM_NAME;
 };
 
 const toImportRecord = (row: RawRecord, options: ImportOptions): ImportBathroomRecord | null => {
@@ -383,8 +429,16 @@ const toImportRecord = (row: RawRecord, options: ImportOptions): ImportBathroomR
   }
 
   const source = resolveSource(getValue(row, ["source", "dataset_source"]), options.source);
+  const city = parseString(getValue(row, ["city", "addr:city", "town", "municipality"])) ?? options.defaultCity;
+  const state = parseString(getValue(row, ["state", "state_code", "province", "addr:state"])) ?? options.defaultState;
+
   const parsedName = parseString(getValue(row, ["name", "restroom_name", "facility_name", "site_name", "location_name"]));
-  const name = parsedName ?? (source === "openstreetmap" ? DEFAULT_OSM_NAME : null);
+  const name =
+    source === "openstreetmap"
+      ? !parsedName || isGenericOsmName(parsedName)
+        ? buildOsmFallbackName(row, city)
+        : parsedName
+      : parsedName;
   if (!name) {
     return null;
   }
@@ -399,12 +453,10 @@ const toImportRecord = (row: RawRecord, options: ImportOptions): ImportBathroomR
         ? `osm:${osmType}/${osmId}`
         : null;
 
-  const city = parseString(getValue(row, ["city", "addr:city", "town", "municipality"])) ?? options.defaultCity;
-  const state = parseString(getValue(row, ["state", "state_code", "province", "addr:state"])) ?? options.defaultState;
   const parsedAddress = parseString(
     getValue(row, ["address", "street_address", "street", "location", "location_address", "cross_street", "addr:full"])
   );
-  const address = parsedAddress ?? (source === "openstreetmap" ? buildAddress(row, city, lat, lng) : null);
+  const address = parsedAddress ?? (source === "openstreetmap" ? buildAddress(row, city) : null);
   if (!address) {
     return null;
   }

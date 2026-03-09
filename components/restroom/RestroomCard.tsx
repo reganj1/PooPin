@@ -5,6 +5,7 @@ import { RatingPills } from "@/components/restroom/RatingPills";
 import { RestroomTags } from "@/components/restroom/RestroomTags";
 import { cn } from "@/lib/utils/cn";
 import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
+import { getRestroomCardSubtitle, getRestroomDisplayName, getRestroomSourceLabel } from "@/lib/utils/restroomPresentation";
 
 interface RestroomCardProps {
   restroom: NearbyBathroom;
@@ -41,6 +42,9 @@ function NavigateIcon({ className }: { className?: string }) {
 export function RestroomCard({ restroom, isHighlighted = false, onHoverChange }: RestroomCardProps) {
   const detailHref = `/restroom/${restroom.id}`;
   const navigateHref = getGoogleMapsDirectionsUrl(restroom.lat, restroom.lng);
+  const displayName = getRestroomDisplayName(restroom);
+  const subtitle = getRestroomCardSubtitle(restroom);
+  const sourceLabel = getRestroomSourceLabel(restroom.source);
 
   const handleBlurCapture = (event: FocusEvent<HTMLElement>) => {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -65,10 +69,8 @@ export function RestroomCard({ restroom, isHighlighted = false, onHoverChange }:
       >
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h3 className="truncate text-base font-semibold text-slate-900 transition group-hover:text-brand-600">{restroom.name}</h3>
-            <p className="mt-1 text-sm text-slate-500">
-              {restroom.address}, {restroom.city}
-            </p>
+            <h3 className="truncate text-base font-semibold text-slate-900 transition group-hover:text-brand-600">{displayName}</h3>
+            <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
           </div>
           <div className="shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
             {toPlaceLabel(restroom.place_type)}
@@ -89,7 +91,7 @@ export function RestroomCard({ restroom, isHighlighted = false, onHoverChange }:
 
         <div className="mt-3.5 text-xs font-medium text-slate-500">
           {restroom.ratings.reviewCount} review
-          {restroom.ratings.reviewCount === 1 ? "" : "s"}
+          {restroom.ratings.reviewCount === 1 ? "" : "s"} • {sourceLabel}
         </div>
       </Link>
 

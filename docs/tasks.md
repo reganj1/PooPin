@@ -26,6 +26,7 @@
 - [x] Refine review form details into a lightweight "what stood out" flow with progressive optional categories.
 - [x] Surface review outputs with human-readable chips/summaries and add lightweight review safety checks.
 - [x] Add OSM/Overpass restroom seed pipeline with deterministic source IDs and existing dedupe safeguards.
+- [x] Improve OSM restroom naming/address presentation quality for clearer map/list/detail readability.
 - [x] Document product scope and local run instructions.
 
 ## Next Suggested Tasks

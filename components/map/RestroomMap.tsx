@@ -6,6 +6,7 @@ import type mapboxgl from "mapbox-gl";
 import type { FeatureCollection, Point } from "geojson";
 import { NearbyBathroom } from "@/types";
 import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
+import { getRestroomDisplayName, getRestroomPopupAddress, getRestroomSourceLabel } from "@/lib/utils/restroomPresentation";
 
 interface RestroomMapProps {
   restrooms: NearbyBathroom[];
@@ -28,6 +29,7 @@ interface RestroomFeatureProperties {
   id: string;
   name: string;
   address: string;
+  source_label: string;
   overall_rating: number;
   smell_rating: number;
   cleanliness_rating: number;
@@ -57,8 +59,9 @@ const toFeatureCollection = (restrooms: NearbyBathroom[]): FeatureCollection<Poi
         },
         properties: {
           id: restroom.id,
-          name: restroom.name,
-          address: restroom.address,
+          name: getRestroomDisplayName(restroom),
+          address: getRestroomPopupAddress(restroom),
+          source_label: getRestroomSourceLabel(restroom.source),
           overall_rating: restroom.ratings.overall,
           smell_rating: restroom.ratings.smell,
           cleanliness_rating: restroom.ratings.cleanliness
@@ -358,7 +361,7 @@ export function RestroomMap({
           return;
         }
 
-        const { id, name, address, overall_rating, smell_rating, cleanliness_rating } = properties;
+        const { id, name, address, source_label, overall_rating, smell_rating, cleanliness_rating } = properties;
         if (!id || !name || !address) {
           return;
         }
@@ -386,6 +389,13 @@ export function RestroomMap({
         addressLine.className = "text-xs text-slate-600";
         addressLine.textContent = address;
         popupContent.appendChild(addressLine);
+
+        if (source_label) {
+          const sourceLine = document.createElement("p");
+          sourceLine.className = "text-[11px] font-medium uppercase tracking-wide text-slate-400";
+          sourceLine.textContent = source_label;
+          popupContent.appendChild(sourceLine);
+        }
 
         const ratingsLine = document.createElement("p");
         ratingsLine.className = "text-xs text-slate-700";

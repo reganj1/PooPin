@@ -7,6 +7,7 @@ import { ReviewForm } from "@/components/review/ReviewForm";
 import { ReviewSummary } from "@/components/review/ReviewSummary";
 import { getBathroomByIdData, getBathroomReviewsData } from "@/lib/data/restrooms";
 import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
+import { getRestroomDetailLocationLine, getRestroomDisplayName, getRestroomSourceLabel } from "@/lib/utils/restroomPresentation";
 
 interface RestroomDetailPageProps {
   params: Promise<{
@@ -55,6 +56,9 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
 
   const reviews = await getBathroomReviewsData(restroom.id);
   const navigateHref = getGoogleMapsDirectionsUrl(restroom.lat, restroom.lng);
+  const displayName = getRestroomDisplayName(restroom);
+  const locationLine = getRestroomDetailLocationLine(restroom);
+  const sourceLabel = getRestroomSourceLabel(restroom.source);
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
@@ -67,12 +71,10 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">{restroom.name}</h1>
-            <p className="mt-2 text-sm text-slate-600">
-              {restroom.address}, {restroom.city}, {restroom.state}
-            </p>
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">{displayName}</h1>
+            <p className="mt-2 text-sm text-slate-600">{locationLine}</p>
             <p className="mt-1 text-xs text-slate-500">
-              Added {formatDate(restroom.created_at)} • {restroom.distanceMiles.toFixed(1)} mi from city center
+              Added {formatDate(restroom.created_at)} • {restroom.distanceMiles.toFixed(1)} mi from city center • {sourceLabel}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
