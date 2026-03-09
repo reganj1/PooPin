@@ -1,6 +1,7 @@
 import { Review } from "@/types";
 import { cn } from "@/lib/utils/cn";
 import { reviewToneClassName, toReviewDetailChips } from "@/lib/utils/reviewPresentation";
+import { ReviewReportAction } from "@/components/review/ReviewReportAction";
 
 interface ReviewListProps {
   reviews: Review[];
@@ -16,8 +17,9 @@ const formatDate = (value: string) =>
 export function ReviewList({ reviews }: ReviewListProps) {
   if (reviews.length === 0) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
-        No reviews yet. This restroom is waiting for its first rating.
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600">
+        <p className="font-semibold text-slate-700">No reviews yet</p>
+        <p className="mt-1">Be the first to help others by sharing your experience.</p>
       </div>
     );
   }
@@ -52,6 +54,8 @@ export function ReviewList({ reviews }: ReviewListProps) {
           ) : (
             <p className="mt-3 text-sm italic text-slate-500">No additional notes shared.</p>
           )}
+
+          <ReviewReportAction bathroomId={review.bathroom_id} reviewId={review.id} />
         </article>
       ))}
     </div>

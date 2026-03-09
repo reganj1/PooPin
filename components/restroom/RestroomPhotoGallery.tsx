@@ -14,8 +14,9 @@ const formatDate = (value: string) =>
 export function RestroomPhotoGallery({ photos }: RestroomPhotoGalleryProps) {
   if (photos.length === 0) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-        No approved photos yet. Upload one to help others preview this restroom.
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600">
+        <p className="font-semibold text-slate-700">No photos yet</p>
+        <p className="mt-1">Uploads are reviewed before appearing here. Add a photo to help others know what to expect.</p>
       </div>
     );
   }

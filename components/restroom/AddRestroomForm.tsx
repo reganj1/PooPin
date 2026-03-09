@@ -1,8 +1,7 @@
 "use client";
 
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import {
@@ -11,8 +10,6 @@ import {
   bathroomCreateSchema,
   bathroomPlaceTypeOptions
 } from "@/lib/validations/bathroom";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { insertBathroom, toAddRestroomErrorMessage } from "@/lib/supabase/bathrooms";
 
 const placeTypeLabel: Record<(typeof bathroomPlaceTypeOptions)[number], string> = {
   park: "Park",
@@ -38,7 +35,7 @@ const defaultValues: BathroomCreateInput = {
   place_type: "other",
   address: "",
   city: "",
-  state: "",
+  state: "CA",
   lat: 37.7749,
   lng: -122.4194,
   access_type: "public",
@@ -48,12 +45,59 @@ const defaultValues: BathroomCreateInput = {
   requires_purchase: false
 };
 
+const SUBMISSION_COOLDOWN_MS = 60_000;
+const LAST_SUBMISSION_STORAGE_KEY = "poopin:add-restroom:last-submit-at";
+
 interface FieldProps {
   label: string;
   htmlFor: keyof BathroomCreateInput;
   error?: string;
   children: ReactNode;
 }
+
+interface SubmitRestroomResponse {
+  success?: boolean;
+  bathroomId?: string | null;
+  status?: string | null;
+  error?: string;
+  duplicateBathroomId?: string | null;
+  fieldErrors?: Partial<Record<keyof BathroomCreateInput, string[]>>;
+}
+
+type ServerFieldErrors = Partial<Record<keyof BathroomCreateInput, string>>;
+
+const toFirstFieldErrors = (
+  fieldErrors: Partial<Record<keyof BathroomCreateInput, string[]>> | undefined
+): ServerFieldErrors => {
+  if (!fieldErrors) {
+    return {};
+  }
+
+  const nextErrors: ServerFieldErrors = {};
+  for (const [key, value] of Object.entries(fieldErrors)) {
+    const firstError = value?.[0];
+    if (firstError) {
+      nextErrors[key as keyof BathroomCreateInput] = firstError;
+    }
+  }
+
+  return nextErrors;
+};
+
+const getClientCooldownRemainingMs = () => {
+  if (typeof window === "undefined") {
+    return 0;
+  }
+
+  const raw = window.localStorage.getItem(LAST_SUBMISSION_STORAGE_KEY);
+  const previousTimestamp = raw ? Number.parseInt(raw, 10) : NaN;
+  if (!Number.isFinite(previousTimestamp)) {
+    return 0;
+  }
+
+  const elapsed = Date.now() - previousTimestamp;
+  return Math.max(0, SUBMISSION_COOLDOWN_MS - elapsed);
+};
 
 function Field({ label, htmlFor, error, children }: FieldProps) {
   return (
@@ -70,51 +114,104 @@ function Field({ label, htmlFor, error, children }: FieldProps) {
 export function AddRestroomForm() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccessId, setSubmitSuccessId] = useState<string | null>(null);
-  const [isRedirecting, setIsRedirecting] = useState(false);
-  const router = useRouter();
-  const supabaseClient = useMemo(() => getSupabaseBrowserClient(), []);
-  const isSupabaseConfigured = Boolean(supabaseClient);
+  const [duplicateBathroomId, setDuplicateBathroomId] = useState<string | null>(null);
+  const [showCoordinates, setShowCoordinates] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
+  const [serverFieldErrors, setServerFieldErrors] = useState<ServerFieldErrors>({});
 
   const {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors, isSubmitting }
   } = useForm<BathroomCreateInput>({
     resolver: zodResolver(bathroomCreateSchema),
     defaultValues
   });
 
+  const getFieldError = (field: keyof BathroomCreateInput) => errors[field]?.message ?? serverFieldErrors[field];
+
+  const handleUseMyLocation = () => {
+    setSubmitError(null);
+
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setSubmitError("Location access is unavailable in this browser.");
+      return;
+    }
+
+    setIsLocating(true);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setValue("lat", Number(position.coords.latitude.toFixed(6)), { shouldDirty: true, shouldValidate: true });
+        setValue("lng", Number(position.coords.longitude.toFixed(6)), { shouldDirty: true, shouldValidate: true });
+        setShowCoordinates(true);
+        setIsLocating(false);
+      },
+      () => {
+        setSubmitError("Could not get your location. You can still adjust the map pin manually.");
+        setShowCoordinates(true);
+        setIsLocating(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000
+      }
+    );
+  };
+
   const onSubmit = async (values: BathroomCreateInput) => {
     setSubmitError(null);
+    setServerFieldErrors({});
     setSubmitSuccessId(null);
-    setIsRedirecting(false);
+    setDuplicateBathroomId(null);
 
-    if (!supabaseClient) {
-      setSubmitError("Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+    const clientCooldownRemainingMs = getClientCooldownRemainingMs();
+    if (clientCooldownRemainingMs > 0) {
+      setSubmitError(`Please wait ${Math.ceil(clientCooldownRemainingMs / 1000)} seconds before submitting again.`);
       return;
     }
 
     try {
-      const result = await insertBathroom(supabaseClient, values);
+      const response = await fetch("/api/restrooms/submit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(values)
+      });
 
-      console.groupCollapsed("[Poopin] add-restroom payload (supabase)");
-      console.log("Payload inserted:", values);
-      console.log("Supabase insert result:", result);
+      const payload = (await response.json()) as SubmitRestroomResponse;
+
+      console.groupCollapsed("[Poopin] restroom submission");
+      console.log("Submitted payload:", values);
+      console.log("API response:", payload);
       console.groupEnd();
 
-      if (result.canReadDetail) {
-        setSubmitSuccessId(result.bathroomId);
-        setIsRedirecting(true);
-        router.push(`/restroom/${result.bathroomId}`);
+      if (!response.ok) {
+        setServerFieldErrors(toFirstFieldErrors(payload.fieldErrors));
+        setSubmitError(payload.error ?? "Could not submit this restroom right now. Please try again.");
+        if (payload.duplicateBathroomId) {
+          setDuplicateBathroomId(payload.duplicateBathroomId);
+        }
         return;
       }
 
-      setSubmitSuccessId(result.bathroomId);
-      reset({ ...defaultValues, city: values.city, state: values.state, lat: values.lat, lng: values.lng });
-    } catch (error) {
-      console.error("[Poopin] add-restroom insert failed", error);
-      setSubmitError(toAddRestroomErrorMessage(error));
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(LAST_SUBMISSION_STORAGE_KEY, String(Date.now()));
+      }
+
+      setSubmitSuccessId(payload.bathroomId ?? null);
+      reset({
+        ...defaultValues,
+        city: values.city,
+        state: values.state
+      });
+      setShowCoordinates(false);
+    } catch {
+      setSubmitError("Could not submit this restroom right now. Please check your connection and try again.");
     }
   };
 
@@ -122,21 +219,16 @@ export function AddRestroomForm() {
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card sm:p-6">
       <div className="mb-6">
         <p className="text-sm font-semibold uppercase tracking-wide text-brand-600">Submit A Restroom</p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">Add a restroom</h1>
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">Help map a restroom</h1>
         <p className="mt-2 text-sm text-slate-600">
-          This form inserts directly into Supabase `bathrooms` when configured.
+          Share a restroom to help nearby people find reliable options. Submissions may be reviewed before appearing
+          publicly.
         </p>
       </div>
 
-      {!isSupabaseConfigured ? (
-        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-          Supabase environment variables are missing, so insert is unavailable until configured.
-        </div>
-      ) : (
-        <div className="mb-5 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-800">
-          Supabase is configured. New restroom submissions will be inserted into the `bathrooms` table.
-        </div>
-      )}
+      <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+        To keep listings trustworthy, submissions are limited to one per minute per device.
+      </div>
 
       {submitError ? (
         <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{submitError}</div>
@@ -144,40 +236,44 @@ export function AddRestroomForm() {
 
       {submitSuccessId ? (
         <div className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-          <p className="text-sm font-semibold text-emerald-700">
-            {isRedirecting ? "Restroom submitted. Redirecting to detail..." : "Restroom submitted successfully."}
-          </p>
+          <p className="text-sm font-semibold text-emerald-700">Thanks, your restroom submission was received.</p>
+          <p className="mt-1 text-xs text-emerald-700">Our team may review it before it appears in public results.</p>
           <p className="mt-1 text-xs text-emerald-700">
-            Restroom id: <span className="font-semibold">{submitSuccessId}</span>
+            Submission reference: <span className="font-semibold">{submitSuccessId}</span>
           </p>
-
-          {!isRedirecting ? (
-            <p className="mt-2 text-xs text-emerald-700">
-              Insert succeeded, but automatic detail redirect was skipped because read access could not be confirmed.
-            </p>
-          ) : null}
-
           <Link
-            href={`/restroom/${submitSuccessId}`}
+            href="/"
             className="mt-3 inline-flex rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
           >
-            Open restroom detail
+            Back to map
+          </Link>
+        </div>
+      ) : null}
+
+      {duplicateBathroomId ? (
+        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-semibold text-amber-800">A similar restroom already appears nearby.</p>
+          <Link
+            href={`/restroom/${duplicateBathroomId}`}
+            className="mt-2 inline-flex rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+          >
+            View existing listing
           </Link>
         </div>
       ) : null}
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
-        <Field label="Name" htmlFor="name" error={errors.name?.message}>
+        <Field label="Name" htmlFor="name" error={getFieldError("name")}>
           <input
             id="name"
             {...register("name")}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-            placeholder="Downtown Civic Center Restroom"
+            placeholder="Civic Center Plaza Restroom"
           />
         </Field>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Place type" htmlFor="place_type" error={errors.place_type?.message}>
+          <Field label="Place type" htmlFor="place_type" error={getFieldError("place_type")}>
             <select
               id="place_type"
               {...register("place_type")}
@@ -191,7 +287,7 @@ export function AddRestroomForm() {
             </select>
           </Field>
 
-          <Field label="Access type" htmlFor="access_type" error={errors.access_type?.message}>
+          <Field label="Access type" htmlFor="access_type" error={getFieldError("access_type")}>
             <select
               id="access_type"
               {...register("access_type")}
@@ -206,17 +302,17 @@ export function AddRestroomForm() {
           </Field>
         </div>
 
-        <Field label="Address" htmlFor="address" error={errors.address?.message}>
+        <Field label="Street address" htmlFor="address" error={getFieldError("address")}>
           <input
             id="address"
             {...register("address")}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-            placeholder="123 Main St"
+            placeholder="123 Market St"
           />
         </Field>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="City" htmlFor="city" error={errors.city?.message}>
+          <Field label="City" htmlFor="city" error={getFieldError("city")}>
             <input
               id="city"
               {...register("city")}
@@ -225,43 +321,78 @@ export function AddRestroomForm() {
             />
           </Field>
 
-          <Field label="State" htmlFor="state" error={errors.state?.message}>
+          <Field label="State" htmlFor="state" error={getFieldError("state")}>
             <input
               id="state"
               {...register("state")}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm uppercase outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
               placeholder="CA"
+              maxLength={30}
             />
           </Field>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Latitude" htmlFor="lat" error={errors.lat?.message}>
-            <input
-              id="lat"
-              type="number"
-              step="any"
-              {...register("lat", {
-                setValueAs: (value) => (value === "" ? undefined : Number(value))
-              })}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-              placeholder="37.7749"
-            />
-          </Field>
+        <section className="rounded-xl border border-slate-200 p-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Location pin</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Add a map pin so people can find this restroom. You can keep the default or refine it.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowCoordinates((current) => !current)}
+              className="inline-flex w-fit rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              {showCoordinates ? "Hide coordinates" : "Refine coordinates"}
+            </button>
+          </div>
 
-          <Field label="Longitude" htmlFor="lng" error={errors.lng?.message}>
-            <input
-              id="lng"
-              type="number"
-              step="any"
-              {...register("lng", {
-                setValueAs: (value) => (value === "" ? undefined : Number(value))
-              })}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-              placeholder="-122.4194"
-            />
-          </Field>
-        </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleUseMyLocation}
+              disabled={isLocating || isSubmitting}
+              className="inline-flex rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isLocating ? "Locating..." : "Use my current location"}
+            </button>
+            <p className="text-xs text-slate-500">Recommended for better map accuracy.</p>
+          </div>
+
+          {showCoordinates ? (
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <Field label="Latitude" htmlFor="lat" error={getFieldError("lat")}>
+                <input
+                  id="lat"
+                  type="number"
+                  step="any"
+                  {...register("lat", {
+                    setValueAs: (value) => (value === "" ? undefined : Number(value))
+                  })}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                  placeholder="37.7749"
+                />
+              </Field>
+
+              <Field label="Longitude" htmlFor="lng" error={getFieldError("lng")}>
+                <input
+                  id="lng"
+                  type="number"
+                  step="any"
+                  {...register("lng", {
+                    setValueAs: (value) => (value === "" ? undefined : Number(value))
+                  })}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                  placeholder="-122.4194"
+                />
+              </Field>
+            </div>
+          ) : (
+            <p className="mt-3 text-xs text-slate-500">Using your current pin values. Open “Refine coordinates” to edit.</p>
+          )}
+        </section>
 
         <fieldset className="rounded-xl border border-slate-200 p-4">
           <legend className="px-1 text-sm font-semibold text-slate-700">Amenities and access</legend>
@@ -298,8 +429,10 @@ export function AddRestroomForm() {
             onClick={() => {
               reset(defaultValues);
               setSubmitError(null);
+              setServerFieldErrors({});
               setSubmitSuccessId(null);
-              setIsRedirecting(false);
+              setDuplicateBathroomId(null);
+              setShowCoordinates(false);
             }}
             disabled={isSubmitting}
             className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"

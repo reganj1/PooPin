@@ -487,6 +487,76 @@ const toTitleCase = (value: string) =>
     .map((part) => (part.length <= 2 ? part.toUpperCase() : `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`))
     .join(" ");
 
+const OSM_CONTEXT_IGNORE_VALUES = new Set([
+  "",
+  "yes",
+  "no",
+  "unknown",
+  "none",
+  "toilets",
+  "toilet",
+  "restroom",
+  "bathroom",
+  "public restroom",
+  "public toilets",
+  "wc",
+  "park",
+  "plaza",
+  "square",
+  "attraction",
+  "landmark",
+  "operator",
+  "facility",
+  "building",
+  "service"
+]);
+
+const toDisplayContext = (value: string) => {
+  const cleaned = normalizeLabel(value).replace(/_/g, " ");
+  if (!cleaned) {
+    return "";
+  }
+
+  const hasUppercase = /[A-Z]/.test(cleaned);
+  return hasUppercase ? cleaned : toTitleCase(cleaned);
+};
+
+const isIgnoredContext = (value: string, fallbackCity: string) => {
+  const normalizedValue = normalizeContext(value);
+  if (!normalizedValue) {
+    return true;
+  }
+
+  if (OSM_CONTEXT_IGNORE_VALUES.has(normalizedValue)) {
+    return true;
+  }
+
+  const normalizedCity = normalizeContext(fallbackCity);
+  if (normalizedCity && (normalizedValue === normalizedCity || normalizedValue === `near ${normalizedCity}`)) {
+    return true;
+  }
+
+  return false;
+};
+
+const pickContextFromKeys = (row: RawRecord, keys: string[], fallbackCity: string) => {
+  for (const key of keys) {
+    const rawValue = parseTagValue(row, [key]);
+    if (!rawValue) {
+      continue;
+    }
+
+    const candidate = toDisplayContext(rawValue);
+    if (!candidate || isGenericOsmName(candidate) || isIgnoredContext(candidate, fallbackCity)) {
+      continue;
+    }
+
+    return candidate;
+  }
+
+  return null;
+};
+
 const buildStreetContext = (row: RawRecord) => {
   const houseNumber = parseTagValue(row, ["addr:housenumber", "house_number"]);
   const streetName = parseTagValue(row, ["addr:street", "road", "street_name", "street"]);
@@ -503,24 +573,87 @@ const buildStreetContext = (row: RawRecord) => {
 };
 
 const buildNeighborhoodContext = (row: RawRecord) => {
-  return parseTagValue(row, ["addr:suburb", "neighbourhood", "neighborhood", "district", "quarter"]);
+  return parseTagValue(row, [
+    "addr:suburb",
+    "neighbourhood",
+    "neighborhood",
+    "district",
+    "quarter",
+    "addr:locality",
+    "addr:hamlet",
+    "locality"
+  ]);
 };
 
-const buildLandmarkContext = (row: RawRecord) => {
-  const candidate = parseTagValue(row, ["park", "landmark", "site_name", "operator", "brand", "network", "name:en"]);
-  if (candidate && !isGenericOsmName(candidate)) {
-    return candidate;
+const buildParkLandmarkContext = (row: RawRecord, fallbackCity: string) => {
+  const namedContext = pickContextFromKeys(
+    row,
+    ["park", "park_name", "plaza", "square", "landmark", "site_name", "name:en", "addr:place", "leisure:park"],
+    fallbackCity
+  );
+  if (namedContext) {
+    return namedContext;
   }
 
-  const leisure = parseTagValue(row, ["leisure"]);
-  if (leisure === "park") {
-    const namedArea = parseTagValue(row, ["addr:place", "addr:hamlet", "addr:locality", "city", "addr:city"]);
-    if (namedArea) {
-      return `${toTitleCase(namedArea)} Park`;
+  const leisureValue = parseTagValueLower(row, ["leisure"]);
+  if (!leisureValue) {
+    return null;
+  }
+
+  const namedArea = pickContextFromKeys(
+    row,
+    ["addr:place", "neighbourhood", "neighborhood", "district", "quarter", "addr:locality", "city", "addr:city"],
+    fallbackCity
+  );
+  if (!namedArea) {
+    return null;
+  }
+
+  if (["park", "garden", "playground", "recreation_ground"].includes(leisureValue)) {
+    const suffix = leisureValue === "garden" ? "Garden" : leisureValue === "playground" ? "Playground" : "Park";
+    if (normalizeContext(namedArea).endsWith(normalizeContext(suffix))) {
+      return namedArea;
     }
+    return `${namedArea} ${suffix}`;
   }
 
-  return null;
+  return namedArea;
+};
+
+const buildTourismAttractionContext = (row: RawRecord, fallbackCity: string) => {
+  const namedContext = pickContextFromKeys(
+    row,
+    ["tourism_name", "attraction_name", "attraction", "poi_name", "destination", "tourism:site"],
+    fallbackCity
+  );
+  if (namedContext) {
+    return namedContext;
+  }
+
+  const tourismValue = parseTagValueLower(row, ["tourism"]);
+  if (!tourismValue || isIgnoredContext(tourismValue, fallbackCity)) {
+    return null;
+  }
+
+  return toDisplayContext(tourismValue);
+};
+
+const buildOperatorFacilityContext = (row: RawRecord, fallbackCity: string) => {
+  return pickContextFromKeys(
+    row,
+    [
+      "operator",
+      "facility_name",
+      "brand",
+      "network",
+      "building:name",
+      "site_operator",
+      "owner",
+      "organization",
+      "organisation"
+    ],
+    fallbackCity
+  );
 };
 
 const buildAddress = (row: RawRecord, fallbackCity: string): string => {
@@ -536,36 +669,67 @@ const buildAddress = (row: RawRecord, fallbackCity: string): string => {
     return streetContext;
   }
 
-  const landmarkContext = buildLandmarkContext(row);
-  if (landmarkContext) {
-    return `Near ${landmarkContext}`;
+  const parkLandmarkContext = buildParkLandmarkContext(row, fallbackCity);
+  if (parkLandmarkContext) {
+    return parkLandmarkContext;
+  }
+
+  const tourismContext = buildTourismAttractionContext(row, fallbackCity);
+  if (tourismContext) {
+    return tourismContext;
+  }
+
+  const operatorContext = buildOperatorFacilityContext(row, fallbackCity);
+  if (operatorContext) {
+    return operatorContext;
   }
 
   const neighborhood = buildNeighborhoodContext(row);
-  if (neighborhood) {
-    return `${neighborhood}, ${fallbackCity}`;
+  const normalizedNeighborhood = neighborhood ? toDisplayContext(neighborhood) : "";
+  if (normalizedNeighborhood && !isIgnoredContext(normalizedNeighborhood, fallbackCity)) {
+    if (fallbackCity && normalizeContext(normalizedNeighborhood) !== normalizeContext(fallbackCity)) {
+      return `${normalizedNeighborhood}, ${fallbackCity}`;
+    }
+    return normalizedNeighborhood;
   }
 
-  return fallbackCity ? `Near ${fallbackCity}` : "Near current area";
+  return fallbackCity || "Current area";
 };
 
+const formatOsmFallbackName = (context: string) => `${DEFAULT_OSM_NAME} — ${withMaxLength(normalizeLabel(context))}`;
+
 const buildOsmFallbackName = (row: RawRecord, fallbackCity: string) => {
-  const landmarkContext = buildLandmarkContext(row);
-  if (landmarkContext) {
-    return `${DEFAULT_OSM_NAME} - ${withMaxLength(normalizeLabel(landmarkContext))}`;
+  const parkLandmarkContext = buildParkLandmarkContext(row, fallbackCity);
+  if (parkLandmarkContext) {
+    return formatOsmFallbackName(parkLandmarkContext);
+  }
+
+  const tourismContext = buildTourismAttractionContext(row, fallbackCity);
+  if (tourismContext) {
+    return formatOsmFallbackName(tourismContext);
+  }
+
+  const operatorContext = buildOperatorFacilityContext(row, fallbackCity);
+  if (operatorContext) {
+    return formatOsmFallbackName(operatorContext);
   }
 
   const streetContext = buildStreetContext(row);
   if (streetContext) {
-    return `${DEFAULT_OSM_NAME} - ${withMaxLength(normalizeLabel(streetContext))}`;
+    return formatOsmFallbackName(streetContext);
   }
 
   const neighborhood = buildNeighborhoodContext(row);
-  if (neighborhood) {
-    return `${DEFAULT_OSM_NAME} - ${withMaxLength(normalizeLabel(neighborhood))}`;
+  const normalizedNeighborhood = neighborhood ? toDisplayContext(neighborhood) : "";
+  if (normalizedNeighborhood && !isIgnoredContext(normalizedNeighborhood, fallbackCity)) {
+    return formatOsmFallbackName(normalizedNeighborhood);
   }
 
-  return fallbackCity ? `${DEFAULT_OSM_NAME} - Near ${withMaxLength(normalizeLabel(fallbackCity), 26)}` : DEFAULT_OSM_NAME;
+  if (fallbackCity) {
+    return formatOsmFallbackName(withMaxLength(toDisplayContext(fallbackCity), 26));
+  }
+
+  return DEFAULT_OSM_NAME;
 };
 
 const toImportRecord = (row: RawRecord, options: ImportOptions): ImportBathroomRecord | null => {
@@ -580,7 +744,9 @@ const toImportRecord = (row: RawRecord, options: ImportOptions): ImportBathroomR
   const city = parseString(getValue(row, ["city", "addr:city", "town", "municipality"])) ?? options.defaultCity;
   const state = parseString(getValue(row, ["state", "state_code", "province", "addr:state"])) ?? options.defaultState;
 
-  const parsedName = parseString(getValue(row, ["name", "restroom_name", "facility_name", "site_name", "location_name"]));
+  const parsedName = parseString(
+    getValue(row, ["name", "name:en", "restroom_name", "facility_name", "site_name", "location_name"])
+  );
   const name =
     source === "openstreetmap"
       ? !parsedName || isGenericOsmName(parsedName)

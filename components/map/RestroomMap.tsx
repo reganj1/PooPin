@@ -6,7 +6,7 @@ import type mapboxgl from "mapbox-gl";
 import type { FeatureCollection, Point } from "geojson";
 import { NearbyBathroom } from "@/types";
 import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
-import { getRestroomDisplayName, getRestroomPopupAddress, getRestroomSourceLabel } from "@/lib/utils/restroomPresentation";
+import { getRestroomDisplayName, getRestroomPopupAddress } from "@/lib/utils/restroomPresentation";
 
 interface RestroomMapProps {
   restrooms: NearbyBathroom[];
@@ -28,11 +28,8 @@ interface RestroomMapProps {
 interface RestroomFeatureProperties {
   id: string;
   name: string;
-  address: string;
-  source_label: string;
-  overall_rating: number;
-  smell_rating: number;
-  cleanliness_rating: number;
+  subtitle: string;
+  distance_miles: number;
 }
 
 const SOURCE_ID = "restrooms-source";
@@ -60,11 +57,8 @@ const toFeatureCollection = (restrooms: NearbyBathroom[]): FeatureCollection<Poi
         properties: {
           id: restroom.id,
           name: getRestroomDisplayName(restroom),
-          address: getRestroomPopupAddress(restroom),
-          source_label: getRestroomSourceLabel(restroom.source),
-          overall_rating: restroom.ratings.overall,
-          smell_rating: restroom.ratings.smell,
-          cleanliness_rating: restroom.ratings.cleanliness
+          subtitle: getRestroomPopupAddress(restroom),
+          distance_miles: restroom.distanceMiles
         }
       }))
   };
@@ -95,7 +89,17 @@ const toUserLocationFeatureCollection = (
   };
 };
 
-const toDisplayRating = (value: number) => (value > 0 ? value.toFixed(1) : "N/A");
+const toDistanceLabel = (value: number) => {
+  if (!Number.isFinite(value) || value < 0) {
+    return "";
+  }
+
+  if (value < 0.1) {
+    return "<0.1 mi away";
+  }
+
+  return `${value.toFixed(1)} mi away`;
+};
 
 const getLocationKey = (location: { lat: number; lng: number } | null) =>
   location ? `${location.lat.toFixed(5)}:${location.lng.toFixed(5)}` : "";
@@ -361,8 +365,8 @@ export function RestroomMap({
           return;
         }
 
-        const { id, name, address, source_label, overall_rating, smell_rating, cleanliness_rating } = properties;
-        if (!id || !name || !address) {
+        const { id, name, subtitle, distance_miles } = properties;
+        if (!id || !name || !subtitle) {
           return;
         }
 
@@ -385,22 +389,18 @@ export function RestroomMap({
         title.textContent = name;
         popupContent.appendChild(title);
 
-        const addressLine = document.createElement("p");
-        addressLine.className = "text-xs text-slate-600";
-        addressLine.textContent = address;
-        popupContent.appendChild(addressLine);
+        const subtitleLine = document.createElement("p");
+        subtitleLine.className = "text-xs text-slate-600";
+        subtitleLine.textContent = subtitle;
+        popupContent.appendChild(subtitleLine);
 
-        if (source_label) {
-          const sourceLine = document.createElement("p");
-          sourceLine.className = "text-[11px] font-medium uppercase tracking-wide text-slate-400";
-          sourceLine.textContent = source_label;
-          popupContent.appendChild(sourceLine);
+        const distanceLabel = toDistanceLabel(distance_miles);
+        if (distanceLabel) {
+          const distanceLine = document.createElement("p");
+          distanceLine.className = "text-xs font-semibold text-slate-700";
+          distanceLine.textContent = distanceLabel;
+          popupContent.appendChild(distanceLine);
         }
-
-        const ratingsLine = document.createElement("p");
-        ratingsLine.className = "text-xs text-slate-700";
-        ratingsLine.textContent = `Overall ${toDisplayRating(overall_rating)} • Smell ${toDisplayRating(smell_rating)} • Clean ${toDisplayRating(cleanliness_rating)}`;
-        popupContent.appendChild(ratingsLine);
 
         const actions = document.createElement("div");
         actions.className = "flex items-center gap-2";
@@ -409,7 +409,7 @@ export function RestroomMap({
         detailButton.type = "button";
         detailButton.className =
           "inline-flex rounded-md border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50";
-        detailButton.textContent = "Open restroom";
+        detailButton.textContent = "View details";
         detailButton.addEventListener("click", () => {
           router.push(`/restroom/${id}`);
         });
@@ -422,7 +422,7 @@ export function RestroomMap({
         navigateLink.rel = "noopener noreferrer";
         navigateLink.className =
           "inline-flex items-center gap-1 rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-800";
-        navigateLink.textContent = "↗ Navigate";
+        navigateLink.textContent = "Navigate";
         actions.appendChild(navigateLink);
 
         popupContent.appendChild(actions);

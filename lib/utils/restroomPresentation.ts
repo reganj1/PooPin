@@ -8,6 +8,7 @@ interface RestroomPresentationInput {
   source: BathroomSource;
 }
 
+const DEFAULT_RESTROOM_NAME = "Public Restroom";
 const GENERIC_OSM_NAMES = new Set([
   "public restroom",
   "public restrooms",
@@ -22,8 +23,11 @@ const GENERIC_OSM_NAMES = new Set([
   "wc",
   "toiletten"
 ]);
+const GENERIC_OSM_NAME_WITH_CONTEXT_PATTERN =
+  /^(public restroom|public restrooms|restroom|restrooms|public toilet|public toilets|toilet|toilets|bathroom|bathrooms|wc)\s*(?:-|—|:)\s*(.+)$/i;
 
 const COORDINATE_FALLBACK_PATTERN = /^approximate location\s*\(/i;
+const RAW_COORDINATE_PATTERN = /^-?\d{1,3}(?:\.\d+)?\s*,\s*-?\d{1,3}(?:\.\d+)?$/;
 
 const normalizeText = (value: string) =>
   value
@@ -40,9 +44,19 @@ const toTitleCase = (value: string) =>
     .map((part) => (part.length <= 2 ? part.toUpperCase() : part[0].toUpperCase() + part.slice(1)))
     .join(" ");
 
-const isCoordinateFallbackAddress = (address: string) => COORDINATE_FALLBACK_PATTERN.test(address.trim());
+const normalizeLabel = (value: string) => value.trim().replace(/\s+/g, " ");
 
-const isGenericOsmName = (name: string) => GENERIC_OSM_NAMES.has(normalizeText(name));
+const isCoordinateFallbackAddress = (address: string) => {
+  const trimmed = address.trim();
+  return COORDINATE_FALLBACK_PATTERN.test(trimmed) || RAW_COORDINATE_PATTERN.test(trimmed);
+};
+
+const stripNearPrefix = (value: string) => value.replace(/^near\s+/i, "").trim();
+
+const isGenericOsmName = (name: string) => {
+  const normalized = normalizeText(name);
+  return GENERIC_OSM_NAMES.has(normalized) || GENERIC_OSM_NAME_WITH_CONTEXT_PATTERN.test(normalizeLabel(name));
+};
 
 const withMaxLength = (value: string, max = 34) => {
   if (value.length <= max) {
@@ -52,28 +66,61 @@ const withMaxLength = (value: string, max = 34) => {
   return `${value.slice(0, max - 1).trimEnd()}…`;
 };
 
+const formatCityState = (city: string, state: string) => {
+  const normalizedCity = city.trim();
+  const normalizedState = state.trim().toUpperCase();
+  return [normalizedCity, normalizedState].filter(Boolean).join(", ");
+};
+
+const isCityEquivalent = (value: string, city: string) => {
+  if (!city.trim()) {
+    return false;
+  }
+
+  const normalizedValue = normalizeText(stripNearPrefix(value));
+  const normalizedCity = normalizeText(city);
+
+  return normalizedValue === normalizedCity;
+};
+
 const isAddressAlreadyCityLike = (address: string, city: string) => {
   if (!city.trim()) {
     return false;
   }
 
-  const normalizedAddress = normalizeText(address);
+  const normalizedAddress = normalizeText(stripNearPrefix(address));
   const normalizedCity = normalizeText(city);
 
-  return normalizedAddress.includes(normalizedCity);
+  return normalizedAddress === normalizedCity || normalizedAddress.includes(normalizedCity);
 };
 
-const cleanAddress = (address: string, city: string) => {
-  const trimmed = address.trim().replace(/\s+/g, " ");
+const cleanAddress = (address: string, city: string, state: string) => {
+  const trimmed = normalizeLabel(address);
   if (trimmed.length === 0) {
-    return city ? `Near ${city}` : "Near current area";
+    const fallbackCity = formatCityState(city, state);
+    return fallbackCity || "Current area";
   }
 
   if (isCoordinateFallbackAddress(trimmed)) {
-    return city ? `Near ${city}` : "Near current area";
+    const fallbackCity = formatCityState(city, state);
+    return fallbackCity || "Current area";
   }
 
   return trimmed;
+};
+
+const extractContextFromGenericName = (name: string, city: string) => {
+  const match = normalizeLabel(name).match(GENERIC_OSM_NAME_WITH_CONTEXT_PATTERN);
+  if (!match?.[2]) {
+    return "";
+  }
+
+  const context = stripNearPrefix(match[2]);
+  if (!context || isCityEquivalent(context, city)) {
+    return "";
+  }
+
+  return toTitleCase(context);
 };
 
 const getNameContextFromAddress = (address: string, city: string) => {
@@ -82,16 +129,46 @@ const getNameContextFromAddress = (address: string, city: string) => {
     return "";
   }
 
-  const withoutNearPrefix = firstSegment.replace(/^near\s+/i, "").trim();
+  const withoutNearPrefix = stripNearPrefix(firstSegment);
   if (!withoutNearPrefix) {
     return "";
   }
 
-  if (city && normalizeText(withoutNearPrefix) === normalizeText(city)) {
+  if (isCityEquivalent(withoutNearPrefix, city)) {
     return "";
   }
 
   return toTitleCase(withoutNearPrefix);
+};
+
+const buildLocationLine = (restroom: RestroomPresentationInput, includeState: boolean) => {
+  const cityState = formatCityState(restroom.city, restroom.state);
+  const cleanedAddress = cleanAddress(restroom.address, restroom.city, restroom.state);
+  const hasCity = restroom.city.trim().length > 0;
+  const includesCity = hasCity && normalizeText(cleanedAddress).includes(normalizeText(restroom.city));
+  const includesState =
+    restroom.state.trim().length > 0 && normalizeText(cleanedAddress).includes(normalizeText(restroom.state));
+
+  if (!hasCity) {
+    return cleanedAddress;
+  }
+
+  if (isAddressAlreadyCityLike(cleanedAddress, restroom.city)) {
+    return includeState ? cityState || cleanedAddress : restroom.city.trim();
+  }
+
+  if (includesCity) {
+    if (includeState && restroom.state.trim() && !includesState) {
+      return `${cleanedAddress}, ${restroom.state.trim().toUpperCase()}`;
+    }
+    return cleanedAddress;
+  }
+
+  if (includeState) {
+    return cityState ? `${cleanedAddress}, ${cityState}` : cleanedAddress;
+  }
+
+  return `${cleanedAddress}, ${restroom.city.trim()}`;
 };
 
 export const getRestroomSourceLabel = (source: BathroomSource) => {
@@ -106,41 +183,29 @@ export const getRestroomSourceLabel = (source: BathroomSource) => {
 };
 
 export const getRestroomDisplayName = (restroom: RestroomPresentationInput) => {
-  const baseName = restroom.name.trim() || "Public Restroom";
+  const baseName = normalizeLabel(restroom.name) || DEFAULT_RESTROOM_NAME;
   if (restroom.source !== "openstreetmap" || !isGenericOsmName(baseName)) {
     return baseName;
   }
 
-  const address = cleanAddress(restroom.address, restroom.city);
-  const context = getNameContextFromAddress(address, restroom.city);
+  const genericNameContext = extractContextFromGenericName(baseName, restroom.city);
+  const addressContext = getNameContextFromAddress(cleanAddress(restroom.address, restroom.city, restroom.state), restroom.city);
+  const context = genericNameContext || addressContext;
   if (!context) {
-    return "Public Restroom";
+    return DEFAULT_RESTROOM_NAME;
   }
 
-  return `Public Restroom — ${withMaxLength(context)}`;
+  return `${DEFAULT_RESTROOM_NAME} — ${withMaxLength(context)}`;
 };
 
 export const getRestroomCardSubtitle = (restroom: RestroomPresentationInput) => {
-  const address = cleanAddress(restroom.address, restroom.city);
-  if (!restroom.city || isAddressAlreadyCityLike(address, restroom.city)) {
-    return address;
-  }
-
-  return `${address}, ${restroom.city}`;
+  return withMaxLength(buildLocationLine(restroom, false), 62);
 };
 
 export const getRestroomDetailLocationLine = (restroom: RestroomPresentationInput) => {
-  const address = cleanAddress(restroom.address, restroom.city);
-  const includesCity = isAddressAlreadyCityLike(address, restroom.city);
-
-  if (includesCity) {
-    return restroom.state ? `${address}, ${restroom.state}` : address;
-  }
-
-  return [address, restroom.city, restroom.state].filter(Boolean).join(", ");
+  return buildLocationLine(restroom, true);
 };
 
 export const getRestroomPopupAddress = (restroom: RestroomPresentationInput) => {
-  const address = cleanAddress(restroom.address, restroom.city);
-  return withMaxLength(address, 52);
+  return withMaxLength(buildLocationLine(restroom, false), 56);
 };
