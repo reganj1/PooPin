@@ -16,9 +16,9 @@
 - [x] Add homepage “Use my location” support for map centering and distance-based re-sorting.
 - [x] Add distinct current-location marker when near-me location is granted.
 - [x] Add lightweight homepage filter and sort controls (public/accessibility/baby-station, closest/best-rated).
+- [x] Add repeatable restroom seed import script for JSON/CSV with dedupe safeguards.
 - [x] Document product scope and local run instructions.
 
 ## Next Suggested Tasks
-- [ ] Add Supabase seed script for local/demo startup data.
 - [ ] Add image upload to Supabase Storage.
 - [ ] Add basic filtering (open now, accessible, public only).
