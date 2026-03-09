@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { MapPanel } from "@/components/map/MapPanel";
 import { RestroomList } from "@/components/restroom/RestroomList";
+import { cn } from "@/lib/utils/cn";
 import { NearbyBathroom } from "@/types";
 
 interface NearbyExplorerProps {
@@ -136,6 +137,12 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, [sortMode, userLocation]);
 
   const highlightedListRestroomId = listHoveredRestroomId ?? mapFocusedRestroomId;
+  const toggleFilter = (filterKey: keyof FilterState) => {
+    setFilters((current) => ({
+      ...current,
+      [filterKey]: !current[filterKey]
+    }));
+  };
 
   const handleUseMyLocation = () => {
     setGeoError(null);
@@ -213,28 +220,43 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
   return (
     <>
-      <section className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <button
-          type="button"
-          onClick={handleUseMyLocation}
-          disabled={isLocating}
-          className="inline-flex w-fit items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isLocating ? "Locating..." : "Use my location"}
-        </button>
+      <section className="mb-4 rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-sm sm:p-4 lg:mb-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleUseMyLocation}
+              disabled={isLocating}
+              className="inline-flex h-10 w-fit items-center rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isLocating ? "Locating..." : "Use my location"}
+            </button>
 
-        {userLocation ? (
-          <p className="text-xs font-medium text-emerald-700">Using your location for map centering and distance sorting.</p>
-        ) : (
-          <p className="text-xs text-slate-500">Using default city center until location is granted.</p>
-        )}
+            {userLocation ? (
+              <p className="text-xs font-medium text-emerald-700 sm:text-sm">
+                Showing nearby results around your location.
+              </p>
+            ) : (
+              <p className="text-xs text-slate-500 sm:text-sm">Browsing from the current map view.</p>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+              {mapRestrooms.length} pins in view
+            </span>
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+              {listRestrooms.length} in list
+            </span>
+          </div>
+        </div>
       </section>
 
       {geoError ? (
         <section className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">{geoError}</section>
       ) : null}
 
-      <section className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+      <section className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(380px,1fr)] xl:grid-cols-[minmax(0,1.55fr)_430px]">
         <div className="lg:sticky lg:top-20 lg:self-start">
           <MapPanel
             restrooms={mapRestrooms}
@@ -246,65 +268,69 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         </div>
 
         <div className="space-y-3">
-          <section className="rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="grid gap-3 sm:grid-cols-2">
+          <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-end justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">Browse this area</h2>
+                <p className="mt-1 text-xs text-slate-500">Filter and sort what you see on the map.</p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
               <fieldset>
                 <legend className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Filters</legend>
-                <div className="space-y-1.5">
-                  <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={filters.publicOnly}
-                      onChange={(event) =>
-                        setFilters((current) => ({
-                          ...current,
-                          publicOnly: event.target.checked
-                        }))
-                      }
-                      className="h-4 w-4 rounded border-slate-300"
-                    />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => toggleFilter("publicOnly")}
+                    aria-pressed={filters.publicOnly}
+                    className={cn(
+                      "rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                      filters.publicOnly
+                        ? "border-brand-300 bg-brand-50 text-brand-700"
+                        : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
+                    )}
+                  >
                     Public only
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={filters.accessible}
-                      onChange={(event) =>
-                        setFilters((current) => ({
-                          ...current,
-                          accessible: event.target.checked
-                        }))
-                      }
-                      className="h-4 w-4 rounded border-slate-300"
-                    />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleFilter("accessible")}
+                    aria-pressed={filters.accessible}
+                    className={cn(
+                      "rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                      filters.accessible
+                        ? "border-brand-300 bg-brand-50 text-brand-700"
+                        : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
+                    )}
+                  >
                     Accessible
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={filters.babyStation}
-                      onChange={(event) =>
-                        setFilters((current) => ({
-                          ...current,
-                          babyStation: event.target.checked
-                        }))
-                      }
-                      className="h-4 w-4 rounded border-slate-300"
-                    />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleFilter("babyStation")}
+                    aria-pressed={filters.babyStation}
+                    className={cn(
+                      "rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                      filters.babyStation
+                        ? "border-brand-300 bg-brand-50 text-brand-700"
+                        : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
+                    )}
+                  >
                     Baby station
-                  </label>
+                  </button>
                 </div>
               </fieldset>
 
-              <div>
-                <label htmlFor="sort-mode" className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
+                <label htmlFor="sort-mode" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Sort
                 </label>
                 <select
                   id="sort-mode"
                   value={sortMode}
                   onChange={(event) => setSortMode(event.target.value as SortMode)}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                  className="h-9 w-[180px] rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
                 >
                   <option value="closest">Closest</option>
                   <option value="best_rated">Best rated</option>

@@ -10,25 +10,28 @@ interface RestroomListProps {
 
 export function RestroomList({
   restrooms,
-  helperText = "Sorted by distance from your default city center location.",
+  helperText = "Showing nearby restrooms for the current map context.",
   highlightedRestroomId = null,
   onRestroomHoverChange
 }: RestroomListProps) {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
-      <div className="mb-4 flex items-end justify-between">
-        <div>
+    <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:p-5">
+      <div className="mb-4 flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+        <div className="min-w-0">
           <h2 className="text-lg font-semibold text-slate-900">Nearby Restrooms</h2>
-          <p className="text-sm text-slate-500">{helperText}</p>
+          <p className="mt-1 text-sm leading-5 text-slate-500">{helperText}</p>
         </div>
+        <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+          {restrooms.length}
+        </span>
       </div>
 
       {restrooms.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
           No restrooms match your selected filters.
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 lg:max-h-[540px] lg:overflow-y-auto lg:pr-1">
           {restrooms.map((restroom) => (
             <RestroomCard
               key={restroom.id}
