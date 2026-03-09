@@ -28,6 +28,9 @@
 - [x] Add OSM/Overpass restroom seed pipeline with deterministic source IDs and existing dedupe safeguards.
 - [x] Improve OSM restroom naming/address presentation quality for clearer map/list/detail readability.
 - [x] Add moderation-first restroom photo uploads (Supabase Storage + pending review + approved-only public gallery).
+- [x] Add anonymous anti-abuse protections for reviews (profanity guardrails, cooldown/rate limits, and review reporting).
+- [x] Add anonymous restroom existence confirmations with community trust counts.
+- [x] Expand Bay Area OSM seeding with chunked fetch/import workflow and stronger import-time normalization/dedupe.
 - [x] Document product scope and local run instructions.
 
 ## Next Suggested Tasks

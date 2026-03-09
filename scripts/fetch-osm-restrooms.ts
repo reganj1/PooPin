@@ -1,16 +1,29 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { BAY_AREA_OSM_CHUNKS, getBayAreaChunk, getBayAreaChunkKeys } from "./lib/bay-area-chunks";
+
+interface FetchJob {
+  label: string;
+  bbox: [number, number, number, number];
+  outputPath: string;
+  defaultCity?: string;
+  defaultState?: string;
+}
 
 interface FetchOptions {
   bbox: [number, number, number, number];
   outputPath: string;
+  outputDir: string;
   endpoint: string;
   timeoutSeconds: number;
   dryRun: boolean;
+  chunkKeys: string[];
+  allBayArea: boolean;
 }
 
 const DEFAULT_BBOX: [number, number, number, number] = [37.706, -122.524, 37.833, -122.356];
 const DEFAULT_OUTPUT = "supabase/seeds/osm-sf-overpass.json";
+const DEFAULT_OUTPUT_DIR = "supabase/seeds/bay-area";
 const DEFAULT_ENDPOINT = "https://overpass-api.de/api/interpreter";
 const DEFAULT_TIMEOUT_SECONDS = 90;
 
@@ -32,21 +45,35 @@ const parseBbox = (value: string): [number, number, number, number] => {
   return [south, west, north, east];
 };
 
+const parseChunkList = (value: string) =>
+  value
+    .split(",")
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.length > 0);
+
 const parseArgs = (): FetchOptions => {
   const args = process.argv.slice(2);
 
   const options: FetchOptions = {
     bbox: DEFAULT_BBOX,
     outputPath: DEFAULT_OUTPUT,
+    outputDir: DEFAULT_OUTPUT_DIR,
     endpoint: DEFAULT_ENDPOINT,
     timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
-    dryRun: false
+    dryRun: false,
+    chunkKeys: [],
+    allBayArea: false
   };
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (arg === "--dry-run") {
       options.dryRun = true;
+      continue;
+    }
+
+    if (arg === "--all-bay-area") {
+      options.allBayArea = true;
       continue;
     }
 
@@ -62,6 +89,18 @@ const parseArgs = (): FetchOptions => {
         break;
       case "--output":
         options.outputPath = next;
+        i += 1;
+        break;
+      case "--output-dir":
+        options.outputDir = next;
+        i += 1;
+        break;
+      case "--chunk":
+        options.chunkKeys.push(next.trim());
+        i += 1;
+        break;
+      case "--chunks":
+        options.chunkKeys.push(...parseChunkList(next));
         i += 1;
         break;
       case "--endpoint":
@@ -82,6 +121,10 @@ const parseArgs = (): FetchOptions => {
     }
   }
 
+  if ((options.allBayArea || options.chunkKeys.length > 0) && args.includes("--bbox")) {
+    throw new Error("Do not combine --bbox with --chunk/--chunks/--all-bay-area");
+  }
+
   return options;
 };
 
@@ -97,17 +140,19 @@ out center tags;
 `.trim();
 };
 
-const run = async () => {
-  const options = parseArgs();
-  const query = buildOverpassQuery(options.bbox, options.timeoutSeconds);
-
+const fetchOverpassPayload = async (
+  endpoint: string,
+  bbox: [number, number, number, number],
+  timeoutSeconds: number
+): Promise<{ elements: unknown[] }> => {
+  const query = buildOverpassQuery(bbox, timeoutSeconds);
   const controller = new AbortController();
-  const timeoutMs = Math.max(options.timeoutSeconds * 1000 + 5000, 15000);
+  const timeoutMs = Math.max(timeoutSeconds * 1000 + 5000, 15000);
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   let response: Response;
   try {
-    response = await fetch(options.endpoint, {
+    response = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
@@ -136,23 +181,91 @@ const run = async () => {
     throw new Error("Overpass response did not include an elements array.");
   }
 
-  const restroomElements = payload.elements.length;
-  console.log(`[seed:fetch:osm] Retrieved ${restroomElements} amenity=toilets elements from Overpass.`);
+  return { elements: payload.elements };
+};
+
+const buildJobs = (options: FetchOptions): FetchJob[] => {
+  const requestedChunkKeys = options.allBayArea ? getBayAreaChunkKeys() : options.chunkKeys;
+
+  if (requestedChunkKeys.length > 0) {
+    const jobs: FetchJob[] = [];
+    const seenChunkKeys = new Set<string>();
+    for (const chunkKey of requestedChunkKeys) {
+      if (seenChunkKeys.has(chunkKey)) {
+        continue;
+      }
+      seenChunkKeys.add(chunkKey);
+
+      const chunk = getBayAreaChunk(chunkKey);
+      if (!chunk) {
+        throw new Error(
+          `Unknown chunk "${chunkKey}". Valid chunks: ${getBayAreaChunkKeys().join(", ")}`
+        );
+      }
+
+      const outputPath =
+        requestedChunkKeys.length === 1 && options.chunkKeys.length === 1 && options.outputPath !== DEFAULT_OUTPUT
+          ? options.outputPath
+          : path.join(options.outputDir, chunk.outputFile);
+
+      jobs.push({
+        label: chunk.label,
+        bbox: chunk.bbox,
+        outputPath,
+        defaultCity: chunk.defaultCity,
+        defaultState: chunk.defaultState
+      });
+    }
+
+    return jobs;
+  }
+
+  return [
+    {
+      label: "Custom bbox",
+      bbox: options.bbox,
+      outputPath: options.outputPath
+    }
+  ];
+};
+
+const run = async () => {
+  const options = parseArgs();
+  const jobs = buildJobs(options);
+
+  for (const job of jobs) {
+    console.log(`[seed:fetch:osm] Fetching ${job.label}...`);
+    const payload = await fetchOverpassPayload(options.endpoint, job.bbox, options.timeoutSeconds);
+    console.log(`[seed:fetch:osm] Retrieved ${payload.elements.length} amenity=toilets elements for ${job.label}.`);
+
+    if (options.dryRun) {
+      continue;
+    }
+
+    const resolvedOutputPath = path.resolve(job.outputPath);
+    await mkdir(path.dirname(resolvedOutputPath), { recursive: true });
+    await writeFile(resolvedOutputPath, JSON.stringify(payload, null, 2), "utf8");
+    console.log(`[seed:fetch:osm] Wrote payload: ${resolvedOutputPath}`);
+
+    if (job.defaultCity && job.defaultState) {
+      console.log(
+        `[seed:fetch:osm] Import command: npm run seed:import:restrooms -- --input ${resolvedOutputPath} --source openstreetmap --default-city "${job.defaultCity}" --default-state "${job.defaultState}"`
+      );
+    } else {
+      console.log(
+        `[seed:fetch:osm] Import command: npm run seed:import:restrooms -- --input ${resolvedOutputPath} --source openstreetmap`
+      );
+    }
+  }
 
   if (options.dryRun) {
-    console.log("[seed:fetch:osm] Dry run complete. No file written.");
+    console.log("[seed:fetch:osm] Dry run complete. No files written.");
     return;
   }
 
-  const outputPath = path.resolve(options.outputPath);
-  await mkdir(path.dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, JSON.stringify(payload, null, 2), "utf8");
-
-  console.log(`[seed:fetch:osm] Wrote Overpass payload: ${outputPath}`);
-  console.log("[seed:fetch:osm] Next step:");
-  console.log(
-    `npm run seed:import:restrooms -- --input ${outputPath} --source openstreetmap --default-city "San Francisco" --default-state "CA"`
-  );
+  if (jobs.length > 1) {
+    console.log("[seed:fetch:osm] Completed multi-chunk fetch.");
+  }
 };
 
 run().catch((error) => {

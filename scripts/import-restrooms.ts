@@ -37,6 +37,8 @@ interface ImportBathroomRecord {
 
 interface ExistingBathroomDedupe {
   name: string;
+  address: string;
+  city: string;
   lat: number;
   lng: number;
   source: string;
@@ -48,6 +50,10 @@ const DEFAULT_CITY = "San Francisco";
 const DEFAULT_STATE = "CA";
 const DEFAULT_DISTANCE_MILES = 0.08;
 const DEFAULT_OSM_NAME = "Public Restroom";
+const OSM_GENERIC_DUPLICATE_DISTANCE_MILES = 0.02;
+const CROSS_SOURCE_STRICT_DUPLICATE_DISTANCE_MILES = 0.01;
+const STREET_CONTEXT_PATTERN =
+  /(?:\b\d{1,5}\b\s+)?[a-z0-9.'-]+\s(?:st|street|ave|avenue|blvd|boulevard|rd|road|dr|drive|ln|lane|way|pl|place|ct|court|ter|terrace|hwy|highway)\b/i;
 
 const allowedPlaceTypes = new Set<BathroomPlaceType>(bathroomPlaceTypeOptions);
 const allowedAccessTypes = new Set<BathroomAccessType>(bathroomAccessTypeOptions);
@@ -63,9 +69,10 @@ const normalizeName = (value: string) =>
     .trim();
 
 const normalizeLabel = (value: string) => value.trim().replace(/\s+/g, " ");
+const normalizeContext = (value: string) => normalizeLabel(value).toLowerCase();
 
 const isGenericOsmName = (value: string) => {
-  const normalized = normalizeLabel(value).toLowerCase();
+  const normalized = normalizeContext(value);
   return [
     "public restroom",
     "public restrooms",
@@ -79,6 +86,15 @@ const isGenericOsmName = (value: string) => {
     "bathrooms",
     "wc"
   ].includes(normalized);
+};
+
+const isGenericRestroomName = (value: string) => {
+  const normalized = normalizeContext(value);
+  return (
+    isGenericOsmName(normalized) ||
+    normalized.startsWith("public restroom - ") ||
+    normalized.startsWith("public restroom — ")
+  );
 };
 
 const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
@@ -136,7 +152,15 @@ const parseBoolean = (value: RawValue) => {
   }
 
   const normalized = value.trim().toLowerCase();
-  return ["true", "1", "yes", "y", "t", "available", "public"].includes(normalized);
+  if (["true", "1", "yes", "y", "t", "available", "public", "designated", "permissive", "customers", "customer"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "0", "no", "n", "f", "private", "restricted"].includes(normalized)) {
+    return false;
+  }
+
+  return false;
 };
 
 const parseNumber = (value: RawValue): number | null => {
@@ -165,6 +189,18 @@ const parseString = (value: RawValue): string | null => {
   return null;
 };
 
+const parseTagValue = (row: RawRecord, keys: string[]): string | null => {
+  return parseString(getValue(row, keys));
+};
+
+const parseTagValueLower = (row: RawRecord, keys: string[]) => {
+  return parseTagValue(row, keys)?.toLowerCase() ?? "";
+};
+
+const parseTagBoolean = (row: RawRecord, keys: string[]) => {
+  return parseBoolean(getValue(row, keys));
+};
+
 const getValue = (row: RawRecord, keys: string[]): RawValue => {
   const index = new Map<string, RawValue>();
   for (const [key, value] of Object.entries(row)) {
@@ -181,42 +217,104 @@ const getValue = (row: RawRecord, keys: string[]): RawValue => {
   return undefined;
 };
 
-const resolvePlaceType = (value: RawValue): BathroomPlaceType => {
-  const parsed = parseString(value)?.toLowerCase();
-  if (!parsed) {
+const inferPlaceTypeFromText = (value: string): BathroomPlaceType => {
+  if (!value) {
     return "other";
   }
 
-  if (allowedPlaceTypes.has(parsed as BathroomPlaceType)) {
-    return parsed as BathroomPlaceType;
+  if (allowedPlaceTypes.has(value as BathroomPlaceType)) {
+    return value as BathroomPlaceType;
   }
 
-  if (parsed.includes("park")) return "park";
-  if (parsed.includes("transit") || parsed.includes("station")) return "transit_station";
-  if (parsed.includes("cafe") || parsed.includes("coffee")) return "cafe";
-  if (parsed.includes("restaurant") || parsed.includes("food")) return "restaurant";
-  if (parsed.includes("library")) return "library";
-  if (parsed.includes("mall") || parsed.includes("shopping")) return "mall";
-  if (parsed.includes("gym") || parsed.includes("fitness")) return "gym";
-  if (parsed.includes("office") || parsed.includes("building")) return "office";
+  if (value.includes("park") || value.includes("playground")) return "park";
+  if (
+    value.includes("transit") ||
+    value.includes("station") ||
+    value.includes("rail") ||
+    value.includes("bus_stop") ||
+    value.includes("subway")
+  ) {
+    return "transit_station";
+  }
+
+  if (value.includes("cafe") || value.includes("coffee")) return "cafe";
+  if (value.includes("restaurant") || value.includes("food") || value.includes("fast_food")) return "restaurant";
+  if (value.includes("library")) return "library";
+  if (value.includes("mall") || value.includes("shopping") || value.includes("supermarket")) return "mall";
+  if (value.includes("gym") || value.includes("fitness") || value.includes("sports")) return "gym";
+  if (value.includes("office") || value.includes("civic") || value.includes("building")) return "office";
 
   return "other";
 };
 
-const resolveAccessType = (value: RawValue): BathroomAccessType => {
-  const parsed = parseString(value)?.toLowerCase();
-  if (!parsed) {
+const resolvePlaceType = (row: RawRecord): BathroomPlaceType => {
+  const directValue = parseString(getValue(row, ["place_type", "category", "facility_type"]))?.toLowerCase();
+  if (directValue) {
+    const inferred = inferPlaceTypeFromText(directValue);
+    if (inferred !== "other") {
+      return inferred;
+    }
+  }
+
+  const contextParts = [
+    parseTagValueLower(row, ["amenity"]),
+    parseTagValueLower(row, ["shop"]),
+    parseTagValueLower(row, ["leisure"]),
+    parseTagValueLower(row, ["tourism"]),
+    parseTagValueLower(row, ["building"]),
+    parseTagValueLower(row, ["public_transport"]),
+    parseTagValueLower(row, ["railway"]),
+    parseTagValueLower(row, ["landuse"]),
+    parseTagValueLower(row, ["operator"]),
+    parseTagValueLower(row, ["site_type"])
+  ].filter(Boolean);
+
+  if (contextParts.length === 0) {
+    return "other";
+  }
+
+  return inferPlaceTypeFromText(contextParts.join(" "));
+};
+
+const resolveAccessType = (row: RawRecord): BathroomAccessType => {
+  const directValue = parseString(getValue(row, ["access_type", "access_level"]))?.toLowerCase();
+  if (directValue && allowedAccessTypes.has(directValue as BathroomAccessType)) {
+    return directValue as BathroomAccessType;
+  }
+
+  const accessContext = [
+    parseTagValueLower(row, ["toilets:access", "access", "access_type", "access_level"]),
+    parseTagValueLower(row, ["operator"]),
+    parseTagValueLower(row, ["fee", "toilets:fee"])
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  if (!accessContext) {
     return "public";
   }
 
-  if (allowedAccessTypes.has(parsed as BathroomAccessType)) {
-    return parsed as BathroomAccessType;
+  if (
+    accessContext.includes("customer") ||
+    accessContext.includes("customers") ||
+    accessContext.includes("patron") ||
+    accessContext.includes("purchase")
+  ) {
+    return "customer_only";
   }
 
-  if (parsed.includes("customer") || parsed.includes("purchase")) return "customer_only";
-  if (parsed.includes("code") || parsed.includes("keypad")) return "code_required";
-  if (parsed.includes("staff") || parsed.includes("attendant")) return "staff_assisted";
-  if (parsed.includes("private")) return "staff_assisted";
+  if (accessContext.includes("code") || accessContext.includes("keypad") || accessContext.includes("key")) {
+    return "code_required";
+  }
+
+  if (
+    accessContext.includes("staff") ||
+    accessContext.includes("private") ||
+    accessContext.includes("employee") ||
+    accessContext.includes("attendant")
+  ) {
+    return "staff_assisted";
+  }
 
   return "public";
 };
@@ -381,19 +479,69 @@ const withMaxLength = (value: string, max = 42) => {
   return `${value.slice(0, max - 1).trimEnd()}…`;
 };
 
-const buildAddress = (row: RawRecord, fallbackCity: string): string => {
-  const fullAddress = parseString(getValue(row, ["address", "street_address", "street", "location", "location_address", "cross_street", "addr:full"]));
-  if (fullAddress) {
-    return fullAddress;
-  }
+const toTitleCase = (value: string) =>
+  value
+    .trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .map((part) => (part.length <= 2 ? part.toUpperCase() : `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`))
+    .join(" ");
 
-  const houseNumber = parseString(getValue(row, ["addr:housenumber", "house_number"]));
-  const streetName = parseString(getValue(row, ["addr:street", "road", "street_name"]));
+const buildStreetContext = (row: RawRecord) => {
+  const houseNumber = parseTagValue(row, ["addr:housenumber", "house_number"]);
+  const streetName = parseTagValue(row, ["addr:street", "road", "street_name", "street"]);
   if (streetName) {
     return [houseNumber, streetName].filter(Boolean).join(" ");
   }
 
-  const neighborhood = parseString(getValue(row, ["addr:suburb", "neighbourhood", "neighborhood", "district"]));
+  const intersection = parseTagValue(row, ["cross_street", "junction"]);
+  if (intersection && STREET_CONTEXT_PATTERN.test(intersection.toLowerCase())) {
+    return intersection;
+  }
+
+  return null;
+};
+
+const buildNeighborhoodContext = (row: RawRecord) => {
+  return parseTagValue(row, ["addr:suburb", "neighbourhood", "neighborhood", "district", "quarter"]);
+};
+
+const buildLandmarkContext = (row: RawRecord) => {
+  const candidate = parseTagValue(row, ["park", "landmark", "site_name", "operator", "brand", "network", "name:en"]);
+  if (candidate && !isGenericOsmName(candidate)) {
+    return candidate;
+  }
+
+  const leisure = parseTagValue(row, ["leisure"]);
+  if (leisure === "park") {
+    const namedArea = parseTagValue(row, ["addr:place", "addr:hamlet", "addr:locality", "city", "addr:city"]);
+    if (namedArea) {
+      return `${toTitleCase(namedArea)} Park`;
+    }
+  }
+
+  return null;
+};
+
+const buildAddress = (row: RawRecord, fallbackCity: string): string => {
+  const fullAddress = parseString(
+    getValue(row, ["address", "street_address", "street", "location", "location_address", "cross_street", "addr:full"])
+  );
+  if (fullAddress) {
+    return fullAddress;
+  }
+
+  const streetContext = buildStreetContext(row);
+  if (streetContext) {
+    return streetContext;
+  }
+
+  const landmarkContext = buildLandmarkContext(row);
+  if (landmarkContext) {
+    return `Near ${landmarkContext}`;
+  }
+
+  const neighborhood = buildNeighborhoodContext(row);
   if (neighborhood) {
     return `${neighborhood}, ${fallbackCity}`;
   }
@@ -402,22 +550,22 @@ const buildAddress = (row: RawRecord, fallbackCity: string): string => {
 };
 
 const buildOsmFallbackName = (row: RawRecord, fallbackCity: string) => {
-  const streetName = parseString(getValue(row, ["addr:street", "road", "street_name"]));
-  if (streetName) {
-    return `${DEFAULT_OSM_NAME} — ${withMaxLength(normalizeLabel(streetName))}`;
+  const landmarkContext = buildLandmarkContext(row);
+  if (landmarkContext) {
+    return `${DEFAULT_OSM_NAME} - ${withMaxLength(normalizeLabel(landmarkContext))}`;
   }
 
-  const neighborhood = parseString(getValue(row, ["addr:suburb", "neighbourhood", "neighborhood", "district", "quarter"]));
+  const streetContext = buildStreetContext(row);
+  if (streetContext) {
+    return `${DEFAULT_OSM_NAME} - ${withMaxLength(normalizeLabel(streetContext))}`;
+  }
+
+  const neighborhood = buildNeighborhoodContext(row);
   if (neighborhood) {
-    return `${DEFAULT_OSM_NAME} — ${withMaxLength(normalizeLabel(neighborhood))}`;
+    return `${DEFAULT_OSM_NAME} - ${withMaxLength(normalizeLabel(neighborhood))}`;
   }
 
-  const referencePlace = parseString(getValue(row, ["operator", "brand", "network"]));
-  if (referencePlace) {
-    return `${DEFAULT_OSM_NAME} — ${withMaxLength(normalizeLabel(referencePlace))}`;
-  }
-
-  return fallbackCity ? `${DEFAULT_OSM_NAME} — Near ${withMaxLength(normalizeLabel(fallbackCity), 26)}` : DEFAULT_OSM_NAME;
+  return fallbackCity ? `${DEFAULT_OSM_NAME} - Near ${withMaxLength(normalizeLabel(fallbackCity), 26)}` : DEFAULT_OSM_NAME;
 };
 
 const toImportRecord = (row: RawRecord, options: ImportOptions): ImportBathroomRecord | null => {
@@ -444,8 +592,8 @@ const toImportRecord = (row: RawRecord, options: ImportOptions): ImportBathroomR
   }
 
   const sourceExternalIdRaw = parseString(getValue(row, ["source_external_id", "external_id", "externalid", "objectid"]));
-  const osmType = parseString(getValue(row, ["osm_type", "type"]))?.toLowerCase();
-  const osmId = parseString(getValue(row, ["osm_id", "id"]));
+  const osmType = parseString(getValue(row, ["osm_type", "object_type", "element_type"]))?.toLowerCase();
+  const osmId = parseString(getValue(row, ["osm_id", "object_id", "element_id", "id"]));
   const sourceExternalId =
     sourceExternalIdRaw && sourceExternalIdRaw.length > 0
       ? sourceExternalIdRaw
@@ -461,22 +609,35 @@ const toImportRecord = (row: RawRecord, options: ImportOptions): ImportBathroomR
     return null;
   }
 
-  const accessType = resolveAccessType(getValue(row, ["access_type", "access", "access_level"]));
+  const accessType = resolveAccessType(row);
   const requiresPurchase =
-    parseBoolean(getValue(row, ["requires_purchase", "purchase_required", "fee"])) || accessType === "customer_only";
+    parseTagBoolean(row, ["requires_purchase", "purchase_required", "fee", "toilets:fee"]) || accessType === "customer_only";
+
+  const accessibilityValue = parseTagValueLower(row, ["wheelchair", "is_accessible", "accessible", "ada_accessible"]);
+  const isAccessible =
+    accessibilityValue.length > 0
+      ? ["yes", "true", "1", "designated", "limited"].includes(accessibilityValue)
+      : parseTagBoolean(row, ["is_accessible", "accessible", "ada_accessible", "wheelchair"]);
+
+  const genderSegregated = parseTagValueLower(row, ["gender_segregated"]);
+  const isGenderNeutral =
+    parseTagBoolean(row, ["is_gender_neutral", "gender_neutral", "all_gender", "unisex"]) ||
+    (genderSegregated.length > 0 && ["no", "false", "0"].includes(genderSegregated));
+
+  const hasBabyStation = parseTagBoolean(row, ["has_baby_station", "baby_station", "changing_table", "baby_changing_table"]);
 
   return {
     name,
-    place_type: resolvePlaceType(getValue(row, ["place_type", "category", "type", "facility_type"])),
+    place_type: resolvePlaceType(row),
     address,
     city,
     state,
     lat,
     lng,
     access_type: accessType,
-    has_baby_station: parseBoolean(getValue(row, ["has_baby_station", "baby_station", "changing_table"])),
-    is_gender_neutral: parseBoolean(getValue(row, ["is_gender_neutral", "gender_neutral", "all_gender", "unisex"])),
-    is_accessible: parseBoolean(getValue(row, ["is_accessible", "accessible", "ada_accessible", "wheelchair"])),
+    has_baby_station: hasBabyStation,
+    is_gender_neutral: isGenderNeutral,
+    is_accessible: isAccessible,
     requires_purchase: requiresPurchase,
     source,
     source_external_id: sourceExternalId,
@@ -499,6 +660,93 @@ const isLikelyDuplicateByNameAndLocation = (
   );
 
   return distance <= distanceMiles;
+};
+
+const extractGenericNameContext = (name: string) => {
+  const normalized = normalizeLabel(name);
+  const match = normalized.match(/^public restroom\s*(?:-|—)\s*(.+)$/i);
+  if (!match?.[1]) {
+    return "";
+  }
+
+  return normalizeName(match[1]);
+};
+
+const toAddressContext = (address: string, city: string) => {
+  const firstSegment = address.split(",")[0]?.trim() ?? "";
+  if (!firstSegment) {
+    return "";
+  }
+
+  const withoutNearPrefix = firstSegment.replace(/^near\s+/i, "").trim();
+  if (!withoutNearPrefix) {
+    return "";
+  }
+
+  if (city && normalizeName(withoutNearPrefix) === normalizeName(city)) {
+    return "";
+  }
+
+  return normalizeName(withoutNearPrefix);
+};
+
+const isLikelyOsmGenericOverlap = (
+  candidate: ImportBathroomRecord,
+  existing: ExistingBathroomDedupe,
+  distanceMiles: number
+) => {
+  if (candidate.source !== "openstreetmap" || existing.source !== "openstreetmap") {
+    return false;
+  }
+
+  if (!isGenericRestroomName(candidate.name) || !isGenericRestroomName(existing.name)) {
+    return false;
+  }
+
+  const distance = haversineDistanceMiles(
+    { lat: candidate.lat, lng: candidate.lng },
+    { lat: existing.lat, lng: existing.lng }
+  );
+  if (distance > Math.min(distanceMiles, OSM_GENERIC_DUPLICATE_DISTANCE_MILES)) {
+    return false;
+  }
+
+  const candidateContext = extractGenericNameContext(candidate.name) || toAddressContext(candidate.address, candidate.city);
+  const existingContext = extractGenericNameContext(existing.name) || toAddressContext(existing.address, existing.city);
+
+  if (candidateContext && existingContext) {
+    return candidateContext === existingContext || isSimilarName(candidateContext, existingContext);
+  }
+
+  return distance <= 0.008;
+};
+
+const isLikelyDuplicateWithoutExternalId = (
+  candidate: ImportBathroomRecord,
+  existing: ExistingBathroomDedupe,
+  distanceMiles: number
+) => {
+  if (isLikelyOsmGenericOverlap(candidate, existing, distanceMiles)) {
+    return true;
+  }
+
+  if (candidate.source === existing.source) {
+    return isLikelyDuplicateByNameAndLocation(candidate, existing, distanceMiles);
+  }
+
+  const distance = haversineDistanceMiles(
+    { lat: candidate.lat, lng: candidate.lng },
+    { lat: existing.lat, lng: existing.lng }
+  );
+  if (distance > Math.min(distanceMiles, CROSS_SOURCE_STRICT_DUPLICATE_DISTANCE_MILES)) {
+    return false;
+  }
+
+  if (isGenericRestroomName(candidate.name) || isGenericRestroomName(existing.name)) {
+    return false;
+  }
+
+  return isSimilarName(candidate.name, existing.name);
 };
 
 const parseArgs = (): ImportOptions => {
@@ -623,7 +871,7 @@ const run = async () => {
 
   const { data: existingRows, error: existingError } = await supabase
     .from("bathrooms")
-    .select("name, lat, lng, source, source_external_id")
+    .select("name, address, city, lat, lng, source, source_external_id")
     .neq("status", "removed")
     .limit(10000);
 
@@ -652,15 +900,28 @@ const run = async () => {
         continue;
       }
 
+      const hasExistingExternalKey = existingExternalKeys.has(key);
+      if (!hasExistingExternalKey) {
+        const overlappingGenericOsm = existing.some((existingRow) =>
+          isLikelyOsmGenericOverlap(record, existingRow, options.distanceMiles)
+        );
+        if (overlappingGenericOsm) {
+          duplicateRows += 1;
+          continue;
+        }
+      }
+
       seenExternalKeysInInput.add(key);
       upsertByExternalId.push(record);
 
-      if (!existingExternalKeys.has(key)) {
+      if (!hasExistingExternalKey) {
         existingExternalKeys.add(key);
       }
 
       existing.push({
         name: record.name,
+        address: record.address,
+        city: record.city,
         lat: record.lat,
         lng: record.lng,
         source: record.source,
@@ -670,9 +931,7 @@ const run = async () => {
       continue;
     }
 
-    const duplicate = existing.some((existingRow) =>
-      isLikelyDuplicateByNameAndLocation(record, existingRow, options.distanceMiles)
-    );
+    const duplicate = existing.some((existingRow) => isLikelyDuplicateWithoutExternalId(record, existingRow, options.distanceMiles));
 
     if (duplicate) {
       duplicateRows += 1;
@@ -682,6 +941,8 @@ const run = async () => {
     insertWithoutExternalId.push(record);
     existing.push({
       name: record.name,
+      address: record.address,
+      city: record.city,
       lat: record.lat,
       lng: record.lng,
       source: record.source,

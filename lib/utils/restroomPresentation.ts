@@ -97,17 +97,11 @@ const getNameContextFromAddress = (address: string, city: string) => {
 export const getRestroomSourceLabel = (source: BathroomSource) => {
   switch (source) {
     case "openstreetmap":
-      return "OpenStreetMap";
+      return "Community mapped";
     case "city_open_data":
-      return "City Data";
-    case "google_places":
-      return "Google Places";
-    case "partner":
-      return "Partner";
-    case "user":
-      return "Community";
+      return "Verified public facility";
     default:
-      return "Other";
+      return "Community submitted";
   }
 };
 
