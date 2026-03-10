@@ -82,9 +82,7 @@ export function MapPanel({
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Sample locations</p>
               <ul className="space-y-1 text-sm text-slate-700">
                 {restrooms.slice(0, 4).map((restroom) => (
-                  <li key={restroom.id}>
-                    • {restroom.name} ({restroom.distanceMiles.toFixed(1)} mi)
-                  </li>
+                  <li key={restroom.id}>• {restroom.name}{showDistance ? ` (${restroom.distanceMiles.toFixed(1)} mi away)` : ""}</li>
                 ))}
               </ul>
             </div>

@@ -82,11 +82,7 @@ export function RestroomCard({ restroom, showDistance = false, isHighlighted = f
           <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">
             Overall {toDisplayRating(restroom.ratings.overall)}
           </span>
-          {showDistance ? (
-            <span className="text-xs font-medium text-slate-500">{restroom.distanceMiles.toFixed(1)} mi away</span>
-          ) : (
-            <span className="text-xs font-medium text-slate-400">Enable location for distance</span>
-          )}
+          {showDistance ? <span className="text-xs font-medium text-slate-500">{restroom.distanceMiles.toFixed(1)} mi away</span> : null}
         </div>
 
         <div className="mt-3.5 flex flex-col gap-2.5">
