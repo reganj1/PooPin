@@ -20,6 +20,7 @@ interface MapPanelProps {
   className?: string;
   mapClassName?: string;
   showHeader?: boolean;
+  onExpandMap?: () => void;
 }
 
 export function MapPanel({
@@ -30,20 +31,32 @@ export function MapPanel({
   onViewportBoundsChange,
   className,
   mapClassName,
-  showHeader = true
+  showHeader = true,
+  onExpandMap
 }: MapPanelProps) {
   if (!isMapboxConfigured) {
     return (
       <section className={cn("overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm", className)}>
         {showHeader ? (
-          <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-5">
+          <header className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:px-5">
             <div>
               <h2 className="text-sm font-semibold text-slate-900">Map view</h2>
               <p className="mt-1 text-xs text-slate-500">Enable Mapbox to display live restroom pins.</p>
             </div>
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
-              {restrooms.length} shown
-            </span>
+            <div className="flex shrink-0 items-center gap-2">
+              {onExpandMap ? (
+                <button
+                  type="button"
+                  onClick={onExpandMap}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  Expand map
+                </button>
+              ) : null}
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+                {restrooms.length} shown
+              </span>
+            </div>
           </header>
         ) : null}
 
@@ -82,14 +95,25 @@ export function MapPanel({
   return (
     <section className={cn("overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm", className)}>
       {showHeader ? (
-        <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-5">
+        <header className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:px-5">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Map view</h2>
             <p className="mt-1 text-xs text-slate-500">Move the map to explore restrooms in any area.</p>
           </div>
-          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
-            {restrooms.length} shown
-          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            {onExpandMap ? (
+              <button
+                type="button"
+                onClick={onExpandMap}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Expand map
+              </button>
+            ) : null}
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+              {restrooms.length} shown
+            </span>
+          </div>
         </header>
       ) : null}
 

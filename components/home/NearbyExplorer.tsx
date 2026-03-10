@@ -176,6 +176,20 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     };
   }, [isMapExpanded]);
 
+  useEffect(() => {
+    if (!isMapExpanded || typeof window === "undefined") {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      window.dispatchEvent(new Event("resize"));
+    }, 80);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isMapExpanded, isExpandedListOpen]);
+
   const handleUseMyLocation = () => {
     setGeoError(null);
 
@@ -333,7 +347,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           onRestroomHoverChange={setListHoveredRestroomId}
           className={cn(isExpandedVariant && "p-3.5 sm:p-4")}
           scrollClassName={
-            isExpandedVariant ? "max-h-[calc(58vh-230px)] overflow-y-auto pr-1 sm:max-h-[calc(100vh-330px)] lg:max-h-[calc(100vh-330px)]" : undefined
+            isExpandedVariant ? "max-h-[280px] overflow-y-auto pr-1 sm:max-h-[calc(100vh-330px)] lg:max-h-[calc(100vh-330px)]" : undefined
           }
         />
       </div>
@@ -352,16 +366,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               className="inline-flex h-10 w-fit items-center rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isLocating ? "Locating..." : "Use my location"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsExpandedListOpen(true);
-                setIsMapExpanded(true);
-              }}
-              className="inline-flex h-10 w-fit items-center rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
-            >
-              Expand map
             </button>
 
             {userLocation ? (
@@ -401,6 +405,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               hoveredRestroomId={listHoveredRestroomId}
               onFocusedRestroomIdChange={setMapFocusedRestroomId}
               onViewportBoundsChange={handleViewportBoundsChange}
+              onExpandMap={() => {
+                setIsExpandedListOpen(true);
+                setIsMapExpanded(true);
+              }}
             />
           </div>
 
@@ -409,8 +417,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       ) : null}
 
       {isMapExpanded ? (
-        <section className="fixed inset-0 z-40 bg-slate-950/20">
-          <div className="absolute inset-0 bg-white">
+        <section className="fixed inset-0 z-[80] bg-slate-950/45 backdrop-blur-[1.5px]">
+          <div className="absolute inset-0">
             <MapPanel
               restrooms={mapRestrooms}
               userLocation={userLocation}
@@ -422,40 +430,42 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               showHeader={false}
             />
 
-            <div className="pointer-events-none absolute inset-x-3 top-3 flex items-start justify-between gap-2 sm:inset-x-4 sm:top-4">
-              <div className="pointer-events-auto rounded-xl border border-slate-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Full map mode</p>
-                <p className="mt-1 text-xs text-slate-600">Move the map to browse more restrooms across the Bay Area.</p>
-              </div>
-              <div className="pointer-events-auto flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleUseMyLocation}
-                  disabled={isLocating}
-                  className="rounded-lg border border-slate-300 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isLocating ? "Locating..." : "My location"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsExpandedListOpen((current) => !current)}
-                  className="rounded-lg border border-slate-300 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:bg-slate-50"
-                >
-                  {isExpandedListOpen ? "Hide list" : "Show list"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsMapExpanded(false)}
-                  className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800"
-                >
-                  Exit full map
-                </button>
+            <div className="pointer-events-none absolute inset-x-3 top-3 sm:inset-x-4 sm:top-4">
+              <div className="pointer-events-auto mx-auto flex w-full max-w-[1400px] flex-col gap-2 rounded-2xl border border-white/70 bg-white/95 px-3 py-2.5 shadow-xl backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Full map mode</p>
+                  <p className="mt-1 text-xs text-slate-700">Bay Area restroom map with live markers and nearby results.</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleUseMyLocation}
+                    disabled={isLocating}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isLocating ? "Locating..." : "My location"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsExpandedListOpen((current) => !current)}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                  >
+                    {isExpandedListOpen ? "Hide list" : "Show list"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsMapExpanded(false)}
+                    className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                  >
+                    Close map
+                  </button>
+                </div>
               </div>
             </div>
 
             {isExpandedListOpen ? (
-              <div className="pointer-events-none absolute inset-x-3 bottom-3 max-h-[58vh] sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-[84px] sm:max-h-none sm:w-[400px]">
-                <div className="pointer-events-auto h-full overflow-y-auto rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-xl backdrop-blur sm:p-3">
+              <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 max-h-[62vh] sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-[92px] sm:max-h-none sm:w-[400px]">
+                <div className="pointer-events-auto h-full overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl sm:p-3">
                   {renderListPanel("expanded")}
                 </div>
               </div>
