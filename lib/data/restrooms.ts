@@ -7,6 +7,7 @@ import {
   getNearbyBathrooms as getMockNearbyBathrooms
 } from "@/lib/mock/restrooms";
 import { bathroomAccessTypeOptions, bathroomPlaceTypeOptions } from "@/lib/validations/bathroom";
+import { buildTopReviewSignals, normalizeReviewQuickTags } from "@/lib/utils/reviewSignals";
 
 const DEFAULT_ORIGIN = { lat: 37.7749, lng: -122.4194 };
 const DEFAULT_LIMIT = 12;
@@ -57,6 +58,7 @@ interface ReviewRow {
   wait_rating: number;
   privacy_rating: number;
   review_text: string | null;
+  quick_tags?: string[] | null;
   visit_time: string | null;
   created_at: string;
   status: string;
@@ -133,6 +135,7 @@ const toReview = (row: ReviewRow): Review | null => {
     wait_rating: row.wait_rating,
     privacy_rating: row.privacy_rating,
     review_text: row.review_text ?? "",
+    quick_tags: normalizeReviewQuickTags(row.quick_tags ?? []),
     visit_time: row.visit_time ?? row.created_at,
     created_at: row.created_at,
     status: row.status
@@ -164,11 +167,14 @@ const buildRatingMap = (reviews: Review[]) => {
       { overall: 0, smell: 0, cleanliness: 0 }
     );
 
+    const qualitySignals = buildTopReviewSignals(bathroomReviews, 2);
+
     ratings.set(bathroomId, {
       overall: roundToOne(totals.overall / bathroomReviews.length),
       smell: roundToOne(totals.smell / bathroomReviews.length),
       cleanliness: roundToOne(totals.cleanliness / bathroomReviews.length),
-      reviewCount: bathroomReviews.length
+      reviewCount: bathroomReviews.length,
+      qualitySignals
     });
   }
 
@@ -179,7 +185,8 @@ const emptyRatings = () => ({
   overall: 0,
   smell: 0,
   cleanliness: 0,
-  reviewCount: 0
+  reviewCount: 0,
+  qualitySignals: []
 });
 
 const toNearbyBathroom = (

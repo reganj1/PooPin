@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { ReviewQuickTag } from "@/types";
+import { mapQuickTagsToDetailedRatings, normalizeReviewQuickTags, reviewQuickTagValues } from "@/lib/utils/reviewSignals";
 
 const ratingFieldSchema = z
   .number({ required_error: "Rating is required", invalid_type_error: "Rating must be a number" })
@@ -12,6 +14,7 @@ const blockedLanguagePatterns = [
 ] as const;
 
 const lowValuePhrases = new Set(["good", "bad", "ok", "okay", "fine", "nice", "clean", "dirty", "n/a", "na", "none"]);
+const MAX_QUICK_TAGS = 2;
 
 const normalizeReviewText = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
 
@@ -46,6 +49,14 @@ const reviewTextSchema = z
     message: "Add a little more detail or leave notes blank."
   });
 
+const quickTagSchema = z.enum(reviewQuickTagValues);
+
+const quickTagsSchema = z
+  .array(quickTagSchema)
+  .max(MAX_QUICK_TAGS, `Pick up to ${MAX_QUICK_TAGS} tags`)
+  .default([])
+  .transform((value) => normalizeReviewQuickTags(value));
+
 export const reviewCreateSchema = z.object({
   bathroom_id: z.string().min(1),
   overall_rating: ratingFieldSchema,
@@ -53,46 +64,35 @@ export const reviewCreateSchema = z.object({
   cleanliness_rating: ratingFieldSchema,
   wait_rating: ratingFieldSchema,
   privacy_rating: ratingFieldSchema,
-  review_text: reviewTextSchema
+  review_text: reviewTextSchema,
+  quick_tags: quickTagsSchema.optional().default([])
 });
 
 export type ReviewCreateInput = z.infer<typeof reviewCreateSchema>;
-
-export const reviewDetailChoiceSchema = z.enum(["high", "medium", "low"]);
-
-export type ReviewDetailChoice = z.infer<typeof reviewDetailChoiceSchema>;
 
 export const reviewFormSchema = z.object({
   overall_rating: z
     .number({ required_error: "Select an overall rating", invalid_type_error: "Select an overall rating" })
     .min(1, "Select an overall rating")
     .max(5, "Select an overall rating"),
-  smell_choice: reviewDetailChoiceSchema.optional(),
-  cleanliness_choice: reviewDetailChoiceSchema.optional(),
-  wait_choice: reviewDetailChoiceSchema.optional(),
-  privacy_choice: reviewDetailChoiceSchema.optional(),
+  quick_tags: quickTagsSchema,
   review_text: reviewTextSchema
 });
 
 export type ReviewFormInput = z.infer<typeof reviewFormSchema>;
 
-const detailChoiceToRating: Record<ReviewDetailChoice, number> = {
-  high: 5,
-  medium: 3,
-  low: 1
-};
-
-const toRatingFromChoice = (choice: ReviewDetailChoice | undefined, fallbackRating: number) =>
-  choice ? detailChoiceToRating[choice] : fallbackRating;
-
 export const mapReviewFormToCreateInput = (bathroomId: string, input: ReviewFormInput): ReviewCreateInput => {
+  const quickTags = normalizeReviewQuickTags(input.quick_tags).slice(0, MAX_QUICK_TAGS) as ReviewQuickTag[];
+  const detailRatings = mapQuickTagsToDetailedRatings(quickTags, input.overall_rating);
+
   return {
     bathroom_id: bathroomId,
     overall_rating: input.overall_rating,
-    smell_rating: toRatingFromChoice(input.smell_choice, input.overall_rating),
-    cleanliness_rating: toRatingFromChoice(input.cleanliness_choice, input.overall_rating),
-    wait_rating: toRatingFromChoice(input.wait_choice, input.overall_rating),
-    privacy_rating: toRatingFromChoice(input.privacy_choice, input.overall_rating),
-    review_text: input.review_text
+    smell_rating: detailRatings.smell_rating,
+    cleanliness_rating: detailRatings.cleanliness_rating,
+    wait_rating: detailRatings.wait_rating,
+    privacy_rating: detailRatings.privacy_rating,
+    review_text: input.review_text,
+    quick_tags: quickTags
   };
 };

@@ -13,6 +13,7 @@ type ReviewInsertRow = Pick<
   | "wait_rating"
   | "privacy_rating"
   | "review_text"
+  | "quick_tags"
   | "visit_time"
   | "status"
 >;
@@ -32,6 +33,7 @@ const toInsertPayload = (input: ReviewCreateInput, reviewId: string): ReviewInse
     wait_rating: input.wait_rating,
     privacy_rating: input.privacy_rating,
     review_text: input.review_text,
+    quick_tags: input.quick_tags ?? [],
     visit_time: new Date().toISOString(),
     status: "active"
   };
@@ -72,6 +74,10 @@ export const toAddReviewErrorMessage = (error: unknown): string => {
 
   if (message.includes("foreign key")) {
     return "Could not attach review to this restroom. Verify restroom_id and database constraints.";
+  }
+
+  if (message.includes("quick_tags") && message.includes("column")) {
+    return "Review tags are not available yet. Run the latest Supabase migrations and retry.";
   }
 
   return error.message || fallback;

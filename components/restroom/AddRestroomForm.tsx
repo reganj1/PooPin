@@ -49,6 +49,10 @@ const defaultValues: BathroomCreateInput = {
 
 const SUBMISSION_COOLDOWN_MS = 60_000;
 const LAST_SUBMISSION_STORAGE_KEY = "poopin:add-restroom:last-submit-at";
+const DEFAULT_COORDINATES = {
+  lat: defaultValues.lat,
+  lng: defaultValues.lng
+};
 
 interface FieldProps {
   label: string;
@@ -117,10 +121,10 @@ export function AddRestroomForm() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccessId, setSubmitSuccessId] = useState<string | null>(null);
   const [duplicateBathroomId, setDuplicateBathroomId] = useState<string | null>(null);
-  const [showCoordinates, setShowCoordinates] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [isResolvingAddress, setIsResolvingAddress] = useState(false);
   const [addressAssistMessage, setAddressAssistMessage] = useState<string | null>(null);
+  const [selectedCoordinates, setSelectedCoordinates] = useState(DEFAULT_COORDINATES);
   const [serverFieldErrors, setServerFieldErrors] = useState<ServerFieldErrors>({});
   const geocodeAbortRef = useRef<AbortController | null>(null);
   const lastResolvedCoordinateKeyRef = useRef<string>("");
@@ -130,17 +134,13 @@ export function AddRestroomForm() {
     handleSubmit,
     reset,
     setValue,
-    watch,
     formState: { errors, isSubmitting }
   } = useForm<BathroomCreateInput>({
     resolver: zodResolver(bathroomCreateSchema),
     defaultValues
   });
 
-  const lat = watch("lat");
-  const lng = watch("lng");
   const getFieldError = (field: keyof BathroomCreateInput) => errors[field]?.message ?? serverFieldErrors[field];
-  const hasAdvancedLocationError = Boolean(getFieldError("lat") || getFieldError("lng"));
 
   const resolveAddressFromCoordinates = useCallback(
     async (coordinates: { lat: number; lng: number }) => {
@@ -155,7 +155,7 @@ export function AddRestroomForm() {
       geocodeAbortRef.current = controller;
 
       setIsResolvingAddress(true);
-      setAddressAssistMessage("Updating address from your selected pin...");
+      setAddressAssistMessage("Finding nearby location details...");
 
       try {
         const geocodeResult = await reverseGeocodeCoordinates(coordinates, controller.signal);
@@ -164,7 +164,7 @@ export function AddRestroomForm() {
         }
 
         if (!geocodeResult) {
-          setAddressAssistMessage("Couldn’t find an exact address. You can edit location details manually.");
+          setAddressAssistMessage("We couldn’t fetch location details right now. You can enter address details manually.");
           return;
         }
 
@@ -180,10 +180,14 @@ export function AddRestroomForm() {
           setValue("state", geocodeResult.state, { shouldDirty: true, shouldValidate: true });
         }
 
-        setAddressAssistMessage("Address details updated from your selected location.");
+        setAddressAssistMessage(
+          geocodeResult.resolution === "exact_address" || geocodeResult.resolution === "street"
+            ? "Address filled from map location. Edit if needed."
+            : "We found the nearby area. You can adjust the details if needed."
+        );
       } catch {
         if (!controller.signal.aborted) {
-          setAddressAssistMessage("Couldn’t auto-fill address for this pin. You can enter it manually.");
+          setAddressAssistMessage("We couldn’t fetch location details right now. You can enter address details manually.");
         }
       } finally {
         if (!controller.signal.aborted) {
@@ -200,14 +204,22 @@ export function AddRestroomForm() {
     };
   }, []);
 
-  const handleCoordinatesChange = useCallback(
+  const applySelectedCoordinates = useCallback(
     (coordinates: { lat: number; lng: number }) => {
+      setSelectedCoordinates(coordinates);
       setValue("lat", coordinates.lat, { shouldDirty: true, shouldValidate: true });
       setValue("lng", coordinates.lng, { shouldDirty: true, shouldValidate: true });
       setSubmitError(null);
       void resolveAddressFromCoordinates(coordinates);
     },
     [resolveAddressFromCoordinates, setValue]
+  );
+
+  const handleCoordinatesChange = useCallback(
+    (coordinates: { lat: number; lng: number }) => {
+      applySelectedCoordinates(coordinates);
+    },
+    [applySelectedCoordinates]
   );
 
   const handleUseMyLocation = () => {
@@ -222,7 +234,7 @@ export function AddRestroomForm() {
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        handleCoordinatesChange({
+        applySelectedCoordinates({
           lat: Number(position.coords.latitude.toFixed(6)),
           lng: Number(position.coords.longitude.toFixed(6))
         });
@@ -287,9 +299,9 @@ export function AddRestroomForm() {
         city: values.city,
         state: values.state
       });
+      setSelectedCoordinates(DEFAULT_COORDINATES);
       setAddressAssistMessage(null);
       lastResolvedCoordinateKeyRef.current = "";
-      setShowCoordinates(false);
     } catch {
       setSubmitError("Could not submit this restroom right now. Please check your connection and try again.");
     }
@@ -364,16 +376,17 @@ export function AddRestroomForm() {
           </div>
 
           <LocationPickerMap
-            coordinates={{
-              lat: typeof lat === "number" ? lat : defaultValues.lat,
-              lng: typeof lng === "number" ? lng : defaultValues.lng
-            }}
+            coordinates={selectedCoordinates}
             onCoordinatesChange={handleCoordinatesChange}
           />
 
           <p className="mt-2 text-xs text-slate-500">
             {isResolvingAddress ? "Finding address details..." : addressAssistMessage ?? "Address details fill in automatically from your pin."}
           </p>
+          <p className="mt-1 text-xs text-slate-500">Need to refine location? Move the pin directly on the map.</p>
+
+          <input type="hidden" {...register("lat", { valueAsNumber: true })} />
+          <input type="hidden" {...register("lng", { valueAsNumber: true })} />
 
           <div className="mt-4 space-y-4">
             <Field label="Address" htmlFor="address" error={getFieldError("address")}>
@@ -405,48 +418,6 @@ export function AddRestroomForm() {
                 />
               </Field>
             </div>
-          </div>
-
-          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <button
-              type="button"
-              onClick={() => setShowCoordinates((current) => !current)}
-              className="inline-flex w-fit rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-            >
-              {showCoordinates ? "Hide pin adjustment" : "Adjust pin"}
-            </button>
-
-            {showCoordinates ? (
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <Field label="Latitude" htmlFor="lat" error={getFieldError("lat")}>
-                  <input
-                    id="lat"
-                    type="number"
-                    step="any"
-                    {...register("lat", {
-                      setValueAs: (value) => (value === "" ? undefined : Number(value))
-                    })}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                    placeholder="37.7749"
-                  />
-                </Field>
-
-                <Field label="Longitude" htmlFor="lng" error={getFieldError("lng")}>
-                  <input
-                    id="lng"
-                    type="number"
-                    step="any"
-                    {...register("lng", {
-                      setValueAs: (value) => (value === "" ? undefined : Number(value))
-                    })}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                    placeholder="-122.4194"
-                  />
-                </Field>
-              </div>
-            ) : hasAdvancedLocationError ? (
-              <p className="mt-2 text-xs font-medium text-rose-600">Please open Adjust pin to fix the location values.</p>
-            ) : null}
           </div>
         </section>
 
@@ -546,9 +517,9 @@ export function AddRestroomForm() {
                 setServerFieldErrors({});
                 setSubmitSuccessId(null);
                 setDuplicateBathroomId(null);
+                setSelectedCoordinates(DEFAULT_COORDINATES);
                 setAddressAssistMessage(null);
                 lastResolvedCoordinateKeyRef.current = "";
-                setShowCoordinates(false);
               }}
               disabled={isSubmitting}
               className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"

@@ -6,6 +6,7 @@ import { RestroomTags } from "@/components/restroom/RestroomTags";
 import { cn } from "@/lib/utils/cn";
 import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
 import { getRestroomCardSubtitle, getRestroomDisplayName, getRestroomSourceLabel } from "@/lib/utils/restroomPresentation";
+import { getReviewQuickTagDescriptor, reviewQuickTagToneClassName } from "@/lib/utils/reviewSignals";
 
 interface RestroomCardProps {
   restroom: NearbyBathroom;
@@ -46,6 +47,7 @@ export function RestroomCard({ restroom, showDistance = false, isHighlighted = f
   const displayName = getRestroomDisplayName(restroom);
   const subtitle = getRestroomCardSubtitle(restroom);
   const sourceLabel = getRestroomSourceLabel(restroom.source);
+  const qualitySignals = restroom.ratings.qualitySignals.slice(0, 2);
 
   const handleBlurCapture = (event: FocusEvent<HTMLElement>) => {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -84,6 +86,29 @@ export function RestroomCard({ restroom, showDistance = false, isHighlighted = f
           </span>
           {showDistance ? <span className="text-xs font-medium text-slate-500">{restroom.distanceMiles.toFixed(1)} mi away</span> : null}
         </div>
+
+        {qualitySignals.length > 0 ? (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {qualitySignals.map((signal) => {
+              const descriptor = getReviewQuickTagDescriptor(signal);
+              if (!descriptor) {
+                return null;
+              }
+
+              return (
+                <span
+                  key={signal}
+                  className={cn(
+                    "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                    reviewQuickTagToneClassName[descriptor.tone]
+                  )}
+                >
+                  {descriptor.icon} {descriptor.label}
+                </span>
+              );
+            })}
+          </div>
+        ) : null}
 
         <div className="mt-3.5 flex flex-col gap-2.5">
           <RatingPills ratings={restroom.ratings} />

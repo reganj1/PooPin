@@ -1,6 +1,7 @@
 import { Review } from "@/types";
 import { cn } from "@/lib/utils/cn";
-import { reviewToneClassName, toReviewDetailChips } from "@/lib/utils/reviewPresentation";
+import { toReviewQuickTagChips } from "@/lib/utils/reviewPresentation";
+import { getReviewQuickTagDescriptor, reviewQuickTagToneClassName } from "@/lib/utils/reviewSignals";
 import { ReviewReportAction } from "@/components/review/ReviewReportAction";
 
 interface ReviewListProps {
@@ -36,17 +37,24 @@ export function ReviewList({ reviews }: ReviewListProps) {
           </div>
 
           <div className="mt-2.5 flex flex-wrap gap-2">
-            {toReviewDetailChips(review).map((chip) => (
-              <span
-                key={chip.key}
-                className={cn(
-                  "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
-                  reviewToneClassName[chip.descriptor.tone]
-                )}
-              >
-                {chip.title}: {chip.descriptor.label}
-              </span>
-            ))}
+            {toReviewQuickTagChips(review).map((tag) => {
+              const descriptor = getReviewQuickTagDescriptor(tag);
+              if (!descriptor) {
+                return null;
+              }
+
+              return (
+                <span
+                  key={tag}
+                  className={cn(
+                    "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+                    reviewQuickTagToneClassName[descriptor.tone]
+                  )}
+                >
+                  {descriptor.icon} {descriptor.label}
+                </span>
+              );
+            })}
           </div>
 
           {review.review_text.trim().length > 0 ? (

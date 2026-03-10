@@ -1,4 +1,5 @@
 import { Bathroom, NearbyBathroom, Review } from "@/types";
+import { buildTopReviewSignals } from "@/lib/utils/reviewSignals";
 
 const DEFAULT_ORIGIN = { lat: 37.7749, lng: -122.4194 };
 
@@ -456,7 +457,8 @@ const getRatingsForBathroom = (bathroomId: string) => {
       overall: 0,
       smell: 0,
       cleanliness: 0,
-      reviewCount: 0
+      reviewCount: 0,
+      qualitySignals: []
     };
   }
 
@@ -474,7 +476,8 @@ const getRatingsForBathroom = (bathroomId: string) => {
     overall: roundToOne(totals.overall / reviews.length),
     smell: roundToOne(totals.smell / reviews.length),
     cleanliness: roundToOne(totals.cleanliness / reviews.length),
-    reviewCount: reviews.length
+    reviewCount: reviews.length,
+    qualitySignals: buildTopReviewSignals(reviews, 2)
   };
 };
 

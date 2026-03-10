@@ -7,6 +7,7 @@ import {
   describeWait,
   reviewToneClassName
 } from "@/lib/utils/reviewPresentation";
+import { getReviewQuickTagDescriptor, reviewQuickTagToneClassName } from "@/lib/utils/reviewSignals";
 import { Review } from "@/types";
 
 interface ReviewSummaryProps {
@@ -55,6 +56,25 @@ export function ReviewSummary({ reviews }: ReviewSummaryProps) {
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
+        {summary.topSignals.map((signal) => {
+          const descriptor = getReviewQuickTagDescriptor(signal);
+          if (!descriptor) {
+            return null;
+          }
+
+          return (
+            <span
+              key={signal}
+              className={cn(
+                "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+                reviewQuickTagToneClassName[descriptor.tone]
+              )}
+            >
+              {descriptor.icon} {descriptor.label}
+            </span>
+          );
+        })}
+
         {aggregateChips.map((chip) => (
           <span
             key={chip.title}

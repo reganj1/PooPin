@@ -1,4 +1,6 @@
 import { Review } from "@/types";
+import { ReviewQuickTag } from "@/types";
+import { buildTopReviewSignals, getReviewQuickTagsForDisplay } from "@/lib/utils/reviewSignals";
 
 type ReviewRatingField = "cleanliness_rating" | "smell_rating" | "wait_rating" | "privacy_rating";
 
@@ -16,6 +18,7 @@ export interface ReviewAggregateSummary {
   smell: number;
   wait: number;
   privacy: number;
+  topSignals: ReviewQuickTag[];
 }
 
 const roundToOne = (value: number) => Math.round(value * 10) / 10;
@@ -110,7 +113,8 @@ export const buildReviewAggregateSummary = (reviews: Review[]): ReviewAggregateS
     cleanliness: roundToOne(totals.cleanliness / reviews.length),
     smell: roundToOne(totals.smell / reviews.length),
     wait: roundToOne(totals.wait / reviews.length),
-    privacy: roundToOne(totals.privacy / reviews.length)
+    privacy: roundToOne(totals.privacy / reviews.length),
+    topSignals: buildTopReviewSignals(reviews, 2)
   };
 };
 
@@ -142,3 +146,7 @@ export const toReviewDetailChips = (review: Pick<Review, ReviewRatingField>) => 
     }
   ] as const;
 };
+
+export const toReviewQuickTagChips = (
+  review: Pick<Review, "quick_tags" | "smell_rating" | "cleanliness_rating" | "wait_rating" | "privacy_rating">
+) => getReviewQuickTagsForDisplay(review).slice(0, 2);

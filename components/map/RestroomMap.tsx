@@ -7,6 +7,7 @@ import type { FeatureCollection, Point } from "geojson";
 import { NearbyBathroom } from "@/types";
 import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
 import { getRestroomDisplayName, getRestroomPopupAddress } from "@/lib/utils/restroomPresentation";
+import { getReviewQuickTagDescriptor, normalizeReviewQuickTags } from "@/lib/utils/reviewSignals";
 
 interface RestroomMapProps {
   restrooms: NearbyBathroom[];
@@ -31,6 +32,8 @@ interface RestroomFeatureProperties {
   name: string;
   subtitle: string;
   distance_miles: number;
+  overall_rating: number;
+  quality_signals: string;
 }
 
 const SOURCE_ID = "restrooms-source";
@@ -59,7 +62,9 @@ const toFeatureCollection = (restrooms: NearbyBathroom[]): FeatureCollection<Poi
           id: restroom.id,
           name: getRestroomDisplayName(restroom),
           subtitle: getRestroomPopupAddress(restroom),
-          distance_miles: restroom.distanceMiles
+          distance_miles: restroom.distanceMiles,
+          overall_rating: restroom.ratings.overall,
+          quality_signals: restroom.ratings.qualitySignals.join("|")
         }
       }))
   };
@@ -367,7 +372,7 @@ export function RestroomMap({
           return;
         }
 
-        const { id, name, subtitle, distance_miles } = properties;
+        const { id, name, subtitle, distance_miles, overall_rating, quality_signals } = properties;
         if (!id || !name || !subtitle) {
           return;
         }
@@ -396,7 +401,38 @@ export function RestroomMap({
         subtitleLine.textContent = subtitle;
         popupContent.appendChild(subtitleLine);
 
-        const distanceLabel = showDistance ? toDistanceLabel(distance_miles) : "";
+        const qualitySignals = normalizeReviewQuickTags((quality_signals ?? "").split("|")).slice(0, 2);
+        const overallRatingValue =
+          typeof overall_rating === "number"
+            ? overall_rating
+            : typeof overall_rating === "string"
+              ? Number.parseFloat(overall_rating)
+              : NaN;
+        const qualityLine = document.createElement("p");
+        qualityLine.className = "text-xs font-semibold text-slate-700";
+
+        const overallRatingLabel =
+          Number.isFinite(overallRatingValue) && overallRatingValue > 0 ? `⭐ ${overallRatingValue.toFixed(1)}` : "⭐ N/A";
+        if (qualitySignals.length > 0) {
+          const signalLabel = qualitySignals
+            .map((signal) => {
+              const descriptor = getReviewQuickTagDescriptor(signal);
+              return descriptor ? `${descriptor.icon} ${descriptor.label}` : signal;
+            })
+            .join(" • ");
+          qualityLine.textContent = `${overallRatingLabel} • ${signalLabel}`;
+        } else {
+          qualityLine.textContent = overallRatingLabel;
+        }
+        popupContent.appendChild(qualityLine);
+
+        const distanceMilesValue =
+          typeof distance_miles === "number"
+            ? distance_miles
+            : typeof distance_miles === "string"
+              ? Number.parseFloat(distance_miles)
+              : NaN;
+        const distanceLabel = showDistance ? toDistanceLabel(distanceMilesValue) : "";
         if (showDistance && distanceLabel) {
           const distanceLine = document.createElement("p");
           distanceLine.className = "text-xs font-semibold text-slate-700";

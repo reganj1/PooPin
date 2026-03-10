@@ -14,6 +14,7 @@ export type BathroomAccessType = "public" | "customer_only" | "code_required" | 
 export type BathroomSource = "user" | "google_places" | "city_open_data" | "openstreetmap" | "partner" | "other";
 
 export type ModerationStatus = "active" | "pending" | "flagged" | "removed";
+export type ReviewQuickTag = "clean" | "smelly" | "no_line" | "crowded" | "no_toilet_paper" | "locked";
 
 export interface Bathroom {
   id: string;
@@ -46,6 +47,7 @@ export interface Review {
   wait_rating: number;
   privacy_rating: number;
   review_text: string;
+  quick_tags?: ReviewQuickTag[];
   visit_time: string;
   created_at: string;
   status: ModerationStatus;
@@ -73,6 +75,7 @@ export interface BathroomRatingSummary {
   smell: number;
   cleanliness: number;
   reviewCount: number;
+  qualitySignals: ReviewQuickTag[];
 }
 
 export interface NearbyBathroom extends Bathroom {

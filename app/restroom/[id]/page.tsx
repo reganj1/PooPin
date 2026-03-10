@@ -14,6 +14,7 @@ import { getApprovedBathroomPhotosData } from "@/lib/data/photos";
 import { getBathroomByIdData, getBathroomReviewsData } from "@/lib/data/restrooms";
 import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
 import { getRestroomDetailLocationLine, getRestroomDisplayName, getRestroomSourceLabel } from "@/lib/utils/restroomPresentation";
+import { getReviewQuickTagDescriptor, reviewQuickTagToneClassName } from "@/lib/utils/reviewSignals";
 
 interface RestroomDetailPageProps {
   params: Promise<{
@@ -134,6 +135,25 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
 
         <div className="mt-5 space-y-3">
           <RatingPills ratings={restroom.ratings} />
+          {restroom.ratings.qualitySignals.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {restroom.ratings.qualitySignals.slice(0, 2).map((signal) => {
+                const descriptor = getReviewQuickTagDescriptor(signal);
+                if (!descriptor) {
+                  return null;
+                }
+
+                return (
+                  <span
+                    key={signal}
+                    className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${reviewQuickTagToneClassName[descriptor.tone]}`}
+                  >
+                    {descriptor.icon} {descriptor.label}
+                  </span>
+                );
+              })}
+            </div>
+          ) : null}
           <RestroomTags restroom={restroom} />
         </div>
 
