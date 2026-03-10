@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils/cn";
 interface RestroomListProps {
   restrooms: NearbyBathroom[];
   helperText?: string;
+  showDistance?: boolean;
   highlightedRestroomId?: string | null;
   onRestroomHoverChange?: (restroomId: string | null) => void;
   className?: string;
@@ -14,6 +15,7 @@ interface RestroomListProps {
 export function RestroomList({
   restrooms,
   helperText = "Showing nearby restrooms for the current map context.",
+  showDistance = false,
   highlightedRestroomId = null,
   onRestroomHoverChange,
   className,
@@ -41,6 +43,7 @@ export function RestroomList({
             <RestroomCard
               key={restroom.id}
               restroom={restroom}
+              showDistance={showDistance}
               isHighlighted={highlightedRestroomId === restroom.id}
               onHoverChange={(isHovering) => onRestroomHoverChange?.(isHovering ? restroom.id : null)}
             />

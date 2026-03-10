@@ -100,14 +100,14 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
             <p className="mt-2 text-sm text-slate-600">{locationLine}</p>
 
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                {restroom.distanceMiles.toFixed(1)} mi away
-              </span>
               <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
                 {sourceLabel}
               </span>
               <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-500">
                 Added {formatDate(restroom.created_at)}
+              </span>
+              <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                Enable location on the map for live distance
               </span>
             </div>
           </div>

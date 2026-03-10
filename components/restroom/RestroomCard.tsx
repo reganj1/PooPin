@@ -9,6 +9,7 @@ import { getRestroomCardSubtitle, getRestroomDisplayName, getRestroomSourceLabel
 
 interface RestroomCardProps {
   restroom: NearbyBathroom;
+  showDistance?: boolean;
   isHighlighted?: boolean;
   onHoverChange?: (isHovering: boolean) => void;
 }
@@ -39,7 +40,7 @@ function NavigateIcon({ className }: { className?: string }) {
   );
 }
 
-export function RestroomCard({ restroom, isHighlighted = false, onHoverChange }: RestroomCardProps) {
+export function RestroomCard({ restroom, showDistance = false, isHighlighted = false, onHoverChange }: RestroomCardProps) {
   const detailHref = `/restroom/${restroom.id}`;
   const navigateHref = getGoogleMapsDirectionsUrl(restroom.lat, restroom.lng);
   const displayName = getRestroomDisplayName(restroom);
@@ -81,7 +82,11 @@ export function RestroomCard({ restroom, isHighlighted = false, onHoverChange }:
           <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">
             Overall {toDisplayRating(restroom.ratings.overall)}
           </span>
-          <span className="text-xs font-medium text-slate-500">{restroom.distanceMiles.toFixed(1)} mi away</span>
+          {showDistance ? (
+            <span className="text-xs font-medium text-slate-500">{restroom.distanceMiles.toFixed(1)} mi away</span>
+          ) : (
+            <span className="text-xs font-medium text-slate-400">Enable location for distance</span>
+          )}
         </div>
 
         <div className="mt-3.5 flex flex-col gap-2.5">

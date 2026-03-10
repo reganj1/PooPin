@@ -22,7 +22,7 @@ interface MapBounds {
   maxLng: number;
 }
 
-type SortMode = "closest" | "best_rated";
+type SortMode = "closest" | "recommended";
 
 interface FilterState {
   publicOnly: boolean;
@@ -34,7 +34,6 @@ interface BoundsApiResponse {
   restrooms: NearbyBathroom[];
 }
 
-const DEFAULT_CITY_CENTER: Coordinate = { lat: 37.7749, lng: -122.4194 };
 const LIST_LIMIT = 20;
 const roundToOne = (value: number) => Math.round(value * 10) / 10;
 const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
@@ -78,20 +77,25 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [isExpandedListOpen, setIsExpandedListOpen] = useState(true);
   const [listHoveredRestroomId, setListHoveredRestroomId] = useState<string | null>(null);
   const [mapFocusedRestroomId, setMapFocusedRestroomId] = useState<string | null>(null);
-  const [sortMode, setSortMode] = useState<SortMode>("closest");
+  const [sortMode, setSortMode] = useState<SortMode>("recommended");
   const [filters, setFilters] = useState<FilterState>({
     publicOnly: false,
     accessible: false,
     babyStation: false
   });
   const [mapRestrooms, setMapRestrooms] = useState<NearbyBathroom[]>(initialRestrooms);
-  const [viewportCenter, setViewportCenter] = useState<Coordinate>(DEFAULT_CITY_CENTER);
 
   const latestBoundsKeyRef = useRef<string>("");
   const activeBoundsRequestIdRef = useRef(0);
-  const distanceOrigin = userLocation ?? viewportCenter;
+  const locationWatchIdRef = useRef<number | null>(null);
+  const hasRealUserLocation = userLocation !== null;
+  const distanceOrigin = userLocation;
 
   const listBaseRestrooms = useMemo(() => {
+    if (!distanceOrigin) {
+      return [...mapRestrooms];
+    }
+
     return [...mapRestrooms].map((restroom) => ({
       ...restroom,
       distanceMiles: roundToOne(haversineDistanceMiles(distanceOrigin, { lat: restroom.lat, lng: restroom.lng }))
@@ -112,7 +116,11 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       return true;
     });
 
-    if (sortMode === "best_rated") {
+    if (sortMode === "closest" && hasRealUserLocation) {
+      return [...filtered].sort((a, b) => a.distanceMiles - b.distanceMiles).slice(0, LIST_LIMIT);
+    }
+
+    if (sortMode === "recommended" || !hasRealUserLocation) {
       return [...filtered]
         .sort((a, b) => {
           if (b.ratings.overall !== a.ratings.overall) {
@@ -121,22 +129,25 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           if (b.ratings.reviewCount !== a.ratings.reviewCount) {
             return b.ratings.reviewCount - a.ratings.reviewCount;
           }
-          return a.distanceMiles - b.distanceMiles;
+          return a.name.localeCompare(b.name);
         })
         .slice(0, LIST_LIMIT);
     }
 
-    return [...filtered].sort((a, b) => a.distanceMiles - b.distanceMiles).slice(0, LIST_LIMIT);
-  }, [filters, listBaseRestrooms, sortMode]);
+    return filtered.slice(0, LIST_LIMIT);
+  }, [filters, hasRealUserLocation, listBaseRestrooms, sortMode]);
 
   const listHelperText = useMemo(() => {
-    const sourceText = userLocation ? "your location" : "the current map center";
-    const areaText = userLocation ? "current map area around you" : "currently visible map area";
-    if (sortMode === "best_rated") {
-      return `Showing ${areaText}. Sorted by best rated with distance from ${sourceText}.`;
+    if (!hasRealUserLocation) {
+      return "Showing the currently visible map area. Enable location to see distance from you and sort by closest.";
     }
-    return `Showing ${areaText}. Sorted by closest distance from ${sourceText}.`;
-  }, [sortMode, userLocation]);
+
+    if (sortMode === "closest") {
+      return "Showing the currently visible map area. Sorted by distance from your live location.";
+    }
+
+    return "Showing the currently visible map area. Sorted by recommended quality near your location.";
+  }, [hasRealUserLocation, sortMode]);
 
   const highlightedListRestroomId = listHoveredRestroomId ?? mapFocusedRestroomId;
   const toggleFilter = (filterKey: keyof FilterState) => {
@@ -145,6 +156,17 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       [filterKey]: !current[filterKey]
     }));
   };
+
+  const stopLocationWatch = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      return;
+    }
+
+    if (locationWatchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(locationWatchIdRef.current);
+      locationWatchIdRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (!isMapExpanded || typeof document === "undefined") {
@@ -196,6 +218,18 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     };
   }, [isMapExpanded, isExpandedListOpen]);
 
+  useEffect(() => {
+    if (!hasRealUserLocation && sortMode === "closest") {
+      setSortMode("recommended");
+    }
+  }, [hasRealUserLocation, sortMode]);
+
+  useEffect(() => {
+    return () => {
+      stopLocationWatch();
+    };
+  }, [stopLocationWatch]);
+
   const handleUseMyLocation = () => {
     setGeoError(null);
 
@@ -205,34 +239,43 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       return;
     }
 
+    if (locationWatchIdRef.current !== null) {
+      return;
+    }
+
     setIsLocating(true);
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setUserLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
-        setGeoError(null);
-        setIsLocating(false);
-      },
-      (error) => {
-        setGeoError(toGeoErrorMessage(error));
-        setUserLocation(null);
-        setIsLocating(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 60000
-      }
-    );
+    try {
+      const watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          setUserLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
+          setGeoError(null);
+          setIsLocating(false);
+        },
+        (error) => {
+          setGeoError(toGeoErrorMessage(error));
+          setIsLocating(false);
+
+          if (error.code === error.PERMISSION_DENIED) {
+            setUserLocation(null);
+            stopLocationWatch();
+          }
+        },
+        {
+          enableHighAccuracy: false,
+          timeout: 12000,
+          maximumAge: 15000
+        }
+      );
+
+      locationWatchIdRef.current = watchId;
+    } catch {
+      setGeoError("Could not enable live location updates. Showing map results without user distance.");
+      setIsLocating(false);
+    }
   };
 
   const handleViewportBoundsChange = useCallback((bounds: MapBounds) => {
-    const center = {
-      lat: (bounds.minLat + bounds.maxLat) / 2,
-      lng: (bounds.minLng + bounds.maxLng) / 2
-    };
-    setViewportCenter(center);
-
     const nextBoundsKey = toBoundsKey(bounds);
     if (latestBoundsKeyRef.current === nextBoundsKey) {
       return;
@@ -339,8 +382,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 onChange={(event) => setSortMode(event.target.value as SortMode)}
                 className="h-9 w-[180px] rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
               >
-                <option value="closest">Closest</option>
-                <option value="best_rated">Best rated</option>
+                <option value="recommended">Recommended</option>
+                <option value="closest" disabled={!hasRealUserLocation}>
+                  Closest to you
+                </option>
               </select>
             </div>
           </div>
@@ -349,6 +394,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         <RestroomList
           restrooms={listRestrooms}
           helperText={listHelperText}
+          showDistance={hasRealUserLocation}
           highlightedRestroomId={highlightedListRestroomId}
           onRestroomHoverChange={setListHoveredRestroomId}
           className={cn(isExpandedVariant && "p-3.5 sm:p-4")}
@@ -371,15 +417,15 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               disabled={isLocating}
               className="inline-flex h-10 w-fit items-center rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isLocating ? "Locating..." : "Use my location"}
+              {isLocating ? "Locating..." : hasRealUserLocation ? "Location on" : "Use my location"}
             </button>
 
-            {userLocation ? (
+            {hasRealUserLocation ? (
               <p className="text-xs font-medium text-emerald-700 sm:text-sm">
-                Showing nearby results around your location.
+                Showing distance and closest sorting from your live location.
               </p>
             ) : (
-              <p className="text-xs text-slate-500 sm:text-sm">Browsing from the current map view.</p>
+              <p className="text-xs text-slate-500 sm:text-sm">Browsing this map area. Enable location to see distance from you.</p>
             )}
           </div>
 
@@ -408,6 +454,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
             <MapPanel
               restrooms={mapRestrooms}
               userLocation={userLocation}
+              showDistance={hasRealUserLocation}
               hoveredRestroomId={listHoveredRestroomId}
               onFocusedRestroomIdChange={setMapFocusedRestroomId}
               onViewportBoundsChange={handleViewportBoundsChange}
@@ -428,6 +475,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
             <MapPanel
               restrooms={mapRestrooms}
               userLocation={userLocation}
+              showDistance={hasRealUserLocation}
               hoveredRestroomId={listHoveredRestroomId}
               onFocusedRestroomIdChange={setMapFocusedRestroomId}
               onViewportBoundsChange={handleViewportBoundsChange}

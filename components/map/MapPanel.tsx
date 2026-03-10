@@ -9,6 +9,7 @@ interface MapPanelProps {
     lat: number;
     lng: number;
   } | null;
+  showDistance?: boolean;
   hoveredRestroomId?: string | null;
   onFocusedRestroomIdChange?: (restroomId: string | null) => void;
   onViewportBoundsChange?: (bounds: {
@@ -26,6 +27,7 @@ interface MapPanelProps {
 export function MapPanel({
   restrooms,
   userLocation = null,
+  showDistance = false,
   hoveredRestroomId = null,
   onFocusedRestroomIdChange,
   onViewportBoundsChange,
@@ -122,6 +124,7 @@ export function MapPanel({
           restrooms={restrooms}
           accessToken={MAPBOX_ACCESS_TOKEN}
           userLocation={userLocation}
+          showDistance={showDistance}
           hoveredRestroomId={hoveredRestroomId}
           onFocusedRestroomIdChange={onFocusedRestroomIdChange}
           onViewportBoundsChange={onViewportBoundsChange}

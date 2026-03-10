@@ -15,6 +15,7 @@ interface RestroomMapProps {
     lat: number;
     lng: number;
   } | null;
+  showDistance?: boolean;
   hoveredRestroomId?: string | null;
   onFocusedRestroomIdChange?: (restroomId: string | null) => void;
   onViewportBoundsChange?: (bounds: {
@@ -108,6 +109,7 @@ export function RestroomMap({
   restrooms,
   accessToken,
   userLocation = null,
+  showDistance = false,
   hoveredRestroomId = null,
   onFocusedRestroomIdChange,
   onViewportBoundsChange
@@ -394,8 +396,8 @@ export function RestroomMap({
         subtitleLine.textContent = subtitle;
         popupContent.appendChild(subtitleLine);
 
-        const distanceLabel = toDistanceLabel(distance_miles);
-        if (distanceLabel) {
+        const distanceLabel = showDistance ? toDistanceLabel(distance_miles) : "";
+        if (showDistance && distanceLabel) {
           const distanceLine = document.createElement("p");
           distanceLine.className = "text-xs font-semibold text-slate-700";
           distanceLine.textContent = distanceLabel;
@@ -491,7 +493,7 @@ export function RestroomMap({
       onFocusedRestroomIdChange?.(null);
     }
     setHoveredFeatureState(resolveHoveredRestroomId());
-  }, [hoveredRestroomId, isMapReady, markerData, onFocusedRestroomIdChange, restrooms.length, router, userLocationData]);
+  }, [hoveredRestroomId, isMapReady, markerData, onFocusedRestroomIdChange, restrooms.length, router, showDistance, userLocationData]);
 
   useEffect(() => {
     if (!isMapReady) {
