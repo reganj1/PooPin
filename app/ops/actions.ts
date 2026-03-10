@@ -1,31 +1,27 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  clearOpsSessionCookie,
+  isOpsSessionAuthenticated,
+  setOpsSessionCookie,
+  verifyOpsDashboardPassword
+} from "@/lib/ops/auth";
 import { ModerationStatus } from "@/types";
 
 const REVIEWED_REPORT_PREFIX = "reviewed:v1:";
 const allowedStatuses = new Set<ModerationStatus>(["active", "pending", "flagged", "removed"]);
-
-const getOpsKey = () => process.env.OPS_DASHBOARD_KEY?.trim() ?? "";
-
-const hasValidOpsKey = (providedKey: unknown) => {
-  const configuredKey = getOpsKey();
-  if (!configuredKey) {
-    return true;
-  }
-
-  return typeof providedKey === "string" && providedKey === configuredKey;
-};
 
 const getStringValue = (formData: FormData, key: string) => {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() : "";
 };
 
-const canRunModerationAction = (formData: FormData) => {
-  const providedOpsKey = getStringValue(formData, "ops_key");
-  if (!hasValidOpsKey(providedOpsKey)) {
+const canRunModerationAction = async () => {
+  const isAuthenticated = await isOpsSessionAuthenticated();
+  if (!isAuthenticated) {
     return false;
   }
 
@@ -41,8 +37,27 @@ const safeRevalidateOps = () => {
   revalidatePath("/ops");
 };
 
+export async function loginOpsAction(formData: FormData) {
+  const password = getStringValue(formData, "password");
+  if (!verifyOpsDashboardPassword(password)) {
+    redirect("/ops?auth=invalid");
+  }
+
+  const sessionSet = await setOpsSessionCookie();
+  if (!sessionSet) {
+    redirect("/ops?auth=unconfigured");
+  }
+
+  redirect("/ops");
+}
+
+export async function logoutOpsAction() {
+  await clearOpsSessionCookie();
+  redirect("/ops");
+}
+
 export async function moderateBathroomAction(formData: FormData) {
-  const supabaseAdmin = canRunModerationAction(formData);
+  const supabaseAdmin = await canRunModerationAction();
   if (!supabaseAdmin) {
     return;
   }
@@ -58,7 +73,7 @@ export async function moderateBathroomAction(formData: FormData) {
 }
 
 export async function moderatePhotoAction(formData: FormData) {
-  const supabaseAdmin = canRunModerationAction(formData);
+  const supabaseAdmin = await canRunModerationAction();
   if (!supabaseAdmin) {
     return;
   }
@@ -74,7 +89,7 @@ export async function moderatePhotoAction(formData: FormData) {
 }
 
 export async function moderateReviewAction(formData: FormData) {
-  const supabaseAdmin = canRunModerationAction(formData);
+  const supabaseAdmin = await canRunModerationAction();
   if (!supabaseAdmin) {
     return;
   }
@@ -90,7 +105,7 @@ export async function moderateReviewAction(formData: FormData) {
 }
 
 export async function markReportReviewedAction(formData: FormData) {
-  const supabaseAdmin = canRunModerationAction(formData);
+  const supabaseAdmin = await canRunModerationAction();
   if (!supabaseAdmin) {
     return;
   }

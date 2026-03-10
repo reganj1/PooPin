@@ -1,11 +1,14 @@
 import Link from "next/link";
 import {
+  loginOpsAction,
+  logoutOpsAction,
   markReportReviewedAction,
   moderateBathroomAction,
   moderatePhotoAction,
   moderateReviewAction
 } from "@/app/ops/actions";
 import { getSupabaseAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase/admin";
+import { getOpsDashboardPassword, isOpsSessionAuthenticated } from "@/lib/ops/auth";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import {
   RESTROOM_ISSUE_REASON_PREFIX,
@@ -168,31 +171,62 @@ function StatusBadge({ status }: { status: ModerationStatus }) {
   );
 }
 
-function HiddenOpsKey({ opsKey }: { opsKey: string }) {
-  if (!opsKey) {
-    return null;
-  }
-
-  return <input type="hidden" name="ops_key" value={opsKey} />;
-}
-
 export default async function OpsPage({ searchParams }: OpsPageProps) {
   const resolvedSearchParams = await searchParams;
-  const opsKey = toStringParam(resolvedSearchParams.key).trim();
-  const expectedOpsKey = process.env.OPS_DASHBOARD_KEY?.trim() ?? "";
-  const isAuthorized = expectedOpsKey ? opsKey === expectedOpsKey : true;
+  const authState = toStringParam(resolvedSearchParams.auth).trim();
+  const configuredPassword = getOpsDashboardPassword();
+  const hasOpsPasswordConfigured = configuredPassword.length > 0;
+  const isAuthorized = await isOpsSessionAuthenticated();
 
-  if (!isAuthorized) {
+  if (!hasOpsPasswordConfigured) {
     return (
       <main className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h1 className="text-xl font-semibold text-slate-900">Ops Access Required</h1>
+          <h1 className="text-xl font-semibold text-slate-900">Ops Password Not Configured</h1>
           <p className="mt-2 text-sm text-slate-600">
-            This internal queue requires an ops key. Open <code>/ops?key=YOUR_KEY</code> with the configured key.
+            Set <code>OPS_DASHBOARD_PASSWORD</code> to enable access protection for this dashboard.
           </p>
           <Link href="/" className="mt-4 inline-flex rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700">
             Back to map
           </Link>
+        </section>
+      </main>
+    );
+  }
+
+  if (!isAuthorized) {
+    return (
+      <main className="mx-auto w-full max-w-md px-4 py-10 sm:px-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-600">Internal Ops</p>
+          <h1 className="mt-2 text-xl font-semibold text-slate-900">Sign in to moderation dashboard</h1>
+          <p className="mt-2 text-sm text-slate-600">This area is restricted to internal beta operations.</p>
+
+          {authState === "invalid" ? (
+            <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+              Incorrect password. Please try again.
+            </p>
+          ) : null}
+
+          <form action={loginOpsAction} className="mt-4 space-y-3">
+            <label htmlFor="ops-password" className="block text-sm font-medium text-slate-700">
+              Password
+            </label>
+            <input
+              id="ops-password"
+              name="password"
+              type="password"
+              required
+              autoComplete="current-password"
+              className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+            />
+            <button
+              type="submit"
+              className="inline-flex w-full items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+            >
+              Sign in
+            </button>
+          </form>
         </section>
       </main>
     );
@@ -293,6 +327,14 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
             <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
               {reviewReports.length + listingReports.length} open reports
             </span>
+            <form action={logoutOpsAction}>
+              <button
+                type="submit"
+                className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Log out
+              </button>
+            </form>
           </div>
         </div>
 
@@ -337,7 +379,6 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                     </Link>
                     {canModerate ? (
                       <form action={moderateBathroomAction} className="flex flex-wrap items-center gap-2">
-                        <HiddenOpsKey opsKey={opsKey} />
                         <input type="hidden" name="bathroom_id" value={bathroom.id} />
                         <button
                           type="submit"
@@ -397,7 +438,6 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                       </Link>
                       {canModerate ? (
                         <form action={moderatePhotoAction} className="flex flex-wrap items-center gap-2">
-                          <HiddenOpsKey opsKey={opsKey} />
                           <input type="hidden" name="photo_id" value={photo.id} />
                           <button
                             type="submit"
@@ -459,7 +499,6 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                       </Link>
                       {canModerate ? (
                         <form action={moderateReviewAction} className="flex flex-wrap items-center gap-2">
-                          <HiddenOpsKey opsKey={opsKey} />
                           <input type="hidden" name="review_id" value={review.id} />
                           <button
                             type="submit"
@@ -521,7 +560,6 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                         </Link>
                         {canModerate ? (
                           <form action={markReportReviewedAction}>
-                            <HiddenOpsKey opsKey={opsKey} />
                             <input type="hidden" name="report_id" value={report.id} />
                             <input type="hidden" name="reason" value={report.reason} />
                             <button
@@ -561,7 +599,6 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                         </Link>
                         {canModerate ? (
                           <form action={markReportReviewedAction}>
-                            <HiddenOpsKey opsKey={opsKey} />
                             <input type="hidden" name="report_id" value={report.id} />
                             <input type="hidden" name="reason" value={report.reason} />
                             <button
