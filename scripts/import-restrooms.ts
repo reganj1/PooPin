@@ -52,6 +52,8 @@ const DEFAULT_DISTANCE_MILES = 0.08;
 const DEFAULT_OSM_NAME = "Public Restroom";
 const OSM_GENERIC_DUPLICATE_DISTANCE_MILES = 0.02;
 const CROSS_SOURCE_STRICT_DUPLICATE_DISTANCE_MILES = 0.01;
+const WEAK_ADDRESS_PATTERN = /^near\s+[a-z][a-z\s.'-]+$/i;
+const COORDINATE_ADDRESS_PATTERN = /^-?\d{1,3}(?:\.\d+)?\s*,\s*-?\d{1,3}(?:\.\d+)?$/;
 const STREET_CONTEXT_PATTERN =
   /(?:\b\d{1,5}\b\s+)?[a-z0-9.'-]+\s(?:st|street|ave|avenue|blvd|boulevard|rd|road|dr|drive|ln|lane|way|pl|place|ct|court|ter|terrace|hwy|highway)\b/i;
 
@@ -561,16 +563,81 @@ const pickContextFromKeys = (row: RawRecord, keys: string[], fallbackCity: strin
   return null;
 };
 
-const buildStreetContext = (row: RawRecord) => {
+const normalizeStreetPart = (value: string) => {
+  const cleaned = value.replace(/\b(corner of|near)\b/gi, " ").replace(/[()]/g, " ");
+  return toDisplayContext(cleaned).replace(/\s+/g, " ").trim();
+};
+
+const splitIntersectionParts = (value: string) =>
+  value
+    .split(/\s*(?:&|\/|;|\+|\band\b|\bat\b)\s*/i)
+    .map((part) => normalizeStreetPart(part))
+    .filter((part) => part.length > 0);
+
+const formatIntersection = (streetA: string, streetB: string) => {
+  const first = normalizeStreetPart(streetA);
+  const second = normalizeStreetPart(streetB);
+  if (!first || !second) {
+    return null;
+  }
+
+  if (normalizeContext(first) === normalizeContext(second)) {
+    return first;
+  }
+
+  return `${first} & ${second}`;
+};
+
+const buildCrossStreetContext = (row: RawRecord) => {
+  const explicitIntersection = parseTagValue(row, [
+    "cross_street",
+    "cross_streets",
+    "intersection",
+    "intersection_name",
+    "at_street",
+    "street_intersection"
+  ]);
+  if (explicitIntersection) {
+    const parts = splitIntersectionParts(explicitIntersection);
+    if (parts.length >= 2) {
+      return formatIntersection(parts[0], parts[1]);
+    }
+  }
+
+  const primaryStreet = parseTagValue(row, ["addr:street", "road", "street_name", "street"]);
+  const secondaryStreet = parseTagValue(row, [
+    "cross_street",
+    "cross_streets",
+    "intersecting_street",
+    "street_2",
+    "addr:cross_street",
+    "nearby_street"
+  ]);
+  if (primaryStreet && secondaryStreet) {
+    return formatIntersection(primaryStreet, secondaryStreet);
+  }
+
+  const junction = parseTagValue(row, ["junction"]);
+  if (junction) {
+    const parts = splitIntersectionParts(junction);
+    if (parts.length >= 2) {
+      return formatIntersection(parts[0], parts[1]);
+    }
+  }
+
+  return null;
+};
+
+const buildSingleStreetContext = (row: RawRecord) => {
   const houseNumber = parseTagValue(row, ["addr:housenumber", "house_number"]);
   const streetName = parseTagValue(row, ["addr:street", "road", "street_name", "street"]);
   if (streetName) {
-    return [houseNumber, streetName].filter(Boolean).join(" ");
+    return [houseNumber, normalizeStreetPart(streetName)].filter(Boolean).join(" ").trim();
   }
 
-  const intersection = parseTagValue(row, ["cross_street", "junction"]);
-  if (intersection && STREET_CONTEXT_PATTERN.test(intersection.toLowerCase())) {
-    return intersection;
+  const firstAddressSegment = parseTagValue(row, ["addr:full", "address"])?.split(",")[0]?.trim();
+  if (firstAddressSegment && STREET_CONTEXT_PATTERN.test(firstAddressSegment.toLowerCase())) {
+    return normalizeStreetPart(firstAddressSegment);
   }
 
   return null;
@@ -660,17 +727,27 @@ const buildOperatorFacilityContext = (row: RawRecord, fallbackCity: string) => {
   );
 };
 
+const isWeakAddress = (address: string, fallbackCity: string) => {
+  const normalized = normalizeLabel(address);
+  if (!normalized) {
+    return true;
+  }
+
+  if (COORDINATE_ADDRESS_PATTERN.test(normalized) || WEAK_ADDRESS_PATTERN.test(normalized)) {
+    return true;
+  }
+
+  const normalizedContext = normalizeContext(normalized);
+  const normalizedCity = normalizeContext(fallbackCity);
+  return Boolean(normalizedCity && (normalizedContext === normalizedCity || normalizedContext === `near ${normalizedCity}`));
+};
+
 const buildAddress = (row: RawRecord, fallbackCity: string): string => {
   const fullAddress = parseString(
     getValue(row, ["address", "street_address", "street", "location", "location_address", "cross_street", "addr:full"])
   );
-  if (fullAddress) {
+  if (fullAddress && !isWeakAddress(fullAddress, fallbackCity)) {
     return fullAddress;
-  }
-
-  const streetContext = buildStreetContext(row);
-  if (streetContext) {
-    return streetContext;
   }
 
   const parkLandmarkContext = buildParkLandmarkContext(row, fallbackCity);
@@ -686,6 +763,16 @@ const buildAddress = (row: RawRecord, fallbackCity: string): string => {
   const operatorContext = buildOperatorFacilityContext(row, fallbackCity);
   if (operatorContext) {
     return operatorContext;
+  }
+
+  const crossStreetContext = buildCrossStreetContext(row);
+  if (crossStreetContext) {
+    return crossStreetContext;
+  }
+
+  const singleStreetContext = buildSingleStreetContext(row);
+  if (singleStreetContext) {
+    return singleStreetContext;
   }
 
   const neighborhood = buildNeighborhoodContext(row);
@@ -718,9 +805,14 @@ const buildOsmFallbackName = (row: RawRecord, fallbackCity: string) => {
     return formatOsmFallbackName(operatorContext);
   }
 
-  const streetContext = buildStreetContext(row);
-  if (streetContext) {
-    return formatOsmFallbackName(streetContext);
+  const crossStreetContext = buildCrossStreetContext(row);
+  if (crossStreetContext) {
+    return formatOsmFallbackName(crossStreetContext);
+  }
+
+  const singleStreetContext = buildSingleStreetContext(row);
+  if (singleStreetContext) {
+    return formatOsmFallbackName(singleStreetContext);
   }
 
   const neighborhood = buildNeighborhoodContext(row);
@@ -749,6 +841,9 @@ const toImportRecord = (row: RawRecord, options: ImportOptions): ImportBathroomR
   const state = parseString(getValue(row, ["state", "state_code", "province", "addr:state"])) ?? options.defaultState;
 
   const explicitOsmName = parseString(getValue(row, ["name", "name:en"]));
+  const parsedAddress = parseString(
+    getValue(row, ["address", "street_address", "street", "location", "location_address", "cross_street", "addr:full"])
+  );
   const parsedName = parseString(
     getValue(row, ["name", "name:en", "restroom_name", "facility_name", "site_name", "location_name"])
   );
@@ -772,10 +867,12 @@ const toImportRecord = (row: RawRecord, options: ImportOptions): ImportBathroomR
         ? `osm:${osmType}/${osmId}`
         : null;
 
-  const parsedAddress = parseString(
-    getValue(row, ["address", "street_address", "street", "location", "location_address", "cross_street", "addr:full"])
-  );
-  const address = parsedAddress ?? (source === "openstreetmap" ? buildAddress(row, city) : null);
+  const address =
+    source === "openstreetmap"
+      ? parsedAddress && !isWeakAddress(parsedAddress, city)
+        ? parsedAddress
+        : buildAddress(row, city)
+      : parsedAddress;
   if (!address) {
     return null;
   }
@@ -1031,14 +1128,14 @@ const run = async () => {
   const normalizedRecords: ImportBathroomRecord[] = [];
   let invalidRows = 0;
 
-  rawRecords.forEach((row) => {
+  for (const row of rawRecords) {
     const normalized = toImportRecord(row, options);
     if (!normalized) {
       invalidRows += 1;
-      return;
+      continue;
     }
     normalizedRecords.push(normalized);
-  });
+  }
 
   const { data: existingRows, error: existingError } = await supabase
     .from("bathrooms")

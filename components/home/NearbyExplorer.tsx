@@ -152,10 +152,16 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     const previousOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    const previousOverscrollBehavior = document.body.style.overscrollBehavior;
     document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "none";
 
     return () => {
       document.body.style.overflow = previousOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      document.body.style.overscrollBehavior = previousOverscrollBehavior;
     };
   }, [isMapExpanded]);
 
@@ -177,7 +183,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, [isMapExpanded]);
 
   useEffect(() => {
-    if (!isMapExpanded || typeof window === "undefined") {
+    if (typeof window === "undefined") {
       return;
     }
 
@@ -347,7 +353,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           onRestroomHoverChange={setListHoveredRestroomId}
           className={cn(isExpandedVariant && "p-3.5 sm:p-4")}
           scrollClassName={
-            isExpandedVariant ? "max-h-[280px] overflow-y-auto pr-1 sm:max-h-[calc(100vh-330px)] lg:max-h-[calc(100vh-330px)]" : undefined
+            isExpandedVariant ? "sm:max-h-[calc(100vh-330px)] sm:overflow-y-auto sm:pr-1 lg:max-h-[calc(100vh-330px)]" : undefined
           }
         />
       </div>
@@ -417,8 +423,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       ) : null}
 
       {isMapExpanded ? (
-        <section className="fixed inset-0 z-[80] bg-slate-950/45 backdrop-blur-[1.5px]">
-          <div className="absolute inset-0">
+        <section className="fixed inset-0 z-[80] overflow-hidden bg-slate-950/45 backdrop-blur-[1.5px]">
+          <div className="absolute inset-0 w-screen max-w-full overflow-hidden">
             <MapPanel
               restrooms={mapRestrooms}
               userLocation={userLocation}
@@ -430,7 +436,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               showHeader={false}
             />
 
-            <div className="pointer-events-none absolute inset-x-3 top-3 sm:inset-x-4 sm:top-4">
+            <div className="pointer-events-none absolute inset-x-2 top-2 sm:inset-x-4 sm:top-4">
               <div className="pointer-events-auto mx-auto flex w-full max-w-[1400px] flex-col gap-2 rounded-2xl border border-white/70 bg-white/95 px-3 py-2.5 shadow-xl backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-4">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Full map mode</p>
@@ -464,11 +470,33 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
             </div>
 
             {isExpandedListOpen ? (
-              <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 max-h-[62vh] sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-[92px] sm:max-h-none sm:w-[400px]">
-                <div className="pointer-events-auto h-full overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl sm:p-3">
-                  {renderListPanel("expanded")}
+              <>
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 sm:hidden">
+                  <div className="pointer-events-auto rounded-t-3xl border-t border-slate-200 bg-white shadow-2xl">
+                    <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">Nearby results</p>
+                        <p className="text-xs text-slate-500">{listRestrooms.length} in current map area</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsExpandedListOpen(false)}
+                        className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700"
+                      >
+                        Hide
+                      </button>
+                    </div>
+                    <div className="max-h-[66vh] overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2">
+                      {renderListPanel("expanded")}
+                    </div>
+                  </div>
                 </div>
-              </div>
+                <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 hidden max-h-[62vh] sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-[92px] sm:block sm:max-h-none sm:w-[400px]">
+                  <div className="pointer-events-auto h-full overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl sm:p-3">
+                    {renderListPanel("expanded")}
+                  </div>
+                </div>
+              </>
             ) : null}
           </div>
         </section>
