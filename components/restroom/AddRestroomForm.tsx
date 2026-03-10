@@ -1,10 +1,11 @@
 "use client";
 
-import { type ReactNode, useCallback, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { LocationPickerMap } from "@/components/map/LocationPickerMap";
+import { reverseGeocodeCoordinates } from "@/lib/mapbox/reverseGeocode";
 import {
   BathroomCreateInput,
   bathroomAccessTypeOptions,
@@ -118,7 +119,11 @@ export function AddRestroomForm() {
   const [duplicateBathroomId, setDuplicateBathroomId] = useState<string | null>(null);
   const [showCoordinates, setShowCoordinates] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  const [isResolvingAddress, setIsResolvingAddress] = useState(false);
+  const [addressAssistMessage, setAddressAssistMessage] = useState<string | null>(null);
   const [serverFieldErrors, setServerFieldErrors] = useState<ServerFieldErrors>({});
+  const geocodeAbortRef = useRef<AbortController | null>(null);
+  const lastResolvedCoordinateKeyRef = useRef<string>("");
 
   const {
     register,
@@ -137,13 +142,72 @@ export function AddRestroomForm() {
   const getFieldError = (field: keyof BathroomCreateInput) => errors[field]?.message ?? serverFieldErrors[field];
   const hasAdvancedLocationError = Boolean(getFieldError("lat") || getFieldError("lng"));
 
+  const resolveAddressFromCoordinates = useCallback(
+    async (coordinates: { lat: number; lng: number }) => {
+      const coordinateKey = `${coordinates.lat.toFixed(6)}:${coordinates.lng.toFixed(6)}`;
+      if (lastResolvedCoordinateKeyRef.current === coordinateKey) {
+        return;
+      }
+      lastResolvedCoordinateKeyRef.current = coordinateKey;
+
+      geocodeAbortRef.current?.abort();
+      const controller = new AbortController();
+      geocodeAbortRef.current = controller;
+
+      setIsResolvingAddress(true);
+      setAddressAssistMessage("Updating address from your selected pin...");
+
+      try {
+        const geocodeResult = await reverseGeocodeCoordinates(coordinates, controller.signal);
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        if (!geocodeResult) {
+          setAddressAssistMessage("Couldn’t find an exact address. You can edit location details manually.");
+          return;
+        }
+
+        if (geocodeResult.address) {
+          setValue("address", geocodeResult.address, { shouldDirty: true, shouldValidate: true });
+        }
+
+        if (geocodeResult.city) {
+          setValue("city", geocodeResult.city, { shouldDirty: true, shouldValidate: true });
+        }
+
+        if (geocodeResult.state) {
+          setValue("state", geocodeResult.state, { shouldDirty: true, shouldValidate: true });
+        }
+
+        setAddressAssistMessage("Address details updated from your selected location.");
+      } catch {
+        if (!controller.signal.aborted) {
+          setAddressAssistMessage("Couldn’t auto-fill address for this pin. You can enter it manually.");
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsResolvingAddress(false);
+        }
+      }
+    },
+    [setValue]
+  );
+
+  useEffect(() => {
+    return () => {
+      geocodeAbortRef.current?.abort();
+    };
+  }, []);
+
   const handleCoordinatesChange = useCallback(
     (coordinates: { lat: number; lng: number }) => {
       setValue("lat", coordinates.lat, { shouldDirty: true, shouldValidate: true });
       setValue("lng", coordinates.lng, { shouldDirty: true, shouldValidate: true });
       setSubmitError(null);
+      void resolveAddressFromCoordinates(coordinates);
     },
-    [setValue]
+    [resolveAddressFromCoordinates, setValue]
   );
 
   const handleUseMyLocation = () => {
@@ -223,6 +287,8 @@ export function AddRestroomForm() {
         city: values.city,
         state: values.state
       });
+      setAddressAssistMessage(null);
+      lastResolvedCoordinateKeyRef.current = "";
       setShowCoordinates(false);
     } catch {
       setSubmitError("Could not submit this restroom right now. Please check your connection and try again.");
@@ -235,7 +301,7 @@ export function AddRestroomForm() {
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-600">Bay Area Beta</p>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 sm:text-[2.05rem]">Submit a restroom</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-          Help people find reliable restrooms faster. Community submissions may be reviewed before appearing publicly.
+          Share a restroom with the community. New submissions may be reviewed before they appear publicly.
         </p>
       </div>
 
@@ -280,7 +346,9 @@ export function AddRestroomForm() {
           <div className="mb-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Step 1</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Choose location</h2>
-            <p className="mt-1 text-sm text-slate-600">Use your location, drop a pin, or add an address as backup context.</p>
+            <p className="mt-1 text-sm text-slate-600">
+              Use your location or drop a pin. Address details auto-fill from the selected point and can be edited.
+            </p>
           </div>
 
           <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -292,7 +360,7 @@ export function AddRestroomForm() {
             >
               {isLocating ? "Locating..." : "Use my current location"}
             </button>
-            <p className="text-xs text-slate-500">Then tap the map to place your pin.</p>
+            <p className="text-xs text-slate-500">Then tap the map to place or move your pin.</p>
           </div>
 
           <LocationPickerMap
@@ -304,12 +372,11 @@ export function AddRestroomForm() {
           />
 
           <p className="mt-2 text-xs text-slate-500">
-            Pin location: {typeof lat === "number" ? lat.toFixed(6) : defaultValues.lat.toFixed(6)},{" "}
-            {typeof lng === "number" ? lng.toFixed(6) : defaultValues.lng.toFixed(6)}
+            {isResolvingAddress ? "Finding address details..." : addressAssistMessage ?? "Address details fill in automatically from your pin."}
           </p>
 
           <div className="mt-4 space-y-4">
-            <Field label="Street address (fallback)" htmlFor="address" error={getFieldError("address")}>
+            <Field label="Address" htmlFor="address" error={getFieldError("address")}>
               <input
                 id="address"
                 {...register("address")}
@@ -346,7 +413,7 @@ export function AddRestroomForm() {
               onClick={() => setShowCoordinates((current) => !current)}
               className="inline-flex w-fit rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
             >
-              {showCoordinates ? "Hide advanced location" : "Fine-tune location (advanced)"}
+              {showCoordinates ? "Hide pin adjustment" : "Adjust pin"}
             </button>
 
             {showCoordinates ? (
@@ -378,9 +445,7 @@ export function AddRestroomForm() {
                 </Field>
               </div>
             ) : hasAdvancedLocationError ? (
-              <p className="mt-2 text-xs font-medium text-rose-600">
-                Please open advanced location to fix latitude/longitude values.
-              </p>
+              <p className="mt-2 text-xs font-medium text-rose-600">Please open Adjust pin to fix the location values.</p>
             ) : null}
           </div>
         </section>
@@ -460,8 +525,8 @@ export function AddRestroomForm() {
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Step 3</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Submit for review</h2>
             <p className="mt-1 text-sm text-slate-600">
-              Submissions, photos, and reviews may be reviewed before appearing publicly to help keep listings
-              trustworthy.
+              Restroom submissions and photo uploads may be reviewed before appearing publicly to help keep listings
+              reliable.
             </p>
           </div>
 
@@ -481,6 +546,8 @@ export function AddRestroomForm() {
                 setServerFieldErrors({});
                 setSubmitSuccessId(null);
                 setDuplicateBathroomId(null);
+                setAddressAssistMessage(null);
+                lastResolvedCoordinateKeyRef.current = "";
                 setShowCoordinates(false);
               }}
               disabled={isSubmitting}
