@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MapPanel } from "@/components/map/MapPanel";
 import { RestroomList } from "@/components/restroom/RestroomList";
 import { cn } from "@/lib/utils/cn";
@@ -74,6 +74,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [userLocation, setUserLocation] = useState<Coordinate | null>(null);
   const [geoError, setGeoError] = useState<string | null>(null);
   const [isLocating, setIsLocating] = useState(false);
+  const [isMapExpanded, setIsMapExpanded] = useState(false);
+  const [isExpandedListOpen, setIsExpandedListOpen] = useState(true);
   const [listHoveredRestroomId, setListHoveredRestroomId] = useState<string | null>(null);
   const [mapFocusedRestroomId, setMapFocusedRestroomId] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("closest");
@@ -143,6 +145,36 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       [filterKey]: !current[filterKey]
     }));
   };
+
+  useEffect(() => {
+    if (!isMapExpanded || typeof document === "undefined") {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isMapExpanded]);
+
+  useEffect(() => {
+    if (!isMapExpanded || typeof window === "undefined") {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMapExpanded(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isMapExpanded]);
 
   const handleUseMyLocation = () => {
     setGeoError(null);
@@ -218,6 +250,96 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       });
   }, []);
 
+  const renderListPanel = (variant: "default" | "expanded") => {
+    const isExpandedVariant = variant === "expanded";
+
+    return (
+      <div className={cn("space-y-3", isExpandedVariant && "h-full")}>
+        <section className={cn("rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm", isExpandedVariant && "p-3.5 sm:p-4")}>
+          <div className="mb-3 flex items-end justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">Browse this area</h2>
+              <p className="mt-1 text-xs text-slate-500">Filter and sort what you see on the map.</p>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <fieldset>
+              <legend className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Filters</legend>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => toggleFilter("publicOnly")}
+                  aria-pressed={filters.publicOnly}
+                  className={cn(
+                    "rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                    filters.publicOnly
+                      ? "border-brand-300 bg-brand-50 text-brand-700"
+                      : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
+                  )}
+                >
+                  Public only
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleFilter("accessible")}
+                  aria-pressed={filters.accessible}
+                  className={cn(
+                    "rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                    filters.accessible
+                      ? "border-brand-300 bg-brand-50 text-brand-700"
+                      : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
+                  )}
+                >
+                  Accessible
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleFilter("babyStation")}
+                  aria-pressed={filters.babyStation}
+                  className={cn(
+                    "rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                    filters.babyStation
+                      ? "border-brand-300 bg-brand-50 text-brand-700"
+                      : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
+                  )}
+                >
+                  Baby station
+                </button>
+              </div>
+            </fieldset>
+
+            <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
+              <label htmlFor={`sort-mode-${variant}`} className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Sort
+              </label>
+              <select
+                id={`sort-mode-${variant}`}
+                value={sortMode}
+                onChange={(event) => setSortMode(event.target.value as SortMode)}
+                className="h-9 w-[180px] rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+              >
+                <option value="closest">Closest</option>
+                <option value="best_rated">Best rated</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <RestroomList
+          restrooms={listRestrooms}
+          helperText={listHelperText}
+          highlightedRestroomId={highlightedListRestroomId}
+          onRestroomHoverChange={setListHoveredRestroomId}
+          className={cn(isExpandedVariant && "p-3.5 sm:p-4")}
+          scrollClassName={
+            isExpandedVariant ? "max-h-[calc(58vh-230px)] overflow-y-auto pr-1 sm:max-h-[calc(100vh-330px)] lg:max-h-[calc(100vh-330px)]" : undefined
+          }
+        />
+      </div>
+    );
+  };
+
   return (
     <>
       <section className="mb-4 rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-sm sm:p-4 lg:mb-5">
@@ -230,6 +352,16 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               className="inline-flex h-10 w-fit items-center rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isLocating ? "Locating..." : "Use my location"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsExpandedListOpen(true);
+                setIsMapExpanded(true);
+              }}
+              className="inline-flex h-10 w-fit items-center rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+            >
+              Expand map
             </button>
 
             {userLocation ? (
@@ -256,97 +388,81 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         <section className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">{geoError}</section>
       ) : null}
 
-      <section className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(380px,1fr)] xl:grid-cols-[minmax(0,1.55fr)_430px]">
-        <div className="lg:sticky lg:top-20 lg:self-start">
-          <MapPanel
-            restrooms={mapRestrooms}
-            userLocation={userLocation}
-            hoveredRestroomId={listHoveredRestroomId}
-            onFocusedRestroomIdChange={setMapFocusedRestroomId}
-            onViewportBoundsChange={handleViewportBoundsChange}
-          />
-        </div>
-
-        <div className="space-y-3">
-          <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-            <div className="mb-3 flex items-end justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold text-slate-900">Browse this area</h2>
-                <p className="mt-1 text-xs text-slate-500">Filter and sort what you see on the map.</p>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <fieldset>
-                <legend className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Filters</legend>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => toggleFilter("publicOnly")}
-                    aria-pressed={filters.publicOnly}
-                    className={cn(
-                      "rounded-full border px-3 py-1.5 text-sm font-medium transition",
-                      filters.publicOnly
-                        ? "border-brand-300 bg-brand-50 text-brand-700"
-                        : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
-                    )}
-                  >
-                    Public only
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => toggleFilter("accessible")}
-                    aria-pressed={filters.accessible}
-                    className={cn(
-                      "rounded-full border px-3 py-1.5 text-sm font-medium transition",
-                      filters.accessible
-                        ? "border-brand-300 bg-brand-50 text-brand-700"
-                        : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
-                    )}
-                  >
-                    Accessible
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => toggleFilter("babyStation")}
-                    aria-pressed={filters.babyStation}
-                    className={cn(
-                      "rounded-full border px-3 py-1.5 text-sm font-medium transition",
-                      filters.babyStation
-                        ? "border-brand-300 bg-brand-50 text-brand-700"
-                        : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
-                    )}
-                  >
-                    Baby station
-                  </button>
-                </div>
-              </fieldset>
-
-              <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
-                <label htmlFor="sort-mode" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Sort
-                </label>
-                <select
-                  id="sort-mode"
-                  value={sortMode}
-                  onChange={(event) => setSortMode(event.target.value as SortMode)}
-                  className="h-9 w-[180px] rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                >
-                  <option value="closest">Closest</option>
-                  <option value="best_rated">Best rated</option>
-                </select>
-              </div>
-            </div>
-          </section>
-
-          <RestroomList
-            restrooms={listRestrooms}
-            helperText={listHelperText}
-            highlightedRestroomId={highlightedListRestroomId}
-            onRestroomHoverChange={setListHoveredRestroomId}
-          />
-        </div>
+      <section className="mb-5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600 sm:px-4">
+        Community submissions, photos, and reviews may be reviewed before appearing publicly.
       </section>
+
+      {!isMapExpanded ? (
+        <section className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(380px,1fr)] xl:grid-cols-[minmax(0,1.55fr)_430px]">
+          <div className="lg:sticky lg:top-20 lg:self-start">
+            <MapPanel
+              restrooms={mapRestrooms}
+              userLocation={userLocation}
+              hoveredRestroomId={listHoveredRestroomId}
+              onFocusedRestroomIdChange={setMapFocusedRestroomId}
+              onViewportBoundsChange={handleViewportBoundsChange}
+            />
+          </div>
+
+          {renderListPanel("default")}
+        </section>
+      ) : null}
+
+      {isMapExpanded ? (
+        <section className="fixed inset-0 z-40 bg-slate-950/20">
+          <div className="absolute inset-0 bg-white">
+            <MapPanel
+              restrooms={mapRestrooms}
+              userLocation={userLocation}
+              hoveredRestroomId={listHoveredRestroomId}
+              onFocusedRestroomIdChange={setMapFocusedRestroomId}
+              onViewportBoundsChange={handleViewportBoundsChange}
+              className="h-full rounded-none border-0 shadow-none"
+              mapClassName="h-full min-h-0"
+              showHeader={false}
+            />
+
+            <div className="pointer-events-none absolute inset-x-3 top-3 flex items-start justify-between gap-2 sm:inset-x-4 sm:top-4">
+              <div className="pointer-events-auto rounded-xl border border-slate-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Full map mode</p>
+                <p className="mt-1 text-xs text-slate-600">Move the map to browse more restrooms across the Bay Area.</p>
+              </div>
+              <div className="pointer-events-auto flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleUseMyLocation}
+                  disabled={isLocating}
+                  className="rounded-lg border border-slate-300 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isLocating ? "Locating..." : "My location"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsExpandedListOpen((current) => !current)}
+                  className="rounded-lg border border-slate-300 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:bg-slate-50"
+                >
+                  {isExpandedListOpen ? "Hide list" : "Show list"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsMapExpanded(false)}
+                  className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                >
+                  Exit full map
+                </button>
+              </div>
+            </div>
+
+            {isExpandedListOpen ? (
+              <div className="pointer-events-none absolute inset-x-3 bottom-3 max-h-[58vh] sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-[84px] sm:max-h-none sm:w-[400px]">
+                <div className="pointer-events-auto h-full overflow-y-auto rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-xl backdrop-blur sm:p-3">
+                  {renderListPanel("expanded")}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
     </>
   );
 }

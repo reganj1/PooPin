@@ -8,7 +8,7 @@ const manrope = Manrope({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Poopin",
-  description: "Discover and rate public restrooms based on smell, cleanliness, and access friction."
+  description: "Discover and rate Bay Area public restrooms based on smell, cleanliness, and access friction."
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -23,6 +23,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   WC
                 </span>
                 <span className="text-xl font-semibold tracking-tight">Poopin</span>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                  Bay Area beta
+                </span>
               </Link>
               <nav className="flex items-center gap-2 text-sm font-medium">
                 <Link

@@ -1,6 +1,7 @@
 import { NearbyBathroom } from "@/types";
 import { MAPBOX_ACCESS_TOKEN, isMapboxConfigured } from "@/lib/mapbox/config";
 import { RestroomMap } from "@/components/map/RestroomMap";
+import { cn } from "@/lib/utils/cn";
 
 interface MapPanelProps {
   restrooms: NearbyBathroom[];
@@ -16,6 +17,9 @@ interface MapPanelProps {
     minLng: number;
     maxLng: number;
   }) => void;
+  className?: string;
+  mapClassName?: string;
+  showHeader?: boolean;
 }
 
 export function MapPanel({
@@ -23,29 +27,39 @@ export function MapPanel({
   userLocation = null,
   hoveredRestroomId = null,
   onFocusedRestroomIdChange,
-  onViewportBoundsChange
+  onViewportBoundsChange,
+  className,
+  mapClassName,
+  showHeader = true
 }: MapPanelProps) {
   if (!isMapboxConfigured) {
     return (
-      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-        <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-5">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-900">Map view</h2>
-            <p className="mt-1 text-xs text-slate-500">Enable Mapbox to display live restroom pins.</p>
-          </div>
-          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
-            {restrooms.length} shown
-          </span>
-        </header>
+      <section className={cn("overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm", className)}>
+        {showHeader ? (
+          <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-5">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Map view</h2>
+              <p className="mt-1 text-xs text-slate-500">Enable Mapbox to display live restroom pins.</p>
+            </div>
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+              {restrooms.length} shown
+            </span>
+          </header>
+        ) : null}
 
-        <div className="h-[340px] bg-slate-100/80 p-5 sm:h-[440px] lg:h-[640px]">
+        <div
+          className={cn(
+            "bg-slate-100/80 p-5",
+            showHeader ? "h-[340px] sm:h-[440px] lg:h-[640px]" : "min-h-[320px] h-full",
+            mapClassName
+          )}
+        >
           <div className="flex h-full flex-col justify-between">
             <div>
               <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Map setup pending</p>
-              <h3 className="mt-2 text-xl font-semibold text-slate-900">Mapbox token not configured</h3>
+              <h3 className="mt-2 text-xl font-semibold text-slate-900">Map temporarily unavailable</h3>
               <p className="mt-2 max-w-lg text-sm text-slate-600">
-                Add `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` to your environment to enable the live map. Restroom discovery
-                and details will continue working.
+                Live map rendering is temporarily unavailable. You can still browse restroom details and nearby results.
               </p>
             </div>
 
@@ -66,18 +80,20 @@ export function MapPanel({
   }
 
   return (
-    <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-      <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-5">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-900">Map view</h2>
-          <p className="mt-1 text-xs text-slate-500">Move the map to explore restrooms in any area.</p>
-        </div>
-        <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
-          {restrooms.length} shown
-        </span>
-      </header>
+    <section className={cn("overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm", className)}>
+      {showHeader ? (
+        <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-5">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Map view</h2>
+            <p className="mt-1 text-xs text-slate-500">Move the map to explore restrooms in any area.</p>
+          </div>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+            {restrooms.length} shown
+          </span>
+        </header>
+      ) : null}
 
-      <div className="h-[340px] sm:h-[440px] lg:h-[640px]">
+      <div className={cn(showHeader ? "h-[340px] sm:h-[440px] lg:h-[640px]" : "h-full min-h-[320px]", mapClassName)}>
         <RestroomMap
           restrooms={restrooms}
           accessToken={MAPBOX_ACCESS_TOKEN}
