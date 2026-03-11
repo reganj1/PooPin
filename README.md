@@ -42,6 +42,7 @@ Poopin is a startup MVP web app for discovering and rating public restrooms, wit
 - `/` homepage with responsive map/list layout (Supabase-first with mock fallback)
 - `/restroom/[id]` restroom detail (Supabase-first with mock fallback)
 - `/add` add-restroom form with React Hook Form + Zod + Supabase insert
+- `/contact` contact form for feedback, listing/content issues, and partnership inquiries
 
 ## Notes
 - Map gracefully falls back to a setup placeholder when Mapbox token is missing.

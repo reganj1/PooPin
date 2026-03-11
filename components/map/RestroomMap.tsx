@@ -38,6 +38,7 @@ interface RestroomFeatureProperties {
 }
 
 const SOURCE_ID = "restrooms-source";
+const HOVER_HALO_LAYER_ID = "restrooms-hover-halo-layer";
 const MARKER_LAYER_ID = "restrooms-marker-layer";
 const LABEL_LAYER_ID = "restrooms-label-layer";
 const USER_SOURCE_ID = "user-location-source";
@@ -135,12 +136,16 @@ export function RestroomMap({
   const clickHandlerRef = useRef<((event: mapboxgl.MapLayerMouseEvent) => void) | null>(null);
   const mouseEnterHandlerRef = useRef<((event: mapboxgl.MapLayerMouseEvent) => void) | null>(null);
   const mouseLeaveHandlerRef = useRef<(() => void) | null>(null);
+  const missingHoveredMarkerLogRef = useRef<Set<string>>(new Set());
+  const invalidCoordinatesLogKeyRef = useRef<string>("");
 
   const markerData = useMemo(() => toFeatureCollection(restrooms), [restrooms]);
   const userLocationData = useMemo(() => toUserLocationFeatureCollection(userLocation), [userLocation]);
+  const markerFeatureIds = useMemo(() => new Set(markerData.features.map((feature) => feature.properties.id)), [markerData]);
 
   useEffect(() => {
     let cancelled = false;
+    const missingHoveredMarkerLogSet = missingHoveredMarkerLogRef.current;
 
     const initMap = async () => {
       if (!mapContainerRef.current || mapRef.current) {
@@ -194,6 +199,9 @@ export function RestroomMap({
         if (map.getLayer(MARKER_LAYER_ID)) {
           map.removeLayer(MARKER_LAYER_ID);
         }
+        if (map.getLayer(HOVER_HALO_LAYER_ID)) {
+          map.removeLayer(HOVER_HALO_LAYER_ID);
+        }
         if (map.getLayer(LABEL_LAYER_ID)) {
           map.removeLayer(LABEL_LAYER_ID);
         }
@@ -218,6 +226,8 @@ export function RestroomMap({
       previousLocationKeyRef.current = "";
       mapHoveredRestroomIdRef.current = null;
       appliedHoveredRestroomIdRef.current = null;
+      missingHoveredMarkerLogSet.clear();
+      invalidCoordinatesLogKeyRef.current = "";
       clickHandlerRef.current = null;
       mouseEnterHandlerRef.current = null;
       mouseLeaveHandlerRef.current = null;
@@ -263,7 +273,8 @@ export function RestroomMap({
       appliedHoveredRestroomIdRef.current = restroomId;
     };
 
-    const resolveHoveredRestroomId = () => mapHoveredRestroomIdRef.current ?? hoveredRestroomId;
+    const resolveHoveredRestroomId = () =>
+      hoveredRestroomId ?? mapHoveredRestroomIdRef.current ?? activePopupRestroomIdRef.current;
 
     const existingSource = map.getSource(SOURCE_ID);
     if (existingSource) {
@@ -273,6 +284,28 @@ export function RestroomMap({
         type: "geojson",
         data: markerData,
         promoteId: "id"
+      });
+    }
+
+    if (!map.getLayer(HOVER_HALO_LAYER_ID)) {
+      map.addLayer({
+        id: HOVER_HALO_LAYER_ID,
+        type: "circle",
+        source: SOURCE_ID,
+        paint: {
+          "circle-color": "#93c5fd",
+          "circle-opacity": ["case", ["boolean", ["feature-state", "hovered"], false], 0.35, 0],
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            10,
+            ["case", ["boolean", ["feature-state", "hovered"], false], 22, 0],
+            14,
+            ["case", ["boolean", ["feature-state", "hovered"], false], 28, 0]
+          ],
+          "circle-blur": ["case", ["boolean", ["feature-state", "hovered"], false], 0.22, 0]
+        }
       });
     }
 
@@ -288,20 +321,21 @@ export function RestroomMap({
             ["linear"],
             ["zoom"],
             10,
-            ["case", ["boolean", ["feature-state", "hovered"], false], 12, 10],
+            ["case", ["boolean", ["feature-state", "hovered"], false], 15, 10],
             14,
-            ["case", ["boolean", ["feature-state", "hovered"], false], 14, 12]
+            ["case", ["boolean", ["feature-state", "hovered"], false], 18, 12]
           ],
           "circle-stroke-width": [
             "interpolate",
             ["linear"],
             ["zoom"],
             10,
-            ["case", ["boolean", ["feature-state", "hovered"], false], 3, 2],
+            ["case", ["boolean", ["feature-state", "hovered"], false], 5, 2],
             14,
-            ["case", ["boolean", ["feature-state", "hovered"], false], 3, 2]
+            ["case", ["boolean", ["feature-state", "hovered"], false], 6, 2]
           ],
-          "circle-stroke-color": "#ffffff"
+          "circle-stroke-color": ["case", ["boolean", ["feature-state", "hovered"], false], "#f8fafc", "#ffffff"],
+          "circle-opacity": ["case", ["boolean", ["feature-state", "hovered"], false], 1, 0.95]
         }
       });
     }
@@ -379,8 +413,6 @@ export function RestroomMap({
         }
 
         onFocusedRestroomIdChange?.(id);
-        mapHoveredRestroomIdRef.current = id;
-        setHoveredFeatureState(resolveHoveredRestroomId());
 
         if (activePopupRestroomIdRef.current === id) {
           router.push(`/restroom/${id}`);
@@ -488,11 +520,13 @@ export function RestroomMap({
           if (activePopupRestroomIdRef.current === id) {
             activePopupRestroomIdRef.current = null;
             onFocusedRestroomIdChange?.(null);
+            setHoveredFeatureState(resolveHoveredRestroomId());
           }
         });
 
         popupRef.current = popup;
         activePopupRestroomIdRef.current = id;
+        setHoveredFeatureState(resolveHoveredRestroomId());
       };
 
       const mouseEnterHandler = (event: mapboxgl.MapLayerMouseEvent) => {
@@ -537,6 +571,51 @@ export function RestroomMap({
     }
     setHoveredFeatureState(resolveHoveredRestroomId());
   }, [hoveredRestroomId, isMapReady, markerData, onFocusedRestroomIdChange, restrooms.length, router, showDistance, userLocationData]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") {
+      return;
+    }
+
+    const invalidRestrooms = restrooms.filter((restroom) => !isValidCoordinate(restroom.lat, restroom.lng));
+    const invalidLogKey = invalidRestrooms
+      .map((restroom) => restroom.id)
+      .sort()
+      .join("|");
+
+    if (invalidRestrooms.length > 0 && invalidLogKey !== invalidCoordinatesLogKeyRef.current) {
+      invalidCoordinatesLogKeyRef.current = invalidLogKey;
+      console.warn("[Poopin] RestroomMap skipped marker features due to invalid coordinates.", {
+        invalidCount: invalidRestrooms.length,
+        invalidRestrooms: invalidRestrooms.map((restroom) => ({
+          id: restroom.id,
+          lat: restroom.lat,
+          lng: restroom.lng,
+          name: restroom.name
+        }))
+      });
+    }
+  }, [restrooms]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") {
+      return;
+    }
+
+    if (!hoveredRestroomId || markerFeatureIds.has(hoveredRestroomId)) {
+      return;
+    }
+
+    if (missingHoveredMarkerLogRef.current.has(hoveredRestroomId)) {
+      return;
+    }
+
+    missingHoveredMarkerLogRef.current.add(hoveredRestroomId);
+    console.warn("[Poopin] Hovered restroom id has no matching visible marker feature.", {
+      hoveredRestroomId,
+      visibleMarkerCount: markerData.features.length
+    });
+  }, [hoveredRestroomId, markerData.features.length, markerFeatureIds]);
 
   useEffect(() => {
     if (!isMapReady) {

@@ -34,6 +34,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </Link>
                 <nav className="flex items-center gap-2 text-sm font-medium">
                   <Link
+                    href="/contact"
+                    className="rounded-lg px-3 py-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                  >
+                    Contact
+                  </Link>
+                  <Link
                     href="/add"
                     className="rounded-lg bg-slate-900 px-3.5 py-2 text-white transition hover:bg-slate-800"
                   >

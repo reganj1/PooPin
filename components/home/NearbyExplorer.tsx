@@ -38,6 +38,7 @@ interface BoundsApiResponse {
 const LIST_LIMIT = 20;
 const roundToOne = (value: number) => Math.round(value * 10) / 10;
 const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+const isValidMapCoordinate = (lat: number, lng: number) => Number.isFinite(lat) && Number.isFinite(lng);
 
 const haversineDistanceMiles = (origin: Coordinate, point: Coordinate) => {
   const earthRadiusMiles = 3958.8;
@@ -89,19 +90,55 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const latestBoundsKeyRef = useRef<string>("");
   const activeBoundsRequestIdRef = useRef(0);
   const locationWatchIdRef = useRef<number | null>(null);
+  const invalidBoundsCoordinatesLogKeyRef = useRef<string>("");
   const hasRealUserLocation = userLocation !== null;
   const distanceOrigin = userLocation;
+  const mapRenderableRestrooms = useMemo(
+    () => mapRestrooms.filter((restroom) => isValidMapCoordinate(restroom.lat, restroom.lng)),
+    [mapRestrooms]
+  );
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") {
+      return;
+    }
+
+    const invalidRestrooms = mapRestrooms.filter((restroom) => !isValidMapCoordinate(restroom.lat, restroom.lng));
+    if (invalidRestrooms.length === 0) {
+      invalidBoundsCoordinatesLogKeyRef.current = "";
+      return;
+    }
+
+    const invalidLogKey = invalidRestrooms
+      .map((restroom) => restroom.id)
+      .sort()
+      .join("|");
+    if (invalidLogKey === invalidBoundsCoordinatesLogKeyRef.current) {
+      return;
+    }
+
+    invalidBoundsCoordinatesLogKeyRef.current = invalidLogKey;
+    console.warn("[Poopin] Bounds results include restrooms with invalid coordinates. These entries are omitted from map/list hover sync.", {
+      invalidCount: invalidRestrooms.length,
+      invalidRestrooms: invalidRestrooms.map((restroom) => ({
+        id: restroom.id,
+        lat: restroom.lat,
+        lng: restroom.lng,
+        name: restroom.name
+      }))
+    });
+  }, [mapRestrooms]);
 
   const listBaseRestrooms = useMemo(() => {
     if (!distanceOrigin) {
-      return [...mapRestrooms];
+      return [...mapRenderableRestrooms];
     }
 
-    return [...mapRestrooms].map((restroom) => ({
+    return [...mapRenderableRestrooms].map((restroom) => ({
       ...restroom,
       distanceMiles: roundToOne(haversineDistanceMiles(distanceOrigin, { lat: restroom.lat, lng: restroom.lng }))
     }));
-  }, [distanceOrigin, mapRestrooms]);
+  }, [distanceOrigin, mapRenderableRestrooms]);
 
   const listRestrooms = useMemo(() => {
     const filtered = listBaseRestrooms.filter((restroom) => {
@@ -440,7 +477,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
-              {mapRestrooms.length} pins in view
+              {mapRenderableRestrooms.length} pins in view
             </span>
             <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
               {listRestrooms.length} in list
@@ -461,7 +498,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         <section className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(380px,1fr)] xl:grid-cols-[minmax(0,1.55fr)_430px]">
           <div className="lg:sticky lg:top-20 lg:self-start">
             <MapPanel
-              restrooms={mapRestrooms}
+              restrooms={mapRenderableRestrooms}
               userLocation={userLocation}
               showDistance={hasRealUserLocation}
               hoveredRestroomId={listHoveredRestroomId}
@@ -479,7 +516,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         <section className="fixed inset-0 z-[80] overflow-hidden bg-slate-950/45 backdrop-blur-[1.5px]">
           <div className="absolute inset-0 w-screen max-w-full overflow-hidden">
             <MapPanel
-              restrooms={mapRestrooms}
+              restrooms={mapRenderableRestrooms}
               userLocation={userLocation}
               showDistance={hasRealUserLocation}
               hoveredRestroomId={listHoveredRestroomId}
