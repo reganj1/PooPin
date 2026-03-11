@@ -1,5 +1,7 @@
 "use client";
 
+import posthog from "posthog-js";
+
 export type NavigateClickSource = "restroom_card" | "restroom_detail" | "map_popup";
 
 export type PoopinAnalyticsEventName =
@@ -37,57 +39,25 @@ interface PoopinAnalyticsEventProperties {
   };
 }
 
-type PendingEvent = {
-  eventName: string;
-  properties?: Record<string, unknown>;
-};
-
-interface PostHogClient {
-  init: (apiKey: string, options?: Record<string, unknown>) => void;
-  capture: (eventName: string, properties?: Record<string, unknown>) => void;
-}
-
 declare global {
   interface Window {
-    posthog?: PostHogClient;
-    __poopinPostHogLoaded?: boolean;
-    __poopinPostHogLoading?: boolean;
+    posthog?: typeof posthog;
+    __poopinPostHogInitialized?: boolean;
   }
 }
 
 const posthogApiKey = process.env.NEXT_PUBLIC_POSTHOG_KEY?.trim() ?? "";
 const posthogHost = process.env.NEXT_PUBLIC_POSTHOG_HOST?.trim() ?? "";
 const normalizedPosthogHost = posthogHost.replace(/\/+$/, "");
-const POSTHOG_SCRIPT_PATH = "/static/array.js";
-const MAX_PENDING_EVENTS = 120;
-
-const pendingEvents: PendingEvent[] = [];
 
 export const shouldEnablePostHog = process.env.NODE_ENV === "production" && Boolean(posthogApiKey && normalizedPosthogHost);
 
-const canCaptureEvents = () => typeof window !== "undefined" && typeof window.posthog?.capture === "function";
-
-const queueEvent = (eventName: string, properties?: Record<string, unknown>) => {
-  if (pendingEvents.length >= MAX_PENDING_EVENTS) {
-    pendingEvents.shift();
+const canCaptureEvents = () => {
+  if (typeof window === "undefined") {
+    return false;
   }
 
-  pendingEvents.push({ eventName, properties });
-};
-
-const flushPendingEvents = () => {
-  if (!canCaptureEvents()) {
-    return;
-  }
-
-  while (pendingEvents.length > 0) {
-    const next = pendingEvents.shift();
-    if (!next) {
-      continue;
-    }
-
-    window.posthog?.capture(next.eventName, next.properties);
-  }
+  return Boolean(window.__poopinPostHogInitialized && typeof window.posthog?.capture === "function");
 };
 
 export const initPostHog = () => {
@@ -95,62 +65,42 @@ export const initPostHog = () => {
     return;
   }
 
-  if (window.__poopinPostHogLoaded) {
-    flushPendingEvents();
+  if (window.__poopinPostHogInitialized) {
+    window.posthog = posthog;
     return;
   }
 
-  if (window.__poopinPostHogLoading) {
-    return;
-  }
-
-  window.__poopinPostHogLoading = true;
-
-  const script = document.createElement("script");
-  script.async = true;
-  script.src = `${normalizedPosthogHost}${POSTHOG_SCRIPT_PATH}`;
-  script.onload = () => {
-    if (typeof window.posthog?.init === "function") {
-      window.posthog.init(posthogApiKey, {
-        api_host: normalizedPosthogHost,
-        autocapture: false,
-        capture_pageview: false,
-        disable_session_recording: false,
-        session_recording: {
-          maskAllInputs: true,
-          maskTextSelector: "[data-ph-mask]",
-          blockSelector: "[data-ph-no-capture]"
-        }
-      });
+  posthog.init(posthogApiKey, {
+    api_host: normalizedPosthogHost,
+    autocapture: false,
+    capture_pageview: false,
+    disable_session_recording: false,
+    session_recording: {
+      maskAllInputs: true,
+      maskTextSelector: "[data-ph-mask]",
+      blockSelector: "[data-ph-no-capture]"
     }
+  });
 
-    window.__poopinPostHogLoaded = true;
-    window.__poopinPostHogLoading = false;
-    flushPendingEvents();
-  };
-
-  script.onerror = () => {
-    window.__poopinPostHogLoading = false;
-  };
-
-  document.head.appendChild(script);
+  window.posthog = posthog;
+  window.__poopinPostHogInitialized = true;
 };
 
 export const capturePageview = (pathname: string) => {
-  if (!shouldEnablePostHog) {
+  if (!shouldEnablePostHog || typeof window === "undefined") {
     return;
   }
 
-  const properties = {
-    pathname
-  };
+  if (!window.__poopinPostHogInitialized) {
+    initPostHog();
+  }
 
   if (canCaptureEvents()) {
-    window.posthog?.capture("$pageview", properties);
-    return;
+    window.posthog?.capture("$pageview", {
+      pathname,
+      current_url: window.location.href
+    });
   }
-
-  queueEvent("$pageview", properties);
 };
 
 export const captureAnalyticsEvent = <T extends PoopinAnalyticsEventName>(
@@ -161,11 +111,12 @@ export const captureAnalyticsEvent = <T extends PoopinAnalyticsEventName>(
     return;
   }
 
+  if (typeof window !== "undefined" && !window.__poopinPostHogInitialized) {
+    initPostHog();
+  }
+
   const payload = properties as unknown as Record<string, unknown>;
   if (canCaptureEvents()) {
     window.posthog?.capture(eventName, payload);
-    return;
   }
-
-  queueEvent(eventName, payload);
 };

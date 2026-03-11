@@ -1,12 +1,57 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+interface BrowserSupabaseConfig {
+  url: string;
+  anonKey: string;
+}
 
-export const getSupabaseBrowserClient = () => {
-  if (!supabaseUrl || !supabaseAnonKey) {
+declare global {
+  var __poopinSupabaseBrowserClient: SupabaseClient | undefined;
+  var __poopinSupabaseBrowserClientConfigKey: string | undefined;
+}
+
+const getBrowserSupabaseConfig = (): BrowserSupabaseConfig | null => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? "";
+
+  if (!url || !anonKey) {
     return null;
   }
 
-  return createClient(supabaseUrl, supabaseAnonKey);
+  try {
+    new URL(url);
+  } catch {
+    return null;
+  }
+
+  return {
+    url,
+    anonKey
+  };
+};
+
+export const getSupabaseBrowserClient = () => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const config = getBrowserSupabaseConfig();
+  if (!config) {
+    return null;
+  }
+
+  const configKey = `${config.url}::${config.anonKey}`;
+  if (globalThis.__poopinSupabaseBrowserClient && globalThis.__poopinSupabaseBrowserClientConfigKey === configKey) {
+    return globalThis.__poopinSupabaseBrowserClient;
+  }
+
+  const client = createClient(config.url, config.anonKey, {
+    auth: {
+      storageKey: "poopin-supabase-auth"
+    }
+  });
+
+  globalThis.__poopinSupabaseBrowserClient = client;
+  globalThis.__poopinSupabaseBrowserClientConfigKey = configKey;
+  return client;
 };

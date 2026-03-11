@@ -19,6 +19,7 @@
     "clsx": "^2.1.1",
     "mapbox-gl": "^3.9.1",
     "next": "^15.0.0",
+    "posthog-js": "^1.360.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hook-form": "^7.54.0",

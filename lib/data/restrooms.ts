@@ -1,5 +1,5 @@
 import { Bathroom, NearbyBathroom, Review } from "@/types";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { getSupabaseServerClient, getSupabaseServerClientConfigIssue } from "@/lib/supabase/server";
 import {
   getBathroomById as getMockBathroomById,
   getBathroomsInBounds as getMockBathroomsInBounds,
@@ -12,6 +12,7 @@ import { buildTopReviewSignals, normalizeReviewQuickTags } from "@/lib/utils/rev
 const DEFAULT_ORIGIN = { lat: 37.7749, lng: -122.4194 };
 const DEFAULT_LIMIT = 12;
 const ACTIVE_STATUS = "active";
+const REVIEW_QUERY_BATHROOM_ID_BATCH_SIZE = 100;
 const moderationStatusOptions = ["active", "pending", "flagged", "removed"] as const;
 const sourceOptions = ["user", "google_places", "city_open_data", "openstreetmap", "partner", "other"] as const;
 const allowedPlaceTypes = new Set<(typeof bathroomPlaceTypeOptions)[number]>(bathroomPlaceTypeOptions);
@@ -201,12 +202,132 @@ const toNearbyBathroom = (
   };
 };
 
+const chunkItems = <T,>(items: T[], batchSize: number) => {
+  if (items.length === 0) {
+    return [] as T[][];
+  }
+
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += batchSize) {
+    chunks.push(items.slice(index, index + batchSize));
+  }
+
+  return chunks;
+};
+
+const supabaseHostForLogs = (() => {
+  const rawUrl = (process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").trim();
+  if (!rawUrl) {
+    return "unconfigured";
+  }
+
+  try {
+    return new URL(rawUrl).host;
+  } catch {
+    return "invalid_url";
+  }
+})();
+
+let hasLoggedSupabaseConfigIssue = false;
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string") {
+      return message;
+    }
+  }
+
+  return "Unknown error";
+};
+
+const isSupabaseNetworkFetchFailure = (message: string) => {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("fetch failed") ||
+    normalized.includes("enotfound") ||
+    normalized.includes("econnrefused") ||
+    normalized.includes("etimedout") ||
+    normalized.includes("network")
+  );
+};
+
+const logSupabaseFallback = (context: string, error: unknown) => {
+  const message = getErrorMessage(error);
+  if (isSupabaseNetworkFetchFailure(message)) {
+    console.warn(`[Poopin] ${context} failed, using mock data.`, {
+      error: message,
+      supabaseHost: supabaseHostForLogs,
+      hint: "Verify Supabase URL/key env vars and local network access to Supabase."
+    });
+    return;
+  }
+
+  console.warn(`[Poopin] ${context} failed, using mock data.`, message);
+};
+
+const logSupabaseConfigFallback = () => {
+  if (hasLoggedSupabaseConfigIssue) {
+    return;
+  }
+
+  hasLoggedSupabaseConfigIssue = true;
+  const configIssue = getSupabaseServerClientConfigIssue();
+  if (!configIssue) {
+    return;
+  }
+
+  console.warn("[Poopin] Supabase server client unavailable, using mock data.", {
+    issue: configIssue
+  });
+};
+
+const fetchActiveReviewRowsByBathroomIds = async (
+  supabase: NonNullable<ReturnType<typeof getSupabaseServerClient>>,
+  bathroomIds: string[],
+  context: string
+) => {
+  const uniqueBathroomIds = [...new Set(bathroomIds)];
+  const idChunks = chunkItems(uniqueBathroomIds, REVIEW_QUERY_BATHROOM_ID_BATCH_SIZE);
+  const collectedRows: ReviewRow[] = [];
+
+  if (process.env.NODE_ENV !== "production" && idChunks.length > 1) {
+    console.info(`[Poopin] ${context} using chunked review fetch.`, {
+      bathroomCount: uniqueBathroomIds.length,
+      chunkCount: idChunks.length,
+      chunkSize: REVIEW_QUERY_BATHROOM_ID_BATCH_SIZE
+    });
+  }
+
+  for (let chunkIndex = 0; chunkIndex < idChunks.length; chunkIndex += 1) {
+    const chunkBathroomIds = idChunks[chunkIndex];
+    const { data: reviewRows, error: reviewError } = await supabase
+      .from("reviews")
+      .select("*")
+      .in("bathroom_id", chunkBathroomIds)
+      .eq("status", ACTIVE_STATUS);
+
+    if (reviewError) {
+      throw new Error(`${context} chunk ${chunkIndex + 1}/${idChunks.length} failed: ${reviewError.message}`);
+    }
+
+    collectedRows.push(...((reviewRows ?? []) as ReviewRow[]));
+  }
+
+  return collectedRows;
+};
+
 export async function getNearbyBathroomsData(
   origin: { lat: number; lng: number } = DEFAULT_ORIGIN,
   limit = DEFAULT_LIMIT
 ): Promise<NearbyBathroom[]> {
   const supabase = getSupabaseServerClient();
   if (!supabase) {
+    logSupabaseConfigFallback();
     return getMockNearbyBathrooms(origin, limit);
   }
 
@@ -217,7 +338,7 @@ export async function getNearbyBathroomsData(
     .limit(500);
 
   if (bathroomError || !bathroomRows) {
-    console.warn("[Poopin] Supabase bathroom query failed, using mock data.", bathroomError?.message);
+    logSupabaseFallback("Supabase bathroom query", bathroomError ?? new Error("Bathroom rows missing."));
     return getMockNearbyBathrooms(origin, limit);
   }
 
@@ -229,29 +350,25 @@ export async function getNearbyBathroomsData(
 
   const bathroomIds = bathrooms.map((bathroom) => bathroom.id);
 
-  const { data: reviewRows, error: reviewError } = await supabase
-    .from("reviews")
-    .select("*")
-    .in("bathroom_id", bathroomIds)
-    .eq("status", ACTIVE_STATUS);
+  try {
+    const reviewRows = await fetchActiveReviewRowsByBathroomIds(supabase, bathroomIds, "Supabase review query");
+    const reviews = reviewRows.map(toReview).filter((row): row is Review => row !== null);
+    const ratingsMap = buildRatingMap(reviews);
 
-  if (reviewError) {
-    console.warn("[Poopin] Supabase review query failed, using mock data.", reviewError.message);
+    return bathrooms
+      .map((bathroom) => toNearbyBathroom(bathroom, ratingsMap, origin))
+      .sort((a, b) => a.distanceMiles - b.distanceMiles)
+      .slice(0, limit);
+  } catch (error) {
+    logSupabaseFallback("Supabase review query", error);
     return getMockNearbyBathrooms(origin, limit);
   }
-
-  const reviews = ((reviewRows ?? []) as ReviewRow[]).map(toReview).filter((row): row is Review => row !== null);
-  const ratingsMap = buildRatingMap(reviews);
-
-  return bathrooms
-    .map((bathroom) => toNearbyBathroom(bathroom, ratingsMap, origin))
-    .sort((a, b) => a.distanceMiles - b.distanceMiles)
-    .slice(0, limit);
 }
 
 export async function getBathroomByIdData(id: string): Promise<NearbyBathroom | undefined> {
   const supabase = getSupabaseServerClient();
   if (!supabase) {
+    logSupabaseConfigFallback();
     return getMockBathroomById(id);
   }
 
@@ -263,7 +380,7 @@ export async function getBathroomByIdData(id: string): Promise<NearbyBathroom | 
     .maybeSingle();
 
   if (bathroomError) {
-    console.warn("[Poopin] Supabase bathroom detail query failed, using mock data.", bathroomError.message);
+    logSupabaseFallback("Supabase bathroom detail query", bathroomError);
     return getMockBathroomById(id);
   }
 
@@ -276,42 +393,53 @@ export async function getBathroomByIdData(id: string): Promise<NearbyBathroom | 
     return undefined;
   }
 
-  const { data: reviewRows, error: reviewError } = await supabase
-    .from("reviews")
-    .select("*")
-    .eq("bathroom_id", id)
-    .eq("status", ACTIVE_STATUS);
+  try {
+    const { data: reviewRows, error: reviewError } = await supabase
+      .from("reviews")
+      .select("*")
+      .eq("bathroom_id", id)
+      .eq("status", ACTIVE_STATUS);
 
-  if (reviewError) {
-    console.warn("[Poopin] Supabase review summary query failed, using mock data.", reviewError.message);
+    if (reviewError) {
+      logSupabaseFallback("Supabase review summary query", reviewError);
+      return getMockBathroomById(id);
+    }
+
+    const reviews = ((reviewRows ?? []) as ReviewRow[]).map(toReview).filter((row): row is Review => row !== null);
+    const ratingsMap = buildRatingMap(reviews);
+
+    return toNearbyBathroom(bathroom, ratingsMap, DEFAULT_ORIGIN);
+  } catch (error) {
+    logSupabaseFallback("Supabase review summary query", error);
     return getMockBathroomById(id);
   }
-
-  const reviews = ((reviewRows ?? []) as ReviewRow[]).map(toReview).filter((row): row is Review => row !== null);
-  const ratingsMap = buildRatingMap(reviews);
-
-  return toNearbyBathroom(bathroom, ratingsMap, DEFAULT_ORIGIN);
 }
 
 export async function getBathroomReviewsData(bathroomId: string): Promise<Review[]> {
   const supabase = getSupabaseServerClient();
   if (!supabase) {
+    logSupabaseConfigFallback();
     return getMockBathroomReviews(bathroomId);
   }
 
-  const { data: reviewRows, error } = await supabase
-    .from("reviews")
-    .select("*")
-    .eq("bathroom_id", bathroomId)
-    .eq("status", ACTIVE_STATUS)
-    .order("created_at", { ascending: false });
+  try {
+    const { data: reviewRows, error } = await supabase
+      .from("reviews")
+      .select("*")
+      .eq("bathroom_id", bathroomId)
+      .eq("status", ACTIVE_STATUS)
+      .order("created_at", { ascending: false });
 
-  if (error) {
-    console.warn("[Poopin] Supabase review list query failed, using mock data.", error.message);
+    if (error) {
+      logSupabaseFallback("Supabase review list query", error);
+      return getMockBathroomReviews(bathroomId);
+    }
+
+    return ((reviewRows ?? []) as ReviewRow[]).map(toReview).filter((row): row is Review => row !== null);
+  } catch (error) {
+    logSupabaseFallback("Supabase review list query", error);
     return getMockBathroomReviews(bathroomId);
   }
-
-  return ((reviewRows ?? []) as ReviewRow[]).map(toReview).filter((row): row is Review => row !== null);
 }
 
 export async function getBathroomsInBoundsData(
@@ -321,6 +449,7 @@ export async function getBathroomsInBoundsData(
 ): Promise<NearbyBathroom[]> {
   const supabase = getSupabaseServerClient();
   if (!supabase) {
+    logSupabaseConfigFallback();
     return getMockBathroomsInBounds(bounds, limit, origin);
   }
 
@@ -335,7 +464,7 @@ export async function getBathroomsInBoundsData(
     .limit(limit);
 
   if (bathroomError || !bathroomRows) {
-    console.warn("[Poopin] Supabase bounds bathroom query failed, using mock data.", bathroomError?.message);
+    logSupabaseFallback("Supabase bounds bathroom query", bathroomError ?? new Error("Bathroom rows missing."));
     return getMockBathroomsInBounds(bounds, limit, origin);
   }
 
@@ -347,21 +476,16 @@ export async function getBathroomsInBoundsData(
 
   const bathroomIds = bathrooms.map((bathroom) => bathroom.id);
 
-  const { data: reviewRows, error: reviewError } = await supabase
-    .from("reviews")
-    .select("*")
-    .in("bathroom_id", bathroomIds)
-    .eq("status", ACTIVE_STATUS);
+  try {
+    const reviewRows = await fetchActiveReviewRowsByBathroomIds(supabase, bathroomIds, "Supabase bounds review query");
+    const reviews = reviewRows.map(toReview).filter((row): row is Review => row !== null);
+    const ratingsMap = buildRatingMap(reviews);
 
-  if (reviewError) {
-    console.warn("[Poopin] Supabase bounds review query failed, using mock data.", reviewError.message);
+    return bathrooms
+      .map((bathroom) => toNearbyBathroom(bathroom, ratingsMap, origin))
+      .sort((a, b) => a.distanceMiles - b.distanceMiles);
+  } catch (error) {
+    logSupabaseFallback("Supabase bounds review query", error);
     return getMockBathroomsInBounds(bounds, limit, origin);
   }
-
-  const reviews = ((reviewRows ?? []) as ReviewRow[]).map(toReview).filter((row): row is Review => row !== null);
-  const ratingsMap = buildRatingMap(reviews);
-
-  return bathrooms
-    .map((bathroom) => toNearbyBathroom(bathroom, ratingsMap, origin))
-    .sort((a, b) => a.distanceMiles - b.distanceMiles);
 }
