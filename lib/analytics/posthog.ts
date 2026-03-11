@@ -77,7 +77,23 @@ const getPostHogConfig = (): PostHogRuntimeConfig | null => {
   });
 };
 
-export const shouldEnablePostHog = () => process.env.NODE_ENV === "production" && Boolean(getPostHogConfig());
+const isDevPostHogOverrideEnabled = () => {
+  const value = process.env.NEXT_PUBLIC_ENABLE_POSTHOG_DEV?.trim().toLowerCase();
+  return value === "true" || value === "1";
+};
+
+export const shouldEnablePostHog = () => {
+  const hasConfig = Boolean(getPostHogConfig());
+  if (!hasConfig) {
+    return false;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    return true;
+  }
+
+  return isDevPostHogOverrideEnabled();
+};
 
 const canCaptureEvents = () => {
   if (typeof window === "undefined") {
