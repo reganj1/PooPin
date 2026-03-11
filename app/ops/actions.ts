@@ -13,28 +13,69 @@ import { ModerationStatus } from "@/types";
 
 const REVIEWED_REPORT_PREFIX = "reviewed:v1:";
 const allowedStatuses = new Set<ModerationStatus>(["active", "pending", "flagged", "removed"]);
+type OpsActionResult = "success" | "error";
 
 const getStringValue = (formData: FormData, key: string) => {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() : "";
 };
 
-const canRunModerationAction = async () => {
+const getModerationClient = async () => {
   const isAuthenticated = await isOpsSessionAuthenticated();
   if (!isAuthenticated) {
-    return false;
+    return {
+      client: null,
+      error: "Session expired. Sign in again to continue moderating."
+    };
   }
 
   const supabaseAdmin = getSupabaseAdminClient();
   if (!supabaseAdmin) {
-    return false;
+    return {
+      client: null,
+      error: "Supabase service role is missing. Ops actions are read-only."
+    };
   }
 
-  return supabaseAdmin;
+  return {
+    client: supabaseAdmin,
+    error: null
+  };
 };
 
-const safeRevalidateOps = () => {
+const getModerationClientOrRedirect = async (
+  action: string
+): Promise<NonNullable<ReturnType<typeof getSupabaseAdminClient>>> => {
+  const { client, error } = await getModerationClient();
+  if (!client) {
+    redirectWithOpsResult(action, "error", error ?? "Could not authenticate moderation action.");
+  }
+
+  return client as NonNullable<ReturnType<typeof getSupabaseAdminClient>>;
+};
+
+const sanitizeMessage = (value: string) => value.replace(/\s+/g, " ").trim().slice(0, 160);
+
+const buildOpsRedirectUrl = (action: string, result: OpsActionResult, message: string) => {
+  const params = new URLSearchParams({
+    ops_action: action,
+    ops_result: result,
+    ops_message: sanitizeMessage(message)
+  });
+
+  return `/ops?${params.toString()}`;
+};
+
+const redirectWithOpsResult = (action: string, result: OpsActionResult, message: string): never => {
+  redirect(buildOpsRedirectUrl(action, result, message));
+};
+
+const revalidateAfterModeration = (bathroomId?: string | null) => {
   revalidatePath("/ops");
+  revalidatePath("/");
+  if (bathroomId) {
+    revalidatePath(`/restroom/${bathroomId}`);
+  }
 };
 
 export async function loginOpsAction(formData: FormData) {
@@ -57,69 +98,103 @@ export async function logoutOpsAction() {
 }
 
 export async function moderateBathroomAction(formData: FormData) {
-  const supabaseAdmin = await canRunModerationAction();
-  if (!supabaseAdmin) {
-    return;
-  }
+  const supabaseAdmin = await getModerationClientOrRedirect("moderate_bathroom");
 
   const bathroomId = getStringValue(formData, "bathroom_id");
   const nextStatus = getStringValue(formData, "status");
   if (!bathroomId || !allowedStatuses.has(nextStatus as ModerationStatus)) {
-    return;
+    redirectWithOpsResult("moderate_bathroom", "error", "Invalid restroom moderation payload.");
   }
 
-  await supabaseAdmin.from("bathrooms").update({ status: nextStatus }).eq("id", bathroomId);
-  safeRevalidateOps();
+  const { data, error } = await supabaseAdmin
+    .from("bathrooms")
+    .update({ status: nextStatus })
+    .eq("id", bathroomId)
+    .select("id")
+    .maybeSingle();
+
+  if (error || !data) {
+    redirectWithOpsResult("moderate_bathroom", "error", error?.message ?? "Restroom moderation update failed.");
+  }
+
+  revalidateAfterModeration(bathroomId);
+  redirectWithOpsResult("moderate_bathroom", "success", `Restroom moved to ${nextStatus}.`);
 }
 
 export async function moderatePhotoAction(formData: FormData) {
-  const supabaseAdmin = await canRunModerationAction();
-  if (!supabaseAdmin) {
-    return;
-  }
+  const supabaseAdmin = await getModerationClientOrRedirect("moderate_photo");
 
   const photoId = getStringValue(formData, "photo_id");
+  const bathroomId = getStringValue(formData, "bathroom_id");
   const nextStatus = getStringValue(formData, "status");
   if (!photoId || !allowedStatuses.has(nextStatus as ModerationStatus)) {
-    return;
+    redirectWithOpsResult("moderate_photo", "error", "Invalid photo moderation payload.");
   }
 
-  await supabaseAdmin.from("photos").update({ status: nextStatus }).eq("id", photoId);
-  safeRevalidateOps();
+  const { data, error } = await supabaseAdmin
+    .from("photos")
+    .update({ status: nextStatus })
+    .eq("id", photoId)
+    .select("id, bathroom_id")
+    .maybeSingle();
+
+  if (error || !data) {
+    redirectWithOpsResult("moderate_photo", "error", error?.message ?? "Photo moderation update failed.");
+  }
+
+  revalidateAfterModeration(bathroomId || data?.bathroom_id || null);
+  redirectWithOpsResult("moderate_photo", "success", `Photo moved to ${nextStatus}.`);
 }
 
 export async function moderateReviewAction(formData: FormData) {
-  const supabaseAdmin = await canRunModerationAction();
-  if (!supabaseAdmin) {
-    return;
-  }
+  const supabaseAdmin = await getModerationClientOrRedirect("moderate_review");
 
   const reviewId = getStringValue(formData, "review_id");
+  const bathroomId = getStringValue(formData, "bathroom_id");
   const nextStatus = getStringValue(formData, "status");
   if (!reviewId || !allowedStatuses.has(nextStatus as ModerationStatus)) {
-    return;
+    redirectWithOpsResult("moderate_review", "error", "Invalid review moderation payload.");
   }
 
-  await supabaseAdmin.from("reviews").update({ status: nextStatus }).eq("id", reviewId);
-  safeRevalidateOps();
+  const { data, error } = await supabaseAdmin
+    .from("reviews")
+    .update({ status: nextStatus })
+    .eq("id", reviewId)
+    .select("id, bathroom_id")
+    .maybeSingle();
+
+  if (error || !data) {
+    redirectWithOpsResult("moderate_review", "error", error?.message ?? "Review moderation update failed.");
+  }
+
+  revalidateAfterModeration(bathroomId || data?.bathroom_id || null);
+  redirectWithOpsResult("moderate_review", "success", `Review moved to ${nextStatus}.`);
 }
 
 export async function markReportReviewedAction(formData: FormData) {
-  const supabaseAdmin = await canRunModerationAction();
-  if (!supabaseAdmin) {
-    return;
-  }
+  const supabaseAdmin = await getModerationClientOrRedirect("review_report");
 
   const reportId = getStringValue(formData, "report_id");
   const reason = getStringValue(formData, "reason");
   if (!reportId || !reason) {
-    return;
+    redirectWithOpsResult("review_report", "error", "Invalid report moderation payload.");
   }
 
   const nextReason = reason.startsWith(REVIEWED_REPORT_PREFIX)
     ? reason
     : `${REVIEWED_REPORT_PREFIX}${reason}`.slice(0, 1900);
 
-  await supabaseAdmin.from("reports").update({ reason: nextReason }).eq("id", reportId);
-  safeRevalidateOps();
+  const { data, error } = await supabaseAdmin
+    .from("reports")
+    .update({ reason: nextReason })
+    .eq("id", reportId)
+    .select("id")
+    .maybeSingle();
+
+  if (error || !data) {
+    redirectWithOpsResult("review_report", "error", error?.message ?? "Could not mark report as reviewed.");
+  }
+
+  revalidateAfterModeration(null);
+  redirectWithOpsResult("review_report", "success", "Report marked reviewed.");
 }

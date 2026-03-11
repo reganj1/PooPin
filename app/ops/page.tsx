@@ -21,6 +21,8 @@ import { BathroomSource, ModerationStatus } from "@/types";
 export const dynamic = "force-dynamic";
 
 const REVIEWED_REPORT_PREFIX = "reviewed:v1:";
+const MAX_QUEUE_ITEMS = 120;
+const COMMUNITY_SOURCES: BathroomSource[] = ["user", "other"];
 
 interface OpsPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -32,6 +34,12 @@ interface BathroomRow {
   address: string;
   city: string;
   state: string;
+  lat: number;
+  lng: number;
+  place_type: string;
+  access_type: string;
+  is_accessible: boolean;
+  requires_purchase: boolean;
   created_at: string;
   status: ModerationStatus;
   source: BathroomSource;
@@ -42,6 +50,8 @@ interface BathroomReferenceRow {
   name: string;
   city: string;
   address: string;
+  lat: number | null;
+  lng: number | null;
 }
 
 interface PhotoRow {
@@ -80,6 +90,14 @@ interface ParsedRestroomIssue {
   issueCode: string;
 }
 
+interface ReviewLookupRow {
+  id: string;
+  bathroom_id: string;
+  status: ModerationStatus;
+  overall_rating: number;
+  review_text: string | null;
+}
+
 const toStringParam = (value: string | string[] | undefined) => {
   if (Array.isArray(value)) {
     return value[0] ?? "";
@@ -103,6 +121,14 @@ const formatDateTime = (value: string) =>
     hour: "numeric",
     minute: "2-digit"
   }).format(new Date(value));
+
+const truncateText = (value: string, max: number) => {
+  if (value.length <= max) {
+    return value;
+  }
+
+  return `${value.slice(0, max - 1).trimEnd()}…`;
+};
 
 const sourceLabelByType: Record<BathroomSource, string> = {
   city_open_data: "Verified public facility",
@@ -163,6 +189,74 @@ const parseRestroomIssue = (reason: string): ParsedRestroomIssue | null => {
   };
 };
 
+const toComparableText = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ");
+
+const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+
+const distanceMiles = (origin: { lat: number; lng: number }, point: { lat: number; lng: number }) => {
+  const earthRadiusMiles = 3958.8;
+  const dLat = toRadians(point.lat - origin.lat);
+  const dLng = toRadians(point.lng - origin.lng);
+  const lat1 = toRadians(origin.lat);
+  const lat2 = toRadians(point.lat);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLng / 2) * Math.sin(dLng / 2) * Math.cos(lat1) * Math.cos(lat2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return earthRadiusMiles * c;
+};
+
+const isWeakAddress = (value: string) => {
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) {
+    return true;
+  }
+
+  if (/^approximate location\s*\(/i.test(trimmed)) {
+    return true;
+  }
+
+  return /^-?\d{1,3}(?:\.\d+)?\s*,\s*-?\d{1,3}(?:\.\d+)?$/.test(trimmed);
+};
+
+const getBathroomDuplicateClue = (bathroom: BathroomRow, pool: BathroomRow[]) => {
+  const sameAddressCount = pool.filter((candidate) => {
+    if (candidate.id === bathroom.id) {
+      return false;
+    }
+
+    return (
+      toComparableText(candidate.address) === toComparableText(bathroom.address) &&
+      toComparableText(candidate.city) === toComparableText(bathroom.city) &&
+      toComparableText(candidate.state) === toComparableText(bathroom.state)
+    );
+  }).length;
+
+  const sameNameNearbyCount = pool.filter((candidate) => {
+    if (candidate.id === bathroom.id) {
+      return false;
+    }
+
+    if (toComparableText(candidate.name) !== toComparableText(bathroom.name)) {
+      return false;
+    }
+
+    return distanceMiles({ lat: bathroom.lat, lng: bathroom.lng }, { lat: candidate.lat, lng: candidate.lng }) <= 0.08;
+  }).length;
+
+  return {
+    sameAddressCount,
+    sameNameNearbyCount
+  };
+};
+
 function StatusBadge({ status }: { status: ModerationStatus }) {
   return (
     <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClassByType[status]}`}>
@@ -171,9 +265,32 @@ function StatusBadge({ status }: { status: ModerationStatus }) {
   );
 }
 
+function QueueColumn({ title, subtitle, count, children }: { title: string; subtitle: string; count: number; children: React.ReactNode }) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+          <p className="mt-1 text-xs text-slate-500">{subtitle}</p>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">{count}</span>
+      </div>
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
+}
+
+const renderEmptyState = (label: string) => (
+  <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">{label}</p>
+);
+
 export default async function OpsPage({ searchParams }: OpsPageProps) {
   const resolvedSearchParams = await searchParams;
   const authState = toStringParam(resolvedSearchParams.auth).trim();
+  const opsAction = toStringParam(resolvedSearchParams.ops_action).trim();
+  const opsResult = toStringParam(resolvedSearchParams.ops_result).trim();
+  const opsMessage = toStringParam(resolvedSearchParams.ops_message).trim();
+
   const configuredPassword = getOpsDashboardPassword();
   const hasOpsPasswordConfigured = configuredPassword.length > 0;
   const isAuthorized = await isOpsSessionAuthenticated();
@@ -243,36 +360,105 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
     );
   }
 
-  const [pendingBathroomsResponse, pendingPhotosResponse, recentReviewsResponse, reportsResponse] = await Promise.all([
+  const [
+    pendingBathroomsResponse,
+    activeBathroomsResponse,
+    removedBathroomsResponse,
+    pendingPhotosResponse,
+    activePhotosResponse,
+    removedPhotosResponse,
+    activeReviewsResponse,
+    moderatedReviewsResponse,
+    reportsResponse
+  ] = await Promise.all([
     supabase
       .from("bathrooms")
-      .select("id, name, address, city, state, created_at, status, source")
+      .select("id, name, address, city, state, lat, lng, place_type, access_type, is_accessible, requires_purchase, created_at, status, source")
+      .in("source", COMMUNITY_SOURCES)
       .eq("status", "pending")
       .order("created_at", { ascending: false })
-      .limit(80),
+      .limit(MAX_QUEUE_ITEMS),
+    supabase
+      .from("bathrooms")
+      .select("id, name, address, city, state, lat, lng, place_type, access_type, is_accessible, requires_purchase, created_at, status, source")
+      .in("source", COMMUNITY_SOURCES)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(MAX_QUEUE_ITEMS),
+    supabase
+      .from("bathrooms")
+      .select("id, name, address, city, state, lat, lng, place_type, access_type, is_accessible, requires_purchase, created_at, status, source")
+      .in("source", COMMUNITY_SOURCES)
+      .in("status", ["removed", "flagged"])
+      .order("created_at", { ascending: false })
+      .limit(MAX_QUEUE_ITEMS),
     supabase
       .from("photos")
-      .select("id, bathroom_id, storage_path, created_at, status, bathrooms(id, name, city, address)")
+      .select("id, bathroom_id, storage_path, created_at, status, bathrooms(id, name, city, address, lat, lng)")
       .eq("status", "pending")
       .order("created_at", { ascending: false })
-      .limit(80),
+      .limit(MAX_QUEUE_ITEMS),
+    supabase
+      .from("photos")
+      .select("id, bathroom_id, storage_path, created_at, status, bathrooms(id, name, city, address, lat, lng)")
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(MAX_QUEUE_ITEMS),
+    supabase
+      .from("photos")
+      .select("id, bathroom_id, storage_path, created_at, status, bathrooms(id, name, city, address, lat, lng)")
+      .in("status", ["removed", "flagged"])
+      .order("created_at", { ascending: false })
+      .limit(MAX_QUEUE_ITEMS),
     supabase
       .from("reviews")
-      .select("id, bathroom_id, overall_rating, review_text, created_at, status, bathrooms(id, name, city, address)")
+      .select("id, bathroom_id, overall_rating, review_text, created_at, status, bathrooms(id, name, city, address, lat, lng)")
+      .eq("status", "active")
       .order("created_at", { ascending: false })
-      .limit(80),
+      .limit(MAX_QUEUE_ITEMS),
+    supabase
+      .from("reviews")
+      .select("id, bathroom_id, overall_rating, review_text, created_at, status, bathrooms(id, name, city, address, lat, lng)")
+      .in("status", ["removed", "flagged"])
+      .order("created_at", { ascending: false })
+      .limit(MAX_QUEUE_ITEMS),
     supabase
       .from("reports")
-      .select("id, bathroom_id, reason, created_at, bathrooms(id, name, city, address)")
+      .select("id, bathroom_id, reason, created_at, bathrooms(id, name, city, address, lat, lng)")
       .not("reason", "like", `${REVIEWED_REPORT_PREFIX}%`)
       .order("created_at", { ascending: false })
-      .limit(150)
+      .limit(180)
   ]);
 
+  const queueErrors = [
+    pendingBathroomsResponse.error ? `Pending restroom queue: ${pendingBathroomsResponse.error.message}` : null,
+    activeBathroomsResponse.error ? `Active restroom queue: ${activeBathroomsResponse.error.message}` : null,
+    removedBathroomsResponse.error ? `Removed restroom queue: ${removedBathroomsResponse.error.message}` : null,
+    pendingPhotosResponse.error ? `Pending photo queue: ${pendingPhotosResponse.error.message}` : null,
+    activePhotosResponse.error ? `Approved photo queue: ${activePhotosResponse.error.message}` : null,
+    removedPhotosResponse.error ? `Removed photo queue: ${removedPhotosResponse.error.message}` : null,
+    activeReviewsResponse.error ? `Active review queue: ${activeReviewsResponse.error.message}` : null,
+    moderatedReviewsResponse.error ? `Removed review queue: ${moderatedReviewsResponse.error.message}` : null,
+    reportsResponse.error ? `Reports queue: ${reportsResponse.error.message}` : null
+  ].filter((value): value is string => Boolean(value));
+
   const pendingBathrooms = (pendingBathroomsResponse.data ?? []) as BathroomRow[];
+  const activeBathrooms = (activeBathroomsResponse.data ?? []) as BathroomRow[];
+  const removedBathrooms = (removedBathroomsResponse.data ?? []) as BathroomRow[];
+
   const pendingPhotos = (pendingPhotosResponse.data ?? []) as PhotoRow[];
-  const recentReviews = (recentReviewsResponse.data ?? []) as ReviewRow[];
+  const activePhotos = (activePhotosResponse.data ?? []) as PhotoRow[];
+  const removedPhotos = (removedPhotosResponse.data ?? []) as PhotoRow[];
+
+  const activeReviews = (activeReviewsResponse.data ?? []) as ReviewRow[];
+  const moderatedReviews = (moderatedReviewsResponse.data ?? []) as ReviewRow[];
+
   const reportRows = (reportsResponse.data ?? []) as ReportRow[];
+
+  const allSubmissionBathrooms = [...pendingBathrooms, ...activeBathrooms, ...removedBathrooms];
+  const bathroomDuplicateClues = new Map(
+    allSubmissionBathrooms.map((bathroom) => [bathroom.id, getBathroomDuplicateClue(bathroom, allSubmissionBathrooms)])
+  );
 
   const reviewReports = reportRows
     .map((row) => {
@@ -304,17 +490,39 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
     })
     .filter((row): row is NonNullable<typeof row> => row !== null);
 
+  const reportReviewIds = [...new Set(reviewReports.map((report) => report.reviewId))];
+  const reviewLookupById = new Map<string, ReviewLookupRow>();
+
+  let reviewLookupErrorMessage: string | null = null;
+
+  if (reportReviewIds.length > 0) {
+    const { data, error } = await supabase
+      .from("reviews")
+      .select("id, bathroom_id, status, overall_rating, review_text")
+      .in("id", reportReviewIds)
+      .limit(reportReviewIds.length);
+
+    if (error) {
+      reviewLookupErrorMessage = `Reported review lookup failed: ${error.message}`;
+    }
+
+    for (const row of (data ?? []) as ReviewLookupRow[]) {
+      reviewLookupById.set(row.id, row);
+    }
+  }
+
   const canModerate = isSupabaseAdminConfigured;
+  const showActionResult = opsResult === "success" || opsResult === "error";
 
   return (
-    <main className="mx-auto w-full max-w-[1280px] px-4 py-6 sm:px-6 lg:py-8">
+    <main className="mx-auto w-full max-w-[1380px] px-4 py-6 sm:px-6 lg:py-8">
       <section className="mb-5 rounded-3xl border border-slate-200 bg-white px-5 py-4 shadow-sm sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-600">Internal Ops</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">Beta moderation queue</h1>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">Beta moderation dashboard</h1>
             <p className="mt-1 text-sm text-slate-600">
-              Monitor submissions, pending photos, reviews, and reports from Bay Area beta traffic.
+              Review pending intake, audit approved content, and remove low-quality data quickly.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -340,256 +548,488 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
 
         {!canModerate ? (
           <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            Read-only mode: set <code>SUPABASE_SERVICE_ROLE_KEY</code> on the server to enable approve/reject actions.
+            Read-only mode: set <code>SUPABASE_SERVICE_ROLE_KEY</code> to enable moderation actions.
           </p>
+        ) : null}
+
+        {showActionResult ? (
+          <p
+            className={`mt-3 rounded-xl border px-3 py-2 text-xs ${
+              opsResult === "success"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-rose-200 bg-rose-50 text-rose-700"
+            }`}
+          >
+            <span className="font-semibold">{opsResult === "success" ? "Success" : "Action failed"}</span>
+            {opsAction ? ` • ${opsAction.replaceAll("_", " ")}` : ""}
+            {opsMessage ? ` • ${opsMessage}` : ""}
+          </p>
+        ) : null}
+
+        {queueErrors.length > 0 || reviewLookupErrorMessage ? (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <p className="font-semibold">Some moderation data could not be loaded.</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              {queueErrors.map((errorMessage) => (
+                <li key={errorMessage}>{errorMessage}</li>
+              ))}
+              {reviewLookupErrorMessage ? <li>{reviewLookupErrorMessage}</li> : null}
+            </ul>
+          </div>
         ) : null}
       </section>
 
-      <section className="grid gap-5 lg:grid-cols-2">
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-          <h2 className="text-lg font-semibold text-slate-900">Pending restroom submissions</h2>
-          <p className="mt-1 text-xs text-slate-500">Approve trusted listings or remove low-quality submissions.</p>
-
-          <div className="mt-4 space-y-3">
-            {pendingBathrooms.length === 0 ? (
-              <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">No pending restroom submissions.</p>
-            ) : (
-              pendingBathrooms.map((bathroom) => (
-                <article key={bathroom.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-slate-900">{bathroom.name}</p>
-                      <p className="text-xs text-slate-600">
-                        {bathroom.address}, {bathroom.city}, {bathroom.state}
-                      </p>
-                    </div>
-                    <StatusBadge status={bathroom.status} />
-                  </div>
-
-                  <p className="mt-2 text-xs text-slate-500">
-                    {sourceLabelByType[bathroom.source]} • Submitted {formatDateTime(bathroom.created_at)}
-                  </p>
-
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <Link
-                      href={`/restroom/${bathroom.id}`}
-                      className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                    >
-                      Open listing
-                    </Link>
-                    {canModerate ? (
-                      <form action={moderateBathroomAction} className="flex flex-wrap items-center gap-2">
-                        <input type="hidden" name="bathroom_id" value={bathroom.id} />
-                        <button
-                          type="submit"
-                          name="status"
-                          value="active"
-                          className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          type="submit"
-                          name="status"
-                          value="removed"
-                          className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                        >
-                          Reject
-                        </button>
-                      </form>
-                    ) : null}
-                  </div>
-                </article>
-              ))
-            )}
+      <section className="space-y-5">
+        <section>
+          <div className="mb-3">
+            <h2 className="text-lg font-semibold text-slate-900">Restroom submissions</h2>
+            <p className="text-xs text-slate-500">Track pending, approved, and removed community restroom submissions.</p>
           </div>
-        </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-          <h2 className="text-lg font-semibold text-slate-900">Pending photos</h2>
-          <p className="mt-1 text-xs text-slate-500">Review and moderate uploads before public display.</p>
+          <div className="grid gap-4 xl:grid-cols-3">
+            <QueueColumn title="Pending submissions" subtitle="Review new community entries." count={pendingBathrooms.length}>
+              {pendingBathrooms.length === 0
+                ? renderEmptyState("No pending restroom submissions.")
+                : pendingBathrooms.map((bathroom) => {
+                    const duplicateClue = bathroomDuplicateClues.get(bathroom.id);
+                    const mapHref = `https://www.google.com/maps?q=${bathroom.lat},${bathroom.lng}`;
 
-          <div className="mt-4 space-y-3">
-            {pendingPhotos.length === 0 ? (
-              <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">No pending photos.</p>
-            ) : (
-              pendingPhotos.map((photo) => {
-                const bathroom = normalizeBathroomReference(photo.bathrooms);
+                    return (
+                      <article key={bathroom.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">{bathroom.name}</p>
+                            <p className="text-xs text-slate-600">
+                              {bathroom.address}, {bathroom.city}, {bathroom.state}
+                            </p>
+                          </div>
+                          <StatusBadge status={bathroom.status} />
+                        </div>
 
-                return (
-                  <article key={photo.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold text-slate-900">{bathroom?.name ?? "Unknown restroom"}</p>
-                        <p className="text-xs text-slate-600">{bathroom?.city ?? "Unknown city"}</p>
+                        <div className="mt-2 space-y-1 text-xs text-slate-500">
+                          <p>
+                            {sourceLabelByType[bathroom.source]} • Submitted {formatDateTime(bathroom.created_at)}
+                          </p>
+                          <p>
+                            Coords: {bathroom.lat.toFixed(5)}, {bathroom.lng.toFixed(5)} •{" "}
+                            <a href={mapHref} target="_blank" rel="noopener noreferrer" className="font-semibold text-slate-700 underline underline-offset-2">
+                              Open map
+                            </a>
+                          </p>
+                          <p>{isWeakAddress(bathroom.address) ? "Address quality: needs review" : "Address quality: usable"}</p>
+                          <p>
+                            Duplicate clues: {duplicateClue?.sameAddressCount ?? 0} same-address, {duplicateClue?.sameNameNearbyCount ?? 0} same-name nearby
+                          </p>
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <Link
+                            href={`/restroom/${bathroom.id}`}
+                            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                          >
+                            Open listing
+                          </Link>
+                          {canModerate ? (
+                            <form action={moderateBathroomAction} className="flex flex-wrap items-center gap-2">
+                              <input type="hidden" name="bathroom_id" value={bathroom.id} />
+                              <button
+                                type="submit"
+                                name="status"
+                                value="active"
+                                className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                type="submit"
+                                name="status"
+                                value="removed"
+                                className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                              >
+                                Reject
+                              </button>
+                            </form>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
+            </QueueColumn>
+
+            <QueueColumn title="Recently approved" subtitle="Audit active community submissions." count={activeBathrooms.length}>
+              {activeBathrooms.length === 0
+                ? renderEmptyState("No approved community submissions yet.")
+                : activeBathrooms.map((bathroom) => {
+                    const mapHref = `https://www.google.com/maps?q=${bathroom.lat},${bathroom.lng}`;
+
+                    return (
+                      <article key={bathroom.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">{bathroom.name}</p>
+                            <p className="text-xs text-slate-600">
+                              {bathroom.address}, {bathroom.city}, {bathroom.state}
+                            </p>
+                          </div>
+                          <StatusBadge status={bathroom.status} />
+                        </div>
+
+                        <p className="mt-2 text-xs text-slate-500">Submitted {formatDateTime(bathroom.created_at)} • Currently active</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          <a href={mapHref} target="_blank" rel="noopener noreferrer" className="font-semibold text-slate-700 underline underline-offset-2">
+                            Open map
+                          </a>
+                        </p>
+
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <Link
+                            href={`/restroom/${bathroom.id}`}
+                            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                          >
+                            Open listing
+                          </Link>
+                          {canModerate ? (
+                            <form action={moderateBathroomAction} className="flex flex-wrap items-center gap-2">
+                              <input type="hidden" name="bathroom_id" value={bathroom.id} />
+                              <button
+                                type="submit"
+                                name="status"
+                                value="removed"
+                                className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                              >
+                                Remove
+                              </button>
+                            </form>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
+            </QueueColumn>
+
+            <QueueColumn title="Rejected / removed" subtitle="Restore if removed in error." count={removedBathrooms.length}>
+              {removedBathrooms.length === 0
+                ? renderEmptyState("No removed restroom submissions.")
+                : removedBathrooms.map((bathroom) => (
+                    <article key={bathroom.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-slate-900">{bathroom.name}</p>
+                          <p className="text-xs text-slate-600">
+                            {bathroom.address}, {bathroom.city}, {bathroom.state}
+                          </p>
+                        </div>
+                        <StatusBadge status={bathroom.status} />
                       </div>
-                      <StatusBadge status={photo.status} />
-                    </div>
 
-                    <p className="mt-2 break-all text-xs text-slate-500">{photo.storage_path}</p>
-                    <p className="mt-1 text-xs text-slate-500">Uploaded {formatDateTime(photo.created_at)}</p>
+                      <p className="mt-2 text-xs text-slate-500">Submitted {formatDateTime(bathroom.created_at)} • Currently removed</p>
 
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <Link
-                        href={`/restroom/${photo.bathroom_id}`}
-                        className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                      >
-                        Open restroom
-                      </Link>
-                      {canModerate ? (
-                        <form action={moderatePhotoAction} className="flex flex-wrap items-center gap-2">
-                          <input type="hidden" name="photo_id" value={photo.id} />
-                          <button
-                            type="submit"
-                            name="status"
-                            value="active"
-                            className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="submit"
-                            name="status"
-                            value="removed"
-                            className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                          >
-                            Reject
-                          </button>
-                        </form>
-                      ) : null}
-                    </div>
-                  </article>
-                );
-              })
-            )}
-          </div>
-        </section>
-      </section>
-
-      <section className="mt-5 grid gap-5 lg:grid-cols-2">
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-          <h2 className="text-lg font-semibold text-slate-900">Recent reviews</h2>
-          <p className="mt-1 text-xs text-slate-500">Recent write activity with moderation controls.</p>
-
-          <div className="mt-4 space-y-3">
-            {recentReviews.length === 0 ? (
-              <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">No recent reviews.</p>
-            ) : (
-              recentReviews.map((review) => {
-                const bathroom = normalizeBathroomReference(review.bathrooms);
-                return (
-                  <article key={review.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold text-slate-900">{bathroom?.name ?? "Unknown restroom"}</p>
-                        <p className="text-xs text-slate-600">Overall {review.overall_rating.toFixed(1)} • {bathroom?.city ?? "Unknown city"}</p>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <Link
+                          href={`/restroom/${bathroom.id}`}
+                          className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                        >
+                          Open listing
+                        </Link>
+                        {canModerate ? (
+                          <form action={moderateBathroomAction} className="flex flex-wrap items-center gap-2">
+                            <input type="hidden" name="bathroom_id" value={bathroom.id} />
+                            <button
+                              type="submit"
+                              name="status"
+                              value="active"
+                              className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                            >
+                              Restore
+                            </button>
+                          </form>
+                        ) : null}
                       </div>
-                      <StatusBadge status={review.status} />
-                    </div>
-
-                    <p className="mt-2 text-sm text-slate-700">{review.review_text?.trim() || "No written note."}</p>
-                    <p className="mt-2 text-xs text-slate-500">Created {formatDateTime(review.created_at)}</p>
-
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <Link
-                        href={`/restroom/${review.bathroom_id}`}
-                        className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                      >
-                        Open restroom
-                      </Link>
-                      {canModerate ? (
-                        <form action={moderateReviewAction} className="flex flex-wrap items-center gap-2">
-                          <input type="hidden" name="review_id" value={review.id} />
-                          <button
-                            type="submit"
-                            name="status"
-                            value="active"
-                            className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
-                          >
-                            Keep
-                          </button>
-                          <button
-                            type="submit"
-                            name="status"
-                            value="flagged"
-                            className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100"
-                          >
-                            Flag
-                          </button>
-                          <button
-                            type="submit"
-                            name="status"
-                            value="removed"
-                            className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                          >
-                            Remove
-                          </button>
-                        </form>
-                      ) : null}
-                    </div>
-                  </article>
-                );
-              })
-            )}
+                    </article>
+                  ))}
+            </QueueColumn>
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-          <h2 className="text-lg font-semibold text-slate-900">Reports queue</h2>
-          <p className="mt-1 text-xs text-slate-500">Reported listings and reported reviews awaiting ops review.</p>
+        <section>
+          <div className="mb-3">
+            <h2 className="text-lg font-semibold text-slate-900">Photo moderation</h2>
+            <p className="text-xs text-slate-500">Moderate pending uploads and revisit approved media.</p>
+          </div>
 
-          <div className="mt-4 space-y-4">
-            <div>
-              <p className="mb-2 text-sm font-semibold text-slate-800">Reported listings</p>
-              <div className="space-y-2">
-                {listingReports.length === 0 ? (
-                  <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">No open listing reports.</p>
-                ) : (
-                  listingReports.map((report) => (
+          <div className="grid gap-4 xl:grid-cols-3">
+            <QueueColumn title="Pending photos" subtitle="Approve before public display." count={pendingPhotos.length}>
+              {pendingPhotos.length === 0
+                ? renderEmptyState("No pending photos.")
+                : pendingPhotos.map((photo) => {
+                    const bathroom = normalizeBathroomReference(photo.bathrooms);
+
+                    return (
+                      <article key={photo.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">{bathroom?.name ?? "Unknown restroom"}</p>
+                            <p className="text-xs text-slate-600">{bathroom?.city ?? "Unknown city"}</p>
+                          </div>
+                          <StatusBadge status={photo.status} />
+                        </div>
+
+                        <p className="mt-2 break-all text-xs text-slate-500">{truncateText(photo.storage_path, 90)}</p>
+                        <p className="mt-1 text-xs text-slate-500">Uploaded {formatDateTime(photo.created_at)}</p>
+
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <Link
+                            href={`/restroom/${photo.bathroom_id}`}
+                            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                          >
+                            Open restroom
+                          </Link>
+                          {canModerate ? (
+                            <form action={moderatePhotoAction} className="flex flex-wrap items-center gap-2">
+                              <input type="hidden" name="photo_id" value={photo.id} />
+                              <input type="hidden" name="bathroom_id" value={photo.bathroom_id} />
+                              <button
+                                type="submit"
+                                name="status"
+                                value="active"
+                                className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                type="submit"
+                                name="status"
+                                value="removed"
+                                className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                              >
+                                Reject
+                              </button>
+                            </form>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
+            </QueueColumn>
+
+            <QueueColumn title="Approved photos" subtitle="Quick audit with remove action." count={activePhotos.length}>
+              {activePhotos.length === 0
+                ? renderEmptyState("No approved photos yet.")
+                : activePhotos.map((photo) => {
+                    const bathroom = normalizeBathroomReference(photo.bathrooms);
+
+                    return (
+                      <article key={photo.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">{bathroom?.name ?? "Unknown restroom"}</p>
+                            <p className="text-xs text-slate-600">{bathroom?.city ?? "Unknown city"}</p>
+                          </div>
+                          <StatusBadge status={photo.status} />
+                        </div>
+
+                        <p className="mt-2 break-all text-xs text-slate-500">{truncateText(photo.storage_path, 90)}</p>
+                        <p className="mt-1 text-xs text-slate-500">Uploaded {formatDateTime(photo.created_at)} • Currently approved</p>
+
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <Link
+                            href={`/restroom/${photo.bathroom_id}`}
+                            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                          >
+                            Open restroom
+                          </Link>
+                          {canModerate ? (
+                            <form action={moderatePhotoAction} className="flex flex-wrap items-center gap-2">
+                              <input type="hidden" name="photo_id" value={photo.id} />
+                              <input type="hidden" name="bathroom_id" value={photo.bathroom_id} />
+                              <button
+                                type="submit"
+                                name="status"
+                                value="removed"
+                                className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                              >
+                                Remove
+                              </button>
+                            </form>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
+            </QueueColumn>
+
+            <QueueColumn title="Removed photos" subtitle="Restore if moderation was too strict." count={removedPhotos.length}>
+              {removedPhotos.length === 0
+                ? renderEmptyState("No removed photos.")
+                : removedPhotos.map((photo) => {
+                    const bathroom = normalizeBathroomReference(photo.bathrooms);
+
+                    return (
+                      <article key={photo.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">{bathroom?.name ?? "Unknown restroom"}</p>
+                            <p className="text-xs text-slate-600">{bathroom?.city ?? "Unknown city"}</p>
+                          </div>
+                          <StatusBadge status={photo.status} />
+                        </div>
+
+                        <p className="mt-2 break-all text-xs text-slate-500">{truncateText(photo.storage_path, 90)}</p>
+                        <p className="mt-1 text-xs text-slate-500">Uploaded {formatDateTime(photo.created_at)} • Currently removed</p>
+
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <Link
+                            href={`/restroom/${photo.bathroom_id}`}
+                            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                          >
+                            Open restroom
+                          </Link>
+                          {canModerate ? (
+                            <form action={moderatePhotoAction} className="flex flex-wrap items-center gap-2">
+                              <input type="hidden" name="photo_id" value={photo.id} />
+                              <input type="hidden" name="bathroom_id" value={photo.bathroom_id} />
+                              <button
+                                type="submit"
+                                name="status"
+                                value="active"
+                                className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                              >
+                                Restore
+                              </button>
+                            </form>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
+            </QueueColumn>
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-3">
+            <h2 className="text-lg font-semibold text-slate-900">Review moderation</h2>
+            <p className="text-xs text-slate-500">Reviews are live immediately. Use this queue for after-the-fact moderation.</p>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <QueueColumn title="Recent active reviews" subtitle="Audit live reviews and remove if needed." count={activeReviews.length}>
+              {activeReviews.length === 0
+                ? renderEmptyState("No recent active reviews.")
+                : activeReviews.map((review) => {
+                    const bathroom = normalizeBathroomReference(review.bathrooms);
+                    return (
+                      <article key={review.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">{bathroom?.name ?? "Unknown restroom"}</p>
+                            <p className="text-xs text-slate-600">Overall {review.overall_rating.toFixed(1)} • {bathroom?.city ?? "Unknown city"}</p>
+                          </div>
+                          <StatusBadge status={review.status} />
+                        </div>
+
+                        <p className="mt-2 text-sm text-slate-700">{review.review_text?.trim() || "No written note."}</p>
+                        <p className="mt-2 text-xs text-slate-500">Created {formatDateTime(review.created_at)}</p>
+
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <Link
+                            href={`/restroom/${review.bathroom_id}`}
+                            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                          >
+                            Open restroom
+                          </Link>
+                          {canModerate ? (
+                            <form action={moderateReviewAction} className="flex flex-wrap items-center gap-2">
+                              <input type="hidden" name="review_id" value={review.id} />
+                              <input type="hidden" name="bathroom_id" value={review.bathroom_id} />
+                              <button
+                                type="submit"
+                                name="status"
+                                value="flagged"
+                                className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+                              >
+                                Flag
+                              </button>
+                              <button
+                                type="submit"
+                                name="status"
+                                value="removed"
+                                className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                              >
+                                Remove
+                              </button>
+                            </form>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
+            </QueueColumn>
+
+            <QueueColumn title="Removed / flagged reviews" subtitle="Restore reviews when moderation was incorrect." count={moderatedReviews.length}>
+              {moderatedReviews.length === 0
+                ? renderEmptyState("No removed or flagged reviews.")
+                : moderatedReviews.map((review) => {
+                    const bathroom = normalizeBathroomReference(review.bathrooms);
+                    return (
+                      <article key={review.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">{bathroom?.name ?? "Unknown restroom"}</p>
+                            <p className="text-xs text-slate-600">Overall {review.overall_rating.toFixed(1)} • {bathroom?.city ?? "Unknown city"}</p>
+                          </div>
+                          <StatusBadge status={review.status} />
+                        </div>
+
+                        <p className="mt-2 text-sm text-slate-700">{review.review_text?.trim() || "No written note."}</p>
+                        <p className="mt-2 text-xs text-slate-500">Created {formatDateTime(review.created_at)}</p>
+
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <Link
+                            href={`/restroom/${review.bathroom_id}`}
+                            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                          >
+                            Open restroom
+                          </Link>
+                          {canModerate ? (
+                            <form action={moderateReviewAction} className="flex flex-wrap items-center gap-2">
+                              <input type="hidden" name="review_id" value={review.id} />
+                              <input type="hidden" name="bathroom_id" value={review.bathroom_id} />
+                              <button
+                                type="submit"
+                                name="status"
+                                value="active"
+                                className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                              >
+                                Restore
+                              </button>
+                            </form>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
+            </QueueColumn>
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-3">
+            <h2 className="text-lg font-semibold text-slate-900">Reports queue</h2>
+            <p className="text-xs text-slate-500">Handle listing and review reports and apply moderation actions as needed.</p>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <QueueColumn title="Reported listings" subtitle="User-submitted listing issues." count={listingReports.length}>
+              {listingReports.length === 0
+                ? renderEmptyState("No open listing reports.")
+                : listingReports.map((report) => (
                     <article key={report.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
                       <p className="font-semibold text-slate-900">{report.bathroom?.name ?? "Unknown restroom"}</p>
                       <p className="mt-1 text-xs text-slate-600">
                         {issueReasonLabelByCode.get(report.issueCode) ?? report.issueCode} • {formatDateTime(report.created_at)}
                       </p>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <Link
-                          href={`/restroom/${report.bathroom_id}`}
-                          className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                        >
-                          Open restroom
-                        </Link>
-                        {canModerate ? (
-                          <form action={markReportReviewedAction}>
-                            <input type="hidden" name="report_id" value={report.id} />
-                            <input type="hidden" name="reason" value={report.reason} />
-                            <button
-                              type="submit"
-                              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                            >
-                              Mark reviewed
-                            </button>
-                          </form>
-                        ) : null}
-                      </div>
-                    </article>
-                  ))
-                )}
-              </div>
-            </div>
 
-            <div>
-              <p className="mb-2 text-sm font-semibold text-slate-800">Reported reviews</p>
-              <div className="space-y-2">
-                {reviewReports.length === 0 ? (
-                  <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">No open review reports.</p>
-                ) : (
-                  reviewReports.map((report) => (
-                    <article key={report.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                      <p className="font-semibold text-slate-900">{report.bathroom?.name ?? "Unknown restroom"}</p>
-                      <p className="mt-1 text-xs text-slate-600">
-                        {reviewReasonLabelByCode.get(report.reasonCode) ?? report.reasonCode} • Review {report.reviewId.slice(0, 8)} •{" "}
-                        {formatDateTime(report.created_at)}
-                      </p>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <Link
                           href={`/restroom/${report.bathroom_id}`}
@@ -611,10 +1051,90 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                         ) : null}
                       </div>
                     </article>
-                  ))
-                )}
-              </div>
-            </div>
+                  ))}
+            </QueueColumn>
+
+            <QueueColumn title="Reported reviews" subtitle="Review reports with direct moderation controls." count={reviewReports.length}>
+              {reviewReports.length === 0
+                ? renderEmptyState("No open review reports.")
+                : reviewReports.map((report) => {
+                    const reviewLookup = reviewLookupById.get(report.reviewId);
+                    return (
+                      <article key={report.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="font-semibold text-slate-900">{report.bathroom?.name ?? "Unknown restroom"}</p>
+                          {reviewLookup ? <StatusBadge status={reviewLookup.status} /> : null}
+                        </div>
+
+                        <p className="mt-1 text-xs text-slate-600">
+                          {reviewReasonLabelByCode.get(report.reasonCode) ?? report.reasonCode} • Review {report.reviewId.slice(0, 8)} •{" "}
+                          {formatDateTime(report.created_at)}
+                        </p>
+
+                        {reviewLookup ? (
+                          <p className="mt-2 text-sm text-slate-700">
+                            Overall {reviewLookup.overall_rating.toFixed(1)} • {reviewLookup.review_text?.trim() || "No written note."}
+                          </p>
+                        ) : (
+                          <p className="mt-2 text-xs text-amber-700">Review row not found. It may already be removed.</p>
+                        )}
+
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <Link
+                            href={`/restroom/${report.bathroom_id}`}
+                            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                          >
+                            Open restroom
+                          </Link>
+
+                          {canModerate && reviewLookup ? (
+                            <form action={moderateReviewAction} className="flex flex-wrap items-center gap-2">
+                              <input type="hidden" name="review_id" value={reviewLookup.id} />
+                              <input type="hidden" name="bathroom_id" value={reviewLookup.bathroom_id} />
+                              <button
+                                type="submit"
+                                name="status"
+                                value="active"
+                                className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                              >
+                                Keep
+                              </button>
+                              <button
+                                type="submit"
+                                name="status"
+                                value="flagged"
+                                className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+                              >
+                                Flag
+                              </button>
+                              <button
+                                type="submit"
+                                name="status"
+                                value="removed"
+                                className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                              >
+                                Remove
+                              </button>
+                            </form>
+                          ) : null}
+
+                          {canModerate ? (
+                            <form action={markReportReviewedAction}>
+                              <input type="hidden" name="report_id" value={report.id} />
+                              <input type="hidden" name="reason" value={report.reason} />
+                              <button
+                                type="submit"
+                                className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                              >
+                                Mark reviewed
+                              </button>
+                            </form>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
+            </QueueColumn>
           </div>
         </section>
       </section>
