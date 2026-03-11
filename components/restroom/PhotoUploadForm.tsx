@@ -2,6 +2,7 @@
 
 import { ChangeEvent, FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { uploadBathroomPhoto, toUploadPhotoErrorMessage } from "@/lib/supabase/photos";
 import {
@@ -142,6 +143,11 @@ export function PhotoUploadForm({ bathroomId }: PhotoUploadFormProps) {
       console.log("insert result:", result);
       console.groupEnd();
 
+      captureAnalyticsEvent("photo_uploaded", {
+        bathroom_id: bathroomId,
+        moderation_state: "pending"
+      });
+
       incrementSessionUploadCount(bathroomId);
       setSubmitSuccess("Photo uploaded and submitted for review. It will appear after approval.");
       setSelectedFile(null);
@@ -206,4 +212,3 @@ export function PhotoUploadForm({ bathroomId }: PhotoUploadFormProps) {
     </div>
   );
 }
-

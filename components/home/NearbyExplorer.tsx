@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MapPanel } from "@/components/map/MapPanel";
 import { RestroomList } from "@/components/restroom/RestroomList";
+import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
 import { cn } from "@/lib/utils/cn";
 import { NearbyBathroom } from "@/types";
 
@@ -150,6 +151,14 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, [hasRealUserLocation, sortMode]);
 
   const highlightedListRestroomId = listHoveredRestroomId ?? mapFocusedRestroomId;
+  const handleExpandMap = () => {
+    captureAnalyticsEvent("expand_map_clicked", {
+      source: "homepage_map"
+    });
+    setIsExpandedListOpen(true);
+    setIsMapExpanded(true);
+  };
+
   const toggleFilter = (filterKey: keyof FilterState) => {
     setFilters((current) => ({
       ...current,
@@ -458,10 +467,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               hoveredRestroomId={listHoveredRestroomId}
               onFocusedRestroomIdChange={setMapFocusedRestroomId}
               onViewportBoundsChange={handleViewportBoundsChange}
-              onExpandMap={() => {
-                setIsExpandedListOpen(true);
-                setIsMapExpanded(true);
-              }}
+              onExpandMap={handleExpandMap}
             />
           </div>
 

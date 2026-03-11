@@ -14,6 +14,7 @@ import { ModerationStatus } from "@/types";
 const REVIEWED_REPORT_PREFIX = "reviewed:v1:";
 const allowedStatuses = new Set<ModerationStatus>(["active", "pending", "flagged", "removed"]);
 type OpsActionResult = "success" | "error";
+type DuplicateWarningDecision = "keep" | "reopen";
 
 const getStringValue = (formData: FormData, key: string) => {
   const value = formData.get(key);
@@ -55,6 +56,12 @@ const getModerationClientOrRedirect = async (
 };
 
 const sanitizeMessage = (value: string) => value.replace(/\s+/g, " ").trim().slice(0, 160);
+
+const toReviewedReportReason = (reason: string) =>
+  reason.startsWith(REVIEWED_REPORT_PREFIX) ? reason : `${REVIEWED_REPORT_PREFIX}${reason}`.slice(0, 1900);
+
+const toUnreviewedReportReason = (reason: string) =>
+  reason.startsWith(REVIEWED_REPORT_PREFIX) ? reason.slice(REVIEWED_REPORT_PREFIX.length) : reason;
 
 const buildOpsRedirectUrl = (action: string, result: OpsActionResult, message: string) => {
   const params = new URLSearchParams({
@@ -180,9 +187,7 @@ export async function markReportReviewedAction(formData: FormData) {
     redirectWithOpsResult("review_report", "error", "Invalid report moderation payload.");
   }
 
-  const nextReason = reason.startsWith(REVIEWED_REPORT_PREFIX)
-    ? reason
-    : `${REVIEWED_REPORT_PREFIX}${reason}`.slice(0, 1900);
+  const nextReason = toReviewedReportReason(reason);
 
   const { data, error } = await supabaseAdmin
     .from("reports")
@@ -197,4 +202,82 @@ export async function markReportReviewedAction(formData: FormData) {
 
   revalidateAfterModeration(null);
   redirectWithOpsResult("review_report", "success", "Report marked reviewed.");
+}
+
+export async function moderateDuplicateWarningAction(formData: FormData) {
+  const supabaseAdmin = await getModerationClientOrRedirect("moderate_duplicate_warning");
+
+  const reportId = getStringValue(formData, "report_id");
+  const reason = getStringValue(formData, "reason");
+  const bathroomId = getStringValue(formData, "bathroom_id");
+  const decision = getStringValue(formData, "decision") as DuplicateWarningDecision;
+
+  if (!reportId || !reason || !bathroomId || (decision !== "keep" && decision !== "reopen")) {
+    redirectWithOpsResult("moderate_duplicate_warning", "error", "Invalid duplicate moderation payload.");
+  }
+
+  const nextReason = decision === "keep" ? toReviewedReportReason(reason) : toUnreviewedReportReason(reason);
+  const successMessage =
+    decision === "keep" ? "Duplicate warning marked as not a duplicate." : "Duplicate warning reopened.";
+
+  const { data, error } = await supabaseAdmin
+    .from("reports")
+    .update({ reason: nextReason })
+    .eq("id", reportId)
+    .select("id")
+    .maybeSingle();
+
+  if (error || !data) {
+    redirectWithOpsResult("moderate_duplicate_warning", "error", error?.message ?? "Could not update duplicate warning.");
+  }
+
+  revalidateAfterModeration(bathroomId);
+  redirectWithOpsResult("moderate_duplicate_warning", "success", successMessage);
+}
+
+export async function removeDuplicateListingAction(formData: FormData) {
+  const supabaseAdmin = await getModerationClientOrRedirect("remove_duplicate_listing");
+
+  const reportId = getStringValue(formData, "report_id");
+  const reason = getStringValue(formData, "reason");
+  const bathroomId = getStringValue(formData, "bathroom_id");
+
+  if (!reportId || !reason || !bathroomId) {
+    redirectWithOpsResult("remove_duplicate_listing", "error", "Invalid duplicate removal payload.");
+  }
+
+  const bathroomUpdate = await supabaseAdmin
+    .from("bathrooms")
+    .update({ status: "removed" })
+    .eq("id", bathroomId)
+    .select("id")
+    .maybeSingle();
+
+  if (bathroomUpdate.error || !bathroomUpdate.data) {
+    redirectWithOpsResult(
+      "remove_duplicate_listing",
+      "error",
+      bathroomUpdate.error?.message ?? "Could not remove listing for duplicate warning."
+    );
+  }
+
+  const reviewedReason = toReviewedReportReason(reason);
+  const reportUpdate = await supabaseAdmin
+    .from("reports")
+    .update({ reason: reviewedReason })
+    .eq("id", reportId)
+    .select("id")
+    .maybeSingle();
+
+  revalidateAfterModeration(bathroomId);
+
+  if (reportUpdate.error || !reportUpdate.data) {
+    redirectWithOpsResult(
+      "remove_duplicate_listing",
+      "error",
+      "Listing removed, but warning state could not be updated. Please retry."
+    );
+  }
+
+  redirectWithOpsResult("remove_duplicate_listing", "success", "Listing removed and duplicate warning resolved.");
 }

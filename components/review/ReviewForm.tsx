@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { cn } from "@/lib/utils/cn";
+import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { insertReview, toAddReviewErrorMessage } from "@/lib/supabase/reviews";
 import { isPositiveReviewQuickTag, reviewQuickTagOptions } from "@/lib/utils/reviewSignals";
@@ -113,6 +114,12 @@ export function ReviewForm({ bathroomId }: ReviewFormProps) {
       console.log("Payload inserted:", payload);
       console.log("Supabase review insert result:", result);
       console.groupEnd();
+
+      captureAnalyticsEvent("review_submitted", {
+        bathroom_id: bathroomId,
+        overall_rating: values.overall_rating,
+        quick_tag_count: values.quick_tags.length
+      });
 
       setSubmitSuccess(true);
       setShowNoteField(false);

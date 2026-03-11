@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { RestroomViewedTracker } from "@/components/analytics/RestroomViewedTracker";
+import { TrackedNavigateLink } from "@/components/analytics/TrackedNavigateLink";
 import { RatingPills } from "@/components/restroom/RatingPills";
 import { RestroomTags } from "@/components/restroom/RestroomTags";
 import { PhotoUploadForm } from "@/components/restroom/PhotoUploadForm";
@@ -87,6 +89,7 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
 
   return (
     <main className="mx-auto w-full max-w-[1100px] px-4 py-6 sm:px-6 sm:py-8">
+      <RestroomViewedTracker bathroomId={restroom.id} />
       <div className="mb-5">
         <Link href="/" className="text-sm font-medium text-brand-600 hover:text-brand-700">
           ← Back to nearby list
@@ -114,15 +117,15 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
           </div>
 
           <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-            <a
+            <TrackedNavigateLink
               href={navigateHref}
-              target="_blank"
-              rel="noopener noreferrer"
+              bathroomId={restroom.id}
+              source="restroom_detail"
               className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
             >
               <NavigateIcon className="h-4 w-4" />
               Navigate
-            </a>
+            </TrackedNavigateLink>
             <Link
               href="#add-review"
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"

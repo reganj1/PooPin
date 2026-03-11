@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { FocusEvent } from "react";
 import { NearbyBathroom } from "@/types";
+import { TrackedNavigateLink } from "@/components/analytics/TrackedNavigateLink";
 import { RatingPills } from "@/components/restroom/RatingPills";
 import { RestroomTags } from "@/components/restroom/RestroomTags";
 import { cn } from "@/lib/utils/cn";
@@ -128,15 +129,15 @@ export function RestroomCard({ restroom, showDistance = false, isHighlighted = f
         >
           Details
         </Link>
-        <a
+        <TrackedNavigateLink
           href={navigateHref}
-          target="_blank"
-          rel="noopener noreferrer"
+          bathroomId={restroom.id}
+          source="restroom_card"
           className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
         >
           <NavigateIcon className="h-3.5 w-3.5" />
           Navigate
-        </a>
+        </TrackedNavigateLink>
       </div>
     </article>
   );

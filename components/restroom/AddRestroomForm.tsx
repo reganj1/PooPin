@@ -5,6 +5,7 @@ import Link from "next/link";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { LocationPickerMap } from "@/components/map/LocationPickerMap";
+import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
 import { reverseGeocodeCoordinates } from "@/lib/mapbox/reverseGeocode";
 import {
   BathroomCreateInput,
@@ -291,6 +292,13 @@ export function AddRestroomForm() {
 
       if (typeof window !== "undefined") {
         window.localStorage.setItem(LAST_SUBMISSION_STORAGE_KEY, String(Date.now()));
+      }
+
+      if (payload.bathroomId && payload.status) {
+        captureAnalyticsEvent("restroom_submitted", {
+          bathroom_id: payload.bathroomId,
+          status: payload.status
+        });
       }
 
       setSubmitSuccessId(payload.bathroomId ?? null);

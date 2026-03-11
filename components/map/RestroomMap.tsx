@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type mapboxgl from "mapbox-gl";
 import type { FeatureCollection, Point } from "geojson";
+import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
 import { NearbyBathroom } from "@/types";
 import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
 import { getRestroomDisplayName, getRestroomPopupAddress } from "@/lib/utils/restroomPresentation";
@@ -461,6 +462,12 @@ export function RestroomMap({
         navigateLink.className =
           "inline-flex items-center gap-1 rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-800";
         navigateLink.textContent = "Navigate";
+        navigateLink.addEventListener("click", () => {
+          captureAnalyticsEvent("navigate_clicked", {
+            bathroom_id: id,
+            source: "map_popup"
+          });
+        });
         actions.appendChild(navigateLink);
 
         popupContent.appendChild(actions);

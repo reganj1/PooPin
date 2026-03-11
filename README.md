@@ -20,11 +20,12 @@ Poopin is a startup MVP web app for discovering and rating public restrooms, wit
    cp .env.example .env.local
    ```
 3. (Optional for map) set `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` in `.env.local`.
-4. Start dev server:
+4. (Optional for analytics) set `NEXT_PUBLIC_POSTHOG_KEY` and `NEXT_PUBLIC_POSTHOG_HOST` in `.env.local`.
+5. Start dev server:
    ```bash
    npm run dev
    ```
-5. Open [http://localhost:3000](http://localhost:3000).
+6. Open [http://localhost:3000](http://localhost:3000).
 
 ## Supabase Setup (Optional, Recommended Next)
 1. Create a Supabase project in the dashboard.
@@ -46,3 +47,4 @@ Poopin is a startup MVP web app for discovering and rating public restrooms, wit
 - Restroom reads are Supabase-first for homepage/detail when env vars are configured.
 - If Supabase env vars are missing (or read queries fail), homepage/detail automatically fall back to typed mock data.
 - Add-restroom submits directly to Supabase when configured and shows graceful errors when not.
+- PostHog analytics initializes only in production builds and only when both `NEXT_PUBLIC_POSTHOG_KEY` and `NEXT_PUBLIC_POSTHOG_HOST` are present.

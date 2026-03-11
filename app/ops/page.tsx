@@ -3,9 +3,11 @@ import {
   loginOpsAction,
   logoutOpsAction,
   markReportReviewedAction,
+  moderateDuplicateWarningAction,
   moderateBathroomAction,
   moderatePhotoAction,
-  moderateReviewAction
+  moderateReviewAction,
+  removeDuplicateListingAction
 } from "@/app/ops/actions";
 import { getSupabaseAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase/admin";
 import { getOpsDashboardPassword, isOpsSessionAuthenticated } from "@/lib/ops/auth";
@@ -21,6 +23,7 @@ import { BathroomSource, ModerationStatus } from "@/types";
 export const dynamic = "force-dynamic";
 
 const REVIEWED_REPORT_PREFIX = "reviewed:v1:";
+const DUPLICATE_ISSUE_CODE = "duplicate_listing";
 const MAX_QUEUE_ITEMS = 120;
 const COMMUNITY_SOURCES: BathroomSource[] = ["user", "other"];
 
@@ -52,6 +55,7 @@ interface BathroomReferenceRow {
   address: string;
   lat: number | null;
   lng: number | null;
+  status?: ModerationStatus | null;
 }
 
 interface PhotoRow {
@@ -88,6 +92,11 @@ interface ParsedReviewReport {
 
 interface ParsedRestroomIssue {
   issueCode: string;
+}
+
+interface ParsedReportReason {
+  baseReason: string;
+  isReviewed: boolean;
 }
 
 interface ReviewLookupRow {
@@ -186,6 +195,20 @@ const parseRestroomIssue = (reason: string): ParsedRestroomIssue | null => {
 
   return {
     issueCode
+  };
+};
+
+const parseReportReason = (reason: string): ParsedReportReason => {
+  if (!reason.startsWith(REVIEWED_REPORT_PREFIX)) {
+    return {
+      baseReason: reason,
+      isReviewed: false
+    };
+  }
+
+  return {
+    baseReason: reason.slice(REVIEWED_REPORT_PREFIX.length),
+    isReviewed: true
   };
 };
 
@@ -424,10 +447,9 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
       .limit(MAX_QUEUE_ITEMS),
     supabase
       .from("reports")
-      .select("id, bathroom_id, reason, created_at, bathrooms(id, name, city, address, lat, lng)")
-      .not("reason", "like", `${REVIEWED_REPORT_PREFIX}%`)
+      .select("id, bathroom_id, reason, created_at, bathrooms(id, name, city, address, lat, lng, status)")
       .order("created_at", { ascending: false })
-      .limit(180)
+      .limit(260)
   ]);
 
   const queueErrors = [
@@ -462,7 +484,8 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
 
   const reviewReports = reportRows
     .map((row) => {
-      const parsed = parseReviewReport(row.reason);
+      const parsedReason = parseReportReason(row.reason);
+      const parsed = parseReviewReport(parsedReason.baseReason);
       if (!parsed) {
         return null;
       }
@@ -470,6 +493,8 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
       return {
         ...row,
         ...parsed,
+        storedReason: row.reason,
+        isReviewed: parsedReason.isReviewed,
         bathroom: normalizeBathroomReference(row.bathrooms)
       };
     })
@@ -477,7 +502,8 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
 
   const listingReports = reportRows
     .map((row) => {
-      const parsed = parseRestroomIssue(row.reason);
+      const parsedReason = parseReportReason(row.reason);
+      const parsed = parseRestroomIssue(parsedReason.baseReason);
       if (!parsed) {
         return null;
       }
@@ -485,12 +511,19 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
       return {
         ...row,
         ...parsed,
+        storedReason: row.reason,
+        isReviewed: parsedReason.isReviewed,
         bathroom: normalizeBathroomReference(row.bathrooms)
       };
     })
     .filter((row): row is NonNullable<typeof row> => row !== null);
 
-  const reportReviewIds = [...new Set(reviewReports.map((report) => report.reviewId))];
+  const pendingDuplicateReports = listingReports.filter((report) => report.issueCode === DUPLICATE_ISSUE_CODE && !report.isReviewed);
+  const reviewedDuplicateReports = listingReports.filter((report) => report.issueCode === DUPLICATE_ISSUE_CODE && report.isReviewed);
+  const openListingReports = listingReports.filter((report) => report.issueCode !== DUPLICATE_ISSUE_CODE && !report.isReviewed);
+  const openReviewReports = reviewReports.filter((report) => !report.isReviewed);
+
+  const reportReviewIds = [...new Set(openReviewReports.map((report) => report.reviewId))];
   const reviewLookupById = new Map<string, ReviewLookupRow>();
 
   let reviewLookupErrorMessage: string | null = null;
@@ -533,7 +566,7 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
               {pendingPhotos.length} pending photos
             </span>
             <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-              {reviewReports.length + listingReports.length} open reports
+              {openReviewReports.length + openListingReports.length + pendingDuplicateReports.length} open reports
             </span>
             <form action={logoutOpsAction}>
               <button
@@ -1015,15 +1048,158 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
 
         <section>
           <div className="mb-3">
+            <h2 className="text-lg font-semibold text-slate-900">Duplicate warnings</h2>
+            <p className="text-xs text-slate-500">
+              Keep duplicate decisions reversible with clear pending and reviewed queues.
+            </p>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <QueueColumn title="Pending duplicate warnings" subtitle="Review and choose keep or remove." count={pendingDuplicateReports.length}>
+              {pendingDuplicateReports.length === 0
+                ? renderEmptyState("No pending duplicate warnings.")
+                : pendingDuplicateReports.map((report) => (
+                    <article key={report.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-slate-900">{report.bathroom?.name ?? "Unknown restroom"}</p>
+                          <p className="text-xs text-slate-600">
+                            {report.bathroom?.address ?? "Address unavailable"} • {report.bathroom?.city ?? "Unknown city"}
+                          </p>
+                        </div>
+                        {report.bathroom?.status ? <StatusBadge status={report.bathroom.status} /> : null}
+                      </div>
+
+                      <p className="mt-2 text-xs text-slate-500">Warning opened {formatDateTime(report.created_at)}</p>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <Link
+                          href={`/restroom/${report.bathroom_id}`}
+                          className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                        >
+                          Open listing
+                        </Link>
+
+                        {canModerate ? (
+                          <>
+                            <form action={moderateDuplicateWarningAction}>
+                              <input type="hidden" name="report_id" value={report.id} />
+                              <input type="hidden" name="reason" value={report.storedReason} />
+                              <input type="hidden" name="bathroom_id" value={report.bathroom_id} />
+                              <button
+                                type="submit"
+                                name="decision"
+                                value="keep"
+                                className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                              >
+                                Keep listing
+                              </button>
+                            </form>
+
+                            <form action={removeDuplicateListingAction}>
+                              <input type="hidden" name="report_id" value={report.id} />
+                              <input type="hidden" name="reason" value={report.storedReason} />
+                              <input type="hidden" name="bathroom_id" value={report.bathroom_id} />
+                              <button
+                                type="submit"
+                                className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                              >
+                                Remove listing
+                              </button>
+                            </form>
+                          </>
+                        ) : null}
+                      </div>
+                    </article>
+                  ))}
+            </QueueColumn>
+
+            <QueueColumn title="Reviewed duplicate decisions" subtitle="Audit, reopen, or remove later." count={reviewedDuplicateReports.length}>
+              {reviewedDuplicateReports.length === 0
+                ? renderEmptyState("No reviewed duplicate decisions yet.")
+                : reviewedDuplicateReports.map((report) => (
+                    <article key={report.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-slate-900">{report.bathroom?.name ?? "Unknown restroom"}</p>
+                          <p className="text-xs text-slate-600">
+                            {report.bathroom?.address ?? "Address unavailable"} • {report.bathroom?.city ?? "Unknown city"}
+                          </p>
+                        </div>
+                        {report.bathroom?.status ? <StatusBadge status={report.bathroom.status} /> : null}
+                      </div>
+
+                      <p className="mt-2 text-xs text-slate-500">Decision recorded {formatDateTime(report.created_at)}</p>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <Link
+                          href={`/restroom/${report.bathroom_id}`}
+                          className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                        >
+                          Open listing
+                        </Link>
+
+                        {canModerate ? (
+                          <>
+                            <form action={moderateDuplicateWarningAction}>
+                              <input type="hidden" name="report_id" value={report.id} />
+                              <input type="hidden" name="reason" value={report.storedReason} />
+                              <input type="hidden" name="bathroom_id" value={report.bathroom_id} />
+                              <button
+                                type="submit"
+                                name="decision"
+                                value="reopen"
+                                className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                              >
+                                Reopen warning
+                              </button>
+                            </form>
+
+                            {report.bathroom?.status === "removed" ? (
+                              <form action={moderateBathroomAction}>
+                                <input type="hidden" name="bathroom_id" value={report.bathroom_id} />
+                                <button
+                                  type="submit"
+                                  name="status"
+                                  value="active"
+                                  className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                                >
+                                  Restore listing
+                                </button>
+                              </form>
+                            ) : (
+                              <form action={removeDuplicateListingAction}>
+                                <input type="hidden" name="report_id" value={report.id} />
+                                <input type="hidden" name="reason" value={report.storedReason} />
+                                <input type="hidden" name="bathroom_id" value={report.bathroom_id} />
+                                <button
+                                  type="submit"
+                                  className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                                >
+                                  Remove listing
+                                </button>
+                              </form>
+                            )}
+                          </>
+                        ) : null}
+                      </div>
+                    </article>
+                  ))}
+            </QueueColumn>
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-3">
             <h2 className="text-lg font-semibold text-slate-900">Reports queue</h2>
             <p className="text-xs text-slate-500">Handle listing and review reports and apply moderation actions as needed.</p>
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
-            <QueueColumn title="Reported listings" subtitle="User-submitted listing issues." count={listingReports.length}>
-              {listingReports.length === 0
+            <QueueColumn title="Reported listings" subtitle="User-submitted listing issues." count={openListingReports.length}>
+              {openListingReports.length === 0
                 ? renderEmptyState("No open listing reports.")
-                : listingReports.map((report) => (
+                : openListingReports.map((report) => (
                     <article key={report.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
                       <p className="font-semibold text-slate-900">{report.bathroom?.name ?? "Unknown restroom"}</p>
                       <p className="mt-1 text-xs text-slate-600">
@@ -1040,12 +1216,12 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                         {canModerate ? (
                           <form action={markReportReviewedAction}>
                             <input type="hidden" name="report_id" value={report.id} />
-                            <input type="hidden" name="reason" value={report.reason} />
+                            <input type="hidden" name="reason" value={report.storedReason} />
                             <button
                               type="submit"
                               className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
                             >
-                              Mark reviewed
+                              Resolve report
                             </button>
                           </form>
                         ) : null}
@@ -1054,10 +1230,10 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                   ))}
             </QueueColumn>
 
-            <QueueColumn title="Reported reviews" subtitle="Review reports with direct moderation controls." count={reviewReports.length}>
-              {reviewReports.length === 0
+            <QueueColumn title="Reported reviews" subtitle="Review reports with direct moderation controls." count={openReviewReports.length}>
+              {openReviewReports.length === 0
                 ? renderEmptyState("No open review reports.")
-                : reviewReports.map((report) => {
+                : openReviewReports.map((report) => {
                     const reviewLookup = reviewLookupById.get(report.reviewId);
                     return (
                       <article key={report.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
@@ -1121,12 +1297,12 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                           {canModerate ? (
                             <form action={markReportReviewedAction}>
                               <input type="hidden" name="report_id" value={report.id} />
-                              <input type="hidden" name="reason" value={report.reason} />
+                              <input type="hidden" name="reason" value={report.storedReason} />
                               <button
                                 type="submit"
                                 className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
                               >
-                                Mark reviewed
+                                Resolve report
                               </button>
                             </form>
                           ) : null}
