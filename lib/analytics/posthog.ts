@@ -39,18 +39,45 @@ interface PoopinAnalyticsEventProperties {
   };
 }
 
+interface PostHogRuntimeConfig {
+  apiKey: string;
+  apiHost: string;
+}
+
 declare global {
   interface Window {
     posthog?: typeof posthog;
     __poopinPostHogInitialized?: boolean;
+    __poopinPostHogConfig?: PostHogRuntimeConfig;
   }
 }
 
-const posthogApiKey = process.env.NEXT_PUBLIC_POSTHOG_KEY?.trim() ?? "";
-const posthogHost = process.env.NEXT_PUBLIC_POSTHOG_HOST?.trim() ?? "";
-const normalizedPosthogHost = posthogHost.replace(/\/+$/, "");
+const normalizePostHogConfig = (config: Partial<PostHogRuntimeConfig>): PostHogRuntimeConfig | null => {
+  const apiKey = config.apiKey?.trim() ?? "";
+  const apiHost = config.apiHost?.trim().replace(/\/+$/, "") ?? "";
 
-export const shouldEnablePostHog = process.env.NODE_ENV === "production" && Boolean(posthogApiKey && normalizedPosthogHost);
+  if (!apiKey || !apiHost) {
+    return null;
+  }
+
+  return {
+    apiKey,
+    apiHost
+  };
+};
+
+const getPostHogConfig = (): PostHogRuntimeConfig | null => {
+  if (typeof window !== "undefined") {
+    return window.__poopinPostHogConfig ?? null;
+  }
+
+  return normalizePostHogConfig({
+    apiKey: process.env.NEXT_PUBLIC_POSTHOG_KEY,
+    apiHost: process.env.NEXT_PUBLIC_POSTHOG_HOST
+  });
+};
+
+export const shouldEnablePostHog = () => process.env.NODE_ENV === "production" && Boolean(getPostHogConfig());
 
 const canCaptureEvents = () => {
   if (typeof window === "undefined") {
@@ -60,8 +87,22 @@ const canCaptureEvents = () => {
   return Boolean(window.__poopinPostHogInitialized && typeof window.posthog?.capture === "function");
 };
 
-export const initPostHog = () => {
-  if (!shouldEnablePostHog || typeof window === "undefined") {
+export const initPostHog = (config?: Partial<PostHogRuntimeConfig>) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (config) {
+    const normalizedConfig = normalizePostHogConfig(config);
+    window.__poopinPostHogConfig = normalizedConfig ?? undefined;
+  }
+
+  if (!shouldEnablePostHog()) {
+    return;
+  }
+
+  const runtimeConfig = getPostHogConfig();
+  if (!runtimeConfig) {
     return;
   }
 
@@ -70,8 +111,8 @@ export const initPostHog = () => {
     return;
   }
 
-  posthog.init(posthogApiKey, {
-    api_host: normalizedPosthogHost,
+  posthog.init(runtimeConfig.apiKey, {
+    api_host: runtimeConfig.apiHost,
     autocapture: false,
     capture_pageview: false,
     disable_session_recording: false,
@@ -87,7 +128,7 @@ export const initPostHog = () => {
 };
 
 export const capturePageview = (pathname: string) => {
-  if (!shouldEnablePostHog || typeof window === "undefined") {
+  if (typeof window === "undefined" || !shouldEnablePostHog()) {
     return;
   }
 
@@ -107,7 +148,7 @@ export const captureAnalyticsEvent = <T extends PoopinAnalyticsEventName>(
   eventName: T,
   properties: PoopinAnalyticsEventProperties[T]
 ) => {
-  if (!shouldEnablePostHog) {
+  if (!shouldEnablePostHog()) {
     return;
   }
 

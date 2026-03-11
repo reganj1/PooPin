@@ -13,10 +13,13 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const posthogKey = process.env.NEXT_PUBLIC_POSTHOG_KEY ?? "";
+  const posthogHost = process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "";
+
   return (
     <html lang="en">
       <body className={`${manrope.className} antialiased`}>
-        <PostHogProvider>
+        <PostHogProvider posthogKey={posthogKey} posthogHost={posthogHost}>
           <div className="min-h-screen">
             <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/95 backdrop-blur">
               <div className="mx-auto flex h-16 w-full max-w-[1320px] items-center justify-between px-4 sm:px-6 lg:px-8">

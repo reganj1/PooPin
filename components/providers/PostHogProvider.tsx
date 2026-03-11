@@ -2,17 +2,26 @@
 
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { capturePageview, initPostHog, shouldEnablePostHog } from "@/lib/analytics/posthog";
+import { capturePageview, initPostHog } from "@/lib/analytics/posthog";
 
-export function PostHogProvider({ children }: { children: React.ReactNode }) {
+interface PostHogProviderProps {
+  children: React.ReactNode;
+  posthogKey?: string;
+  posthogHost?: string;
+}
+
+export function PostHogProvider({ children, posthogKey = "", posthogHost = "" }: PostHogProviderProps) {
   const pathname = usePathname();
 
   useEffect(() => {
-    initPostHog();
-  }, []);
+    initPostHog({
+      apiKey: posthogKey,
+      apiHost: posthogHost
+    });
+  }, [posthogHost, posthogKey]);
 
   useEffect(() => {
-    if (!shouldEnablePostHog || !pathname) {
+    if (!pathname) {
       return;
     }
 

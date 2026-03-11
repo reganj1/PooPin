@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -43,12 +43,18 @@ const shouldConfirmContradictoryReview = (values: ReviewFormInput) => {
 
 export function ReviewForm({ bathroomId }: ReviewFormProps) {
   const router = useRouter();
-  const supabaseClient = useMemo(() => getSupabaseBrowserClient(), []);
+  const [supabaseClient, setSupabaseClient] = useState<ReturnType<typeof getSupabaseBrowserClient>>(null);
+  const [hasResolvedSupabaseClient, setHasResolvedSupabaseClient] = useState(false);
   const isSupabaseConfigured = Boolean(supabaseClient);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [showNoteField, setShowNoteField] = useState(false);
   const [quickTagHint, setQuickTagHint] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSupabaseClient(getSupabaseBrowserClient());
+    setHasResolvedSupabaseClient(true);
+  }, []);
 
   const {
     register,
@@ -140,7 +146,7 @@ export function ReviewForm({ bathroomId }: ReviewFormProps) {
         <p className="mt-1 text-sm text-slate-600">Leave a fast rating in a few taps.</p>
       </div>
 
-      {!isSupabaseConfigured ? (
+      {hasResolvedSupabaseClient && !isSupabaseConfigured ? (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
           Review submission is temporarily unavailable.
         </div>
