@@ -514,7 +514,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
       {isMapExpanded ? (
         <section className="fixed inset-0 z-[80] overflow-hidden bg-slate-950/45 backdrop-blur-[1.5px]">
-          <div className="absolute inset-0 w-screen max-w-full overflow-hidden">
+          <div className="absolute inset-0 max-w-full overflow-hidden">
             <MapPanel
               restrooms={mapRenderableRestrooms}
               userLocation={userLocation}
@@ -528,19 +528,21 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
             />
 
             <div className="pointer-events-none absolute inset-x-2 top-2 sm:inset-x-4 sm:top-4">
-              <div className="pointer-events-auto mx-auto flex w-full max-w-[1400px] flex-col gap-2 rounded-2xl border border-white/70 bg-white/95 px-3 py-2.5 shadow-xl backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-4">
-                <div>
+              <div className="pointer-events-auto mx-auto flex w-full max-w-[1400px] min-w-0 flex-col gap-2 rounded-2xl border border-white/70 bg-white/95 px-3 py-2.5 shadow-xl backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Full map mode</p>
-                  <p className="mt-1 text-xs text-slate-700">Bay Area restroom map with live markers and nearby results.</p>
+                  <p className="mt-1 hidden text-xs text-slate-700 sm:block">
+                    Bay Area restroom map with live markers and nearby results.
+                  </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                   <button
                     type="button"
                     onClick={handleUseMyLocation}
                     disabled={isLocating}
                     className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {isLocating ? "Locating..." : "My location"}
+                    {isLocating ? "Locating..." : "Locate"}
                   </button>
                   <button
                     type="button"
@@ -562,7 +564,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
             {isExpandedListOpen ? (
               <>
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 sm:hidden">
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 overflow-hidden sm:hidden">
                   <div className="pointer-events-auto rounded-t-3xl border-t border-slate-200 bg-white shadow-2xl">
                     <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
                       <div>
@@ -577,7 +579,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                         Hide
                       </button>
                     </div>
-                    <div className="max-h-[66vh] overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2">
+                    <div className="max-h-[66vh] overflow-x-hidden overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2">
                       {renderListPanel("expanded")}
                     </div>
                   </div>

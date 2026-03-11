@@ -7,7 +7,7 @@ export default async function HomePage() {
   const restrooms = await getNearbyBathroomsData();
 
   return (
-    <main className="mx-auto w-full max-w-[1320px] px-4 pb-8 pt-5 sm:px-6 lg:px-8 lg:pb-10 lg:pt-6">
+    <main className="mx-auto w-full max-w-[1320px] overflow-x-hidden px-4 pb-8 pt-5 sm:px-6 lg:px-8 lg:pb-10 lg:pt-6">
       <section className="mb-5 rounded-3xl border border-slate-200/80 bg-white px-5 py-5 shadow-sm sm:px-6 lg:mb-6 lg:px-7 lg:py-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
