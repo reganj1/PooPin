@@ -63,7 +63,7 @@ export function MapPanel({
                   Expand map
                 </button>
               ) : null}
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+              <span className="hidden rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 sm:inline-flex">
                 {restrooms.length} shown
               </span>
             </div>
@@ -118,7 +118,7 @@ export function MapPanel({
                 Expand map
               </button>
             ) : null}
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+            <span className="hidden rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 sm:inline-flex">
               {restrooms.length} shown
             </span>
           </div>

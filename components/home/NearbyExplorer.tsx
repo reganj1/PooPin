@@ -596,6 +596,13 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleExpandMap}
+              className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              Expand map
+            </button>
             <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
               {mapRenderableRestrooms.length} pins in view
             </span>
