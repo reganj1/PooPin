@@ -36,6 +36,7 @@ interface RestroomMapProps {
     lng: number;
     zoom: number;
   }) => void;
+  onNavigateToDetail?: (restroomId: string) => void;
 }
 
 interface RestroomFeatureProperties {
@@ -129,10 +130,10 @@ const toDistanceLabel = (value: number) => {
   }
 
   if (value < 0.1) {
-    return "<0.1 mi away";
+    return "<0.1 mi straight-line";
   }
 
-  return `${value.toFixed(1)} mi away`;
+  return `${value.toFixed(1)} mi straight-line`;
 };
 
 const getLocationKey = (location: { lat: number; lng: number } | null) =>
@@ -147,7 +148,8 @@ export function RestroomMap({
   hoveredRestroomId = null,
   onFocusedRestroomIdChange,
   onViewportBoundsChange,
-  onCameraChange
+  onCameraChange,
+  onNavigateToDetail
 }: RestroomMapProps) {
   const router = useRouter();
   const [isMapReady, setIsMapReady] = useState(false);
@@ -159,11 +161,12 @@ export function RestroomMap({
   const activePopupRestroomIdRef = useRef<string | null>(null);
   const hasBoundLayerEventsRef = useRef(false);
   const hasInitializedCameraRef = useRef(false);
+  const hasAppliedRestoredCameraRef = useRef(false);
   const previousLocationKeyRef = useRef<string>("");
   const mapHoveredRestroomIdRef = useRef<string | null>(null);
   const appliedHoveredRestroomIdRef = useRef<string | null>(null);
   const clickHandlerRef = useRef<((event: mapboxgl.MapLayerMouseEvent) => void) | null>(null);
-  const mouseEnterHandlerRef = useRef<((event: mapboxgl.MapLayerMouseEvent) => void) | null>(null);
+  const mouseMoveHandlerRef = useRef<((event: mapboxgl.MapLayerMouseEvent) => void) | null>(null);
   const mouseLeaveHandlerRef = useRef<(() => void) | null>(null);
   const missingHoveredMarkerLogRef = useRef<Set<string>>(new Set());
   const invalidCoordinatesLogKeyRef = useRef<string>("");
@@ -223,6 +226,7 @@ export function RestroomMap({
       (map as unknown as { touchPitch?: { disable: () => void } }).touchPitch?.disable();
       if (hasInitialCamera) {
         hasInitializedCameraRef.current = true;
+        hasAppliedRestoredCameraRef.current = true;
       }
       map.on("load", () => {
         setIsMapReady(true);
@@ -244,8 +248,8 @@ export function RestroomMap({
         if (clickHandlerRef.current) {
           map.off("click", HIT_LAYER_ID, clickHandlerRef.current);
         }
-        if (mouseEnterHandlerRef.current) {
-          map.off("mouseenter", HIT_LAYER_ID, mouseEnterHandlerRef.current);
+        if (mouseMoveHandlerRef.current) {
+          map.off("mousemove", HIT_LAYER_ID, mouseMoveHandlerRef.current);
         }
         if (mouseLeaveHandlerRef.current) {
           map.off("mouseleave", HIT_LAYER_ID, mouseLeaveHandlerRef.current);
@@ -281,6 +285,7 @@ export function RestroomMap({
 
       hasBoundLayerEventsRef.current = false;
       hasInitializedCameraRef.current = false;
+      hasAppliedRestoredCameraRef.current = false;
       previousLocationKeyRef.current = "";
       mapHoveredRestroomIdRef.current = null;
       appliedHoveredRestroomIdRef.current = null;
@@ -291,7 +296,7 @@ export function RestroomMap({
       missingHoveredMarkerLogSet.clear();
       invalidCoordinatesLogKeyRef.current = "";
       clickHandlerRef.current = null;
-      mouseEnterHandlerRef.current = null;
+      mouseMoveHandlerRef.current = null;
       mouseLeaveHandlerRef.current = null;
       mapRef.current = null;
       mapboxRef.current = null;
@@ -317,11 +322,15 @@ export function RestroomMap({
     const setHoveredFeatureState = (restroomId: string | null) => {
       const previousId = appliedHoveredRestroomIdRef.current;
 
-      if (previousId !== restroomId) {
+      if (previousId === restroomId) {
+        return;
+      }
+
+      if (previousId) {
         try {
-          map.removeFeatureState({ source: SOURCE_ID });
+          map.setFeatureState({ source: SOURCE_ID, id: previousId }, { hovered: false });
         } catch {
-          // Ignore feature-state reset errors while data sources refresh.
+          // Ignore stale feature ids while viewport data updates.
         }
       }
 
@@ -343,13 +352,13 @@ export function RestroomMap({
 
       return hoveredRestroomId ?? mapHoveredRestroomIdRef.current ?? activePopupRestroomIdRef.current;
     };
-    const isCoarsePointer = isCoarsePointerRef.current;
-    const hoverHaloRadiusZoom10 = isCoarsePointer ? 18 : 24;
-    const hoverHaloRadiusZoom14 = isCoarsePointer ? 24 : 32;
-    const activeMarkerRadiusZoom10 = isCoarsePointer ? 11 : 17;
-    const activeMarkerRadiusZoom14 = isCoarsePointer ? 13 : 21;
-    const activeMarkerStrokeZoom10 = isCoarsePointer ? 4 : 6;
-    const activeMarkerStrokeZoom14 = isCoarsePointer ? 5 : 7;
+    // Keep hover/active emphasis consistent across desktop/mobile and avoid dramatic size jumps.
+    const hoverHaloRadiusZoom10 = 17;
+    const hoverHaloRadiusZoom14 = 22;
+    const activeMarkerRadiusZoom10 = 12;
+    const activeMarkerRadiusZoom14 = 15;
+    const activeMarkerStrokeZoom10 = 4;
+    const activeMarkerStrokeZoom14 = 5;
 
     const existingSource = map.getSource(SOURCE_ID);
     if (existingSource) {
@@ -527,6 +536,7 @@ export function RestroomMap({
         }
 
         if (activePopupRestroomIdRef.current === id) {
+          onNavigateToDetail?.(id);
           router.push(`/restroom/${id}`);
           return;
         }
@@ -595,6 +605,7 @@ export function RestroomMap({
           "inline-flex rounded-md border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50";
         detailButton.textContent = "View details";
         detailButton.addEventListener("click", () => {
+          onNavigateToDetail?.(id);
           router.push(`/restroom/${id}`);
         });
         actions.appendChild(detailButton);
@@ -649,7 +660,7 @@ export function RestroomMap({
 
         const feature = event.features?.[0];
         const restroomId = feature?.properties?.id;
-        if (typeof restroomId === "string") {
+        if (typeof restroomId === "string" && mapHoveredRestroomIdRef.current !== restroomId) {
           mapHoveredRestroomIdRef.current = restroomId;
           setHoveredFeatureState(resolveHoveredRestroomId());
           onFocusedRestroomIdChange?.(restroomId);
@@ -673,11 +684,11 @@ export function RestroomMap({
       };
 
       map.on("click", HIT_LAYER_ID, clickHandler);
-      map.on("mouseenter", HIT_LAYER_ID, mouseEnterHandler);
+      map.on("mousemove", HIT_LAYER_ID, mouseEnterHandler);
       map.on("mouseleave", HIT_LAYER_ID, mouseLeaveHandler);
 
       clickHandlerRef.current = clickHandler;
-      mouseEnterHandlerRef.current = mouseEnterHandler;
+      mouseMoveHandlerRef.current = mouseEnterHandler;
       mouseLeaveHandlerRef.current = mouseLeaveHandler;
       hasBoundLayerEventsRef.current = true;
     }
@@ -691,7 +702,17 @@ export function RestroomMap({
       onFocusedRestroomIdChange?.(null);
     }
     setHoveredFeatureState(resolveHoveredRestroomId());
-  }, [hoveredRestroomId, isMapReady, markerData, onFocusedRestroomIdChange, restrooms.length, router, showDistance, userLocationData]);
+  }, [
+    hoveredRestroomId,
+    isMapReady,
+    markerData,
+    onFocusedRestroomIdChange,
+    onNavigateToDetail,
+    restrooms.length,
+    router,
+    showDistance,
+    userLocationData
+  ]);
 
   useEffect(() => {
     if (process.env.NODE_ENV === "production") {
@@ -748,11 +769,17 @@ export function RestroomMap({
       return;
     }
 
+    const previousLocationKey = previousLocationKeyRef.current;
     const currentLocationKey = getLocationKey(userLocation);
-    const hasLocationChanged = previousLocationKeyRef.current !== currentLocationKey;
+    const hasLocationChanged = previousLocationKey !== currentLocationKey;
+    const isFirstObservedLocation = previousLocationKey === "";
     previousLocationKeyRef.current = currentLocationKey;
 
     if (userLocation && isValidCoordinate(userLocation.lat, userLocation.lng) && hasLocationChanged) {
+      const hasRestoredCamera = isValidCamera(initialCameraRef.current);
+      if (hasRestoredCamera && isFirstObservedLocation) {
+        return;
+      }
       map.easeTo({ center: [userLocation.lng, userLocation.lat], zoom: 13, duration: 700 });
       hasInitializedCameraRef.current = true;
       return;
@@ -792,6 +819,33 @@ export function RestroomMap({
     });
     hasInitializedCameraRef.current = true;
   }, [isMapReady, markerData, userLocation]);
+
+  useEffect(() => {
+    if (!isMapReady) {
+      return;
+    }
+
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    if (hasAppliedRestoredCameraRef.current) {
+      return;
+    }
+
+    const restoredCamera = initialCameraRef.current;
+    if (!isValidCamera(restoredCamera)) {
+      return;
+    }
+
+    map.jumpTo({
+      center: [restoredCamera.lng, restoredCamera.lat],
+      zoom: restoredCamera.zoom
+    });
+    hasInitializedCameraRef.current = true;
+    hasAppliedRestoredCameraRef.current = true;
+  }, [initialCamera, isMapReady]);
 
   useEffect(() => {
     if (!isMapReady || (!onViewportBoundsChange && !onCameraChange)) {

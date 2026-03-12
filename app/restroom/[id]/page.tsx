@@ -111,7 +111,7 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
                 Added {formatDate(restroom.created_at)}
               </span>
               <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                Enable location on the map for live distance
+                Enable location on the map for live straight-line distance
               </span>
             </div>
           </div>

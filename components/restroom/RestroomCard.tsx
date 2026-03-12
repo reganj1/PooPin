@@ -14,10 +14,22 @@ interface RestroomCardProps {
   showDistance?: boolean;
   isHighlighted?: boolean;
   onHoverChange?: (isHovering: boolean) => void;
+  onNavigateToDetail?: (restroomId: string) => void;
 }
 
 const toPlaceLabel = (value: string) => value.replaceAll("_", " ");
 const toDisplayRating = (value: number) => (value > 0 ? value.toFixed(1) : "N/A");
+const toDistanceLabel = (value: number) => {
+  if (!Number.isFinite(value) || value < 0) {
+    return "";
+  }
+
+  if (value < 0.1) {
+    return "<0.1 mi straight-line";
+  }
+
+  return `${value.toFixed(1)} mi straight-line`;
+};
 
 function NavigateIcon({ className }: { className?: string }) {
   return (
@@ -42,7 +54,13 @@ function NavigateIcon({ className }: { className?: string }) {
   );
 }
 
-export function RestroomCard({ restroom, showDistance = false, isHighlighted = false, onHoverChange }: RestroomCardProps) {
+export function RestroomCard({
+  restroom,
+  showDistance = false,
+  isHighlighted = false,
+  onHoverChange,
+  onNavigateToDetail
+}: RestroomCardProps) {
   const detailHref = `/restroom/${restroom.id}`;
   const navigateHref = getGoogleMapsDirectionsUrl(restroom.lat, restroom.lng);
   const displayName = getRestroomDisplayName(restroom);
@@ -54,6 +72,10 @@ export function RestroomCard({ restroom, showDistance = false, isHighlighted = f
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
       onHoverChange?.(false);
     }
+  };
+
+  const handleNavigateToDetail = () => {
+    onNavigateToDetail?.(restroom.id);
   };
 
   return (
@@ -69,6 +91,7 @@ export function RestroomCard({ restroom, showDistance = false, isHighlighted = f
     >
       <Link
         href={detailHref}
+        onClick={handleNavigateToDetail}
         className="block rounded-lg outline-none transition focus-visible:ring-2 focus-visible:ring-brand-200"
       >
         <div className="flex items-start justify-between gap-4">
@@ -85,7 +108,7 @@ export function RestroomCard({ restroom, showDistance = false, isHighlighted = f
           <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">
             Overall {toDisplayRating(restroom.ratings.overall)}
           </span>
-          {showDistance ? <span className="text-xs font-medium text-slate-500">{restroom.distanceMiles.toFixed(1)} mi away</span> : null}
+          {showDistance ? <span className="text-xs font-medium text-slate-500">{toDistanceLabel(restroom.distanceMiles)}</span> : null}
         </div>
 
         {qualitySignals.length > 0 ? (
@@ -125,6 +148,7 @@ export function RestroomCard({ restroom, showDistance = false, isHighlighted = f
       <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
         <Link
           href={detailHref}
+          onClick={handleNavigateToDetail}
           className="inline-flex items-center rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
         >
           Details

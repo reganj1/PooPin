@@ -1,11 +1,12 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { LocationPickerMap } from "@/components/map/LocationPickerMap";
 import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
+import { forwardGeocodeAddress } from "@/lib/mapbox/forwardGeocode";
 import { reverseGeocodeCoordinates } from "@/lib/mapbox/reverseGeocode";
 import {
   BathroomCreateInput,
@@ -123,17 +124,20 @@ export function AddRestroomForm() {
   const [submitSuccessId, setSubmitSuccessId] = useState<string | null>(null);
   const [duplicateBathroomId, setDuplicateBathroomId] = useState<string | null>(null);
   const [isLocating, setIsLocating] = useState(false);
+  const [isResolvingFromAddress, setIsResolvingFromAddress] = useState(false);
   const [isResolvingAddress, setIsResolvingAddress] = useState(false);
   const [addressAssistMessage, setAddressAssistMessage] = useState<string | null>(null);
   const [selectedCoordinates, setSelectedCoordinates] = useState(DEFAULT_COORDINATES);
   const [serverFieldErrors, setServerFieldErrors] = useState<ServerFieldErrors>({});
-  const geocodeAbortRef = useRef<AbortController | null>(null);
+  const reverseGeocodeAbortRef = useRef<AbortController | null>(null);
+  const forwardGeocodeAbortRef = useRef<AbortController | null>(null);
   const lastResolvedCoordinateKeyRef = useRef<string>("");
 
   const {
     register,
     handleSubmit,
     reset,
+    getValues,
     setValue,
     formState: { errors, isSubmitting }
   } = useForm<BathroomCreateInput>({
@@ -151,9 +155,9 @@ export function AddRestroomForm() {
       }
       lastResolvedCoordinateKeyRef.current = coordinateKey;
 
-      geocodeAbortRef.current?.abort();
+      reverseGeocodeAbortRef.current?.abort();
       const controller = new AbortController();
-      geocodeAbortRef.current = controller;
+      reverseGeocodeAbortRef.current = controller;
 
       setIsResolvingAddress(true);
       setAddressAssistMessage("Finding nearby location details...");
@@ -165,7 +169,7 @@ export function AddRestroomForm() {
         }
 
         if (!geocodeResult) {
-          setAddressAssistMessage("We couldn’t fetch location details right now. You can enter address details manually.");
+          setAddressAssistMessage("We couldn't fetch location details right now. You can enter address details manually.");
           return;
         }
 
@@ -188,7 +192,7 @@ export function AddRestroomForm() {
         );
       } catch {
         if (!controller.signal.aborted) {
-          setAddressAssistMessage("We couldn’t fetch location details right now. You can enter address details manually.");
+          setAddressAssistMessage("We couldn't fetch location details right now. You can enter address details manually.");
         }
       } finally {
         if (!controller.signal.aborted) {
@@ -201,17 +205,20 @@ export function AddRestroomForm() {
 
   useEffect(() => {
     return () => {
-      geocodeAbortRef.current?.abort();
+      reverseGeocodeAbortRef.current?.abort();
+      forwardGeocodeAbortRef.current?.abort();
     };
   }, []);
 
   const applySelectedCoordinates = useCallback(
-    (coordinates: { lat: number; lng: number }) => {
+    (coordinates: { lat: number; lng: number }, options?: { skipReverseGeocode?: boolean }) => {
       setSelectedCoordinates(coordinates);
       setValue("lat", coordinates.lat, { shouldDirty: true, shouldValidate: true });
       setValue("lng", coordinates.lng, { shouldDirty: true, shouldValidate: true });
       setSubmitError(null);
-      void resolveAddressFromCoordinates(coordinates);
+      if (!options?.skipReverseGeocode) {
+        void resolveAddressFromCoordinates(coordinates);
+      }
     },
     [resolveAddressFromCoordinates, setValue]
   );
@@ -252,6 +259,93 @@ export function AddRestroomForm() {
       }
     );
   };
+
+  const handleAddressLookup = useCallback(async () => {
+    const address = getValues("address").trim();
+    const city = getValues("city").trim();
+    const state = getValues("state").trim();
+    if (!address && !city && !state) {
+      setAddressAssistMessage("Enter an address first, then use Find on map.");
+      return;
+    }
+
+    reverseGeocodeAbortRef.current?.abort();
+    setIsResolvingAddress(false);
+    forwardGeocodeAbortRef.current?.abort();
+    const controller = new AbortController();
+    forwardGeocodeAbortRef.current = controller;
+
+    setSubmitError(null);
+    setIsResolvingFromAddress(true);
+    setAddressAssistMessage("Placing pin from address...");
+
+    try {
+      const lookupResult = await forwardGeocodeAddress(
+        {
+          address,
+          city,
+          state
+        },
+        controller.signal
+      );
+
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      if (!lookupResult) {
+        setAddressAssistMessage("Couldn't place a pin from that address. Move the pin on the map or edit details manually.");
+        return;
+      }
+
+      if (lookupResult.address) {
+        setValue("address", lookupResult.address, { shouldDirty: true, shouldValidate: true });
+      }
+      if (lookupResult.city) {
+        setValue("city", lookupResult.city, { shouldDirty: true, shouldValidate: true });
+      }
+      if (lookupResult.state) {
+        setValue("state", lookupResult.state, { shouldDirty: true, shouldValidate: true });
+      }
+
+      applySelectedCoordinates(
+        {
+          lat: lookupResult.lat,
+          lng: lookupResult.lng
+        },
+        { skipReverseGeocode: true }
+      );
+
+      setAddressAssistMessage(
+        lookupResult.resolution === "exact_address" || lookupResult.resolution === "street"
+          ? "Pin placed from address. You can move it to refine the location."
+          : "Pin placed from nearby area details. You can refine by moving the pin."
+      );
+    } catch {
+      if (!controller.signal.aborted) {
+        setAddressAssistMessage("Couldn't place a pin from that address right now. Move the pin on the map or try again.");
+      }
+    } finally {
+      if (!controller.signal.aborted) {
+        setIsResolvingFromAddress(false);
+      }
+    }
+  }, [applySelectedCoordinates, getValues, setValue]);
+
+  const handleAddressLookupKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+
+      event.preventDefault();
+      if (isSubmitting || isResolvingFromAddress) {
+        return;
+      }
+      void handleAddressLookup();
+    },
+    [handleAddressLookup, isResolvingFromAddress, isSubmitting]
+  );
 
   const onSubmit = async (values: BathroomCreateInput) => {
     setSubmitError(null);
@@ -307,6 +401,10 @@ export function AddRestroomForm() {
         city: values.city,
         state: values.state
       });
+      reverseGeocodeAbortRef.current?.abort();
+      forwardGeocodeAbortRef.current?.abort();
+      setIsResolvingAddress(false);
+      setIsResolvingFromAddress(false);
       setSelectedCoordinates(DEFAULT_COORDINATES);
       setAddressAssistMessage(null);
       lastResolvedCoordinateKeyRef.current = "";
@@ -366,21 +464,19 @@ export function AddRestroomForm() {
           <div className="mb-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Step 1</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Choose location</h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Use your location or drop a pin. Address details auto-fill from the selected point and can be edited.
-            </p>
+            <p className="mt-1 text-sm text-slate-600">Move the pin or enter a location.</p>
           </div>
 
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={handleUseMyLocation}
-              disabled={isLocating || isSubmitting}
+              disabled={isLocating || isSubmitting || isResolvingFromAddress}
               className="inline-flex rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isLocating ? "Locating..." : "Use my current location"}
             </button>
-            <p className="text-xs text-slate-500">Then tap the map to place or move your pin.</p>
+            <p className="text-xs text-slate-500">Tap or drag the pin to refine the spot.</p>
           </div>
 
           <LocationPickerMap
@@ -389,42 +485,67 @@ export function AddRestroomForm() {
           />
 
           <p className="mt-2 text-xs text-slate-500">
-            {isResolvingAddress ? "Finding address details..." : addressAssistMessage ?? "Address details fill in automatically from your pin."}
+            {isResolvingFromAddress
+              ? "Placing pin from address..."
+              : isResolvingAddress
+                ? "Finding address details..."
+                : addressAssistMessage ?? "Address details fill in automatically from your pin."}
           </p>
-          <p className="mt-1 text-xs text-slate-500">Need to refine location? Move the pin directly on the map.</p>
 
           <input type="hidden" {...register("lat", { valueAsNumber: true })} />
           <input type="hidden" {...register("lng", { valueAsNumber: true })} />
 
-          <div className="mt-4 space-y-4">
-            <Field label="Address" htmlFor="address" error={getFieldError("address")}>
-              <input
-                id="address"
-                {...register("address")}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                placeholder="123 Market St"
-              />
-            </Field>
+          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/50 p-3 sm:p-4">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Location details</p>
+                <p className="text-xs text-slate-500">Use Address, City, and State to move the pin.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleAddressLookup();
+                }}
+                disabled={isSubmitting || isResolvingAddress || isResolvingFromAddress}
+                className="inline-flex w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:min-w-28"
+              >
+                {isResolvingFromAddress ? "Finding..." : "Find on map"}
+              </button>
+            </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="City" htmlFor="city" error={getFieldError("city")}>
+            <div className="space-y-4">
+              <Field label="Address" htmlFor="address" error={getFieldError("address")}>
                 <input
-                  id="city"
-                  {...register("city")}
+                  id="address"
+                  {...register("address")}
+                  onKeyDown={handleAddressLookupKeyDown}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                  placeholder="San Francisco"
+                  placeholder="123 Market St"
                 />
               </Field>
 
-              <Field label="State" htmlFor="state" error={getFieldError("state")}>
-                <input
-                  id="state"
-                  {...register("state")}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm uppercase outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                  placeholder="CA"
-                  maxLength={30}
-                />
-              </Field>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="City" htmlFor="city" error={getFieldError("city")}>
+                  <input
+                    id="city"
+                    {...register("city")}
+                    onKeyDown={handleAddressLookupKeyDown}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                    placeholder="San Francisco"
+                  />
+                </Field>
+
+                <Field label="State" htmlFor="state" error={getFieldError("state")}>
+                  <input
+                    id="state"
+                    {...register("state")}
+                    onKeyDown={handleAddressLookupKeyDown}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm uppercase outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                    placeholder="CA"
+                    maxLength={30}
+                  />
+                </Field>
+              </div>
             </div>
           </div>
         </section>
@@ -520,11 +641,15 @@ export function AddRestroomForm() {
             <button
               type="button"
               onClick={() => {
+                reverseGeocodeAbortRef.current?.abort();
+                forwardGeocodeAbortRef.current?.abort();
                 reset(defaultValues);
                 setSubmitError(null);
                 setServerFieldErrors({});
                 setSubmitSuccessId(null);
                 setDuplicateBathroomId(null);
+                setIsResolvingAddress(false);
+                setIsResolvingFromAddress(false);
                 setSelectedCoordinates(DEFAULT_COORDINATES);
                 setAddressAssistMessage(null);
                 lastResolvedCoordinateKeyRef.current = "";

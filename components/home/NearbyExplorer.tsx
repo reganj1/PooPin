@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type TouchEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MapPanel } from "@/components/map/MapPanel";
 import { RestroomList } from "@/components/restroom/RestroomList";
 import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
@@ -30,6 +30,7 @@ interface MapCamera {
 }
 
 type SortMode = "closest" | "recommended";
+type MobileSheetState = "collapsed" | "default" | "expanded";
 
 interface FilterState {
   publicOnly: boolean;
@@ -39,6 +40,18 @@ interface FilterState {
 
 interface BoundsApiResponse {
   restrooms: NearbyBathroom[];
+}
+
+interface PersistedHomeMapState {
+  updatedAt: number;
+  isMapExpanded: boolean;
+  isExpandedListOpen: boolean;
+  mapCamera: MapCamera | null;
+  sortMode: SortMode;
+  filters: FilterState;
+  userLocation: Coordinate | null;
+  pendingRestore: boolean;
+  scrollY: number;
 }
 
 const LIST_LIMIT = 20;
@@ -59,6 +72,26 @@ const isValidMapCamera = (camera: MapCamera | null): camera is MapCamera =>
       camera.lng <= 180 &&
       camera.zoom >= 0 &&
       camera.zoom <= 24
+  );
+const isValidSortMode = (value: unknown): value is SortMode => value === "closest" || value === "recommended";
+const isValidFilterState = (value: unknown): value is FilterState =>
+  Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as FilterState).publicOnly === "boolean" &&
+      typeof (value as FilterState).accessible === "boolean" &&
+      typeof (value as FilterState).babyStation === "boolean"
+  );
+const isValidCoordinate = (value: unknown): value is Coordinate =>
+  Boolean(
+    value &&
+      typeof value === "object" &&
+      Number.isFinite((value as Coordinate).lat) &&
+      Number.isFinite((value as Coordinate).lng) &&
+      (value as Coordinate).lat >= -90 &&
+      (value as Coordinate).lat <= 90 &&
+      (value as Coordinate).lng >= -180 &&
+      (value as Coordinate).lng <= 180
   );
 
 const haversineDistanceMiles = (origin: Coordinate, point: Coordinate) => {
@@ -93,6 +126,55 @@ const toBoundsKey = (bounds: MapBounds) =>
   `${bounds.minLat.toFixed(4)}:${bounds.maxLat.toFixed(4)}:${bounds.minLng.toFixed(4)}:${bounds.maxLng.toFixed(4)}`;
 
 const isLocalhostHost = (hostname: string) => hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+const MOBILE_SHEET_COLLAPSED_VISIBLE_PX = 88;
+const MOBILE_SHEET_DEFAULT_VISIBLE_RATIO = 0.46;
+const MOBILE_SHEET_EXPANDED_VISIBLE_RATIO = 0.64;
+const MOBILE_SHEET_MAX_HEIGHT_RATIO = 0.72;
+
+interface MobileSheetMetrics {
+  height: number;
+  minOffset: number;
+  maxOffset: number;
+  offsets: Record<MobileSheetState, number>;
+}
+
+const clampNumber = (value: number, min: number, max: number) => {
+  const lowerBound = Math.min(min, max);
+  const upperBound = Math.max(min, max);
+  return Math.max(lowerBound, Math.min(upperBound, value));
+};
+
+const getMobileSheetMetrics = (viewportHeight: number): MobileSheetMetrics => {
+  const clampedViewportHeight = Math.max(480, viewportHeight);
+  const maxHeight = clampNumber(
+    Math.round(clampedViewportHeight * MOBILE_SHEET_MAX_HEIGHT_RATIO),
+    320,
+    clampedViewportHeight - 56
+  );
+
+  const collapsedVisible = Math.min(MOBILE_SHEET_COLLAPSED_VISIBLE_PX, maxHeight);
+  const expandedVisible = clampNumber(Math.round(clampedViewportHeight * MOBILE_SHEET_EXPANDED_VISIBLE_RATIO), 360, maxHeight - 8);
+  const defaultVisible = clampNumber(
+    Math.round(clampedViewportHeight * MOBILE_SHEET_DEFAULT_VISIBLE_RATIO),
+    280,
+    expandedVisible - 72
+  );
+
+  const expandedOffset = Math.max(0, maxHeight - expandedVisible);
+  const defaultOffset = clampNumber(maxHeight - defaultVisible, expandedOffset, maxHeight - collapsedVisible);
+  const collapsedOffset = Math.max(defaultOffset, maxHeight - collapsedVisible);
+
+  return {
+    height: maxHeight,
+    minOffset: expandedOffset,
+    maxOffset: collapsedOffset,
+    offsets: {
+      collapsed: collapsedOffset,
+      default: defaultOffset,
+      expanded: expandedOffset
+    }
+  };
+};
 
 export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [userLocation, setUserLocation] = useState<Coordinate | null>(null);
@@ -100,6 +182,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [isLocating, setIsLocating] = useState(false);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [isExpandedListOpen, setIsExpandedListOpen] = useState(true);
+  const [mobileSheetState, setMobileSheetState] = useState<MobileSheetState>("default");
   const [listHoveredRestroomId, setListHoveredRestroomId] = useState<string | null>(null);
   const [mapFocusedRestroomId, setMapFocusedRestroomId] = useState<string | null>(null);
   const [mapCamera, setMapCamera] = useState<MapCamera | null>(null);
@@ -109,14 +192,26 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     accessible: false,
     babyStation: false
   });
+  const [isHomeStateReady, setIsHomeStateReady] = useState(false);
   const [mapRestrooms, setMapRestrooms] = useState<NearbyBathroom[]>(initialRestrooms);
 
   const latestBoundsKeyRef = useRef<string>("");
   const activeBoundsRequestIdRef = useRef(0);
   const locationWatchIdRef = useRef<number | null>(null);
   const invalidBoundsCoordinatesLogKeyRef = useRef<string>("");
+  const mapCameraRef = useRef<MapCamera | null>(null);
   const hasHydratedMapStateRef = useRef(false);
   const lockedScrollYRef = useRef(0);
+  const pendingScrollRestoreRef = useRef<number | null>(null);
+  const mobileSheetRef = useRef<HTMLDivElement | null>(null);
+  const mobileSheetAnimationFrameRef = useRef<number | null>(null);
+  const mobileSheetPendingOffsetRef = useRef<number | null>(null);
+  const mobileSheetCurrentOffsetRef = useRef(0);
+  const mobileSheetMetricsRef = useRef<MobileSheetMetrics | null>(null);
+  const mobileSheetTouchStartYRef = useRef<number | null>(null);
+  const mobileSheetTouchStartOffsetRef = useRef<number | null>(null);
+  const mobileSheetDidDragRef = useRef(false);
+  const mobileSheetDragResetTimeoutRef = useRef<number | null>(null);
   const hasRealUserLocation = userLocation !== null;
   const distanceOrigin = userLocation;
   const mapRenderableRestrooms = useMemo(
@@ -165,6 +260,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       distanceMiles: roundToOne(haversineDistanceMiles(distanceOrigin, { lat: restroom.lat, lng: restroom.lng }))
     }));
   }, [distanceOrigin, mapRenderableRestrooms]);
+  const mapDisplayRestrooms = listBaseRestrooms;
 
   const listRestrooms = useMemo(() => {
     const filtered = listBaseRestrooms.filter((restroom) => {
@@ -207,7 +303,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     if (sortMode === "closest") {
-      return "Showing the currently visible map area. Sorted by distance from your live location.";
+      return "Showing the currently visible map area. Sorted by straight-line distance from your live location.";
     }
 
     return "Showing the currently visible map area. Sorted by recommended quality near your location.";
@@ -219,8 +315,203 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       source: "homepage_map"
     });
     setIsExpandedListOpen(true);
+    setMobileSheetState("default");
     setIsMapExpanded(true);
   };
+
+  const scheduleMobileSheetOffset = useCallback((offset: number, animated: boolean) => {
+    const sheetElement = mobileSheetRef.current;
+    if (!sheetElement || typeof window === "undefined") {
+      return;
+    }
+
+    if (animated) {
+      if (mobileSheetAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(mobileSheetAnimationFrameRef.current);
+        mobileSheetAnimationFrameRef.current = null;
+      }
+
+      mobileSheetPendingOffsetRef.current = null;
+      sheetElement.style.transition = "transform 220ms cubic-bezier(0.22, 1, 0.36, 1)";
+      sheetElement.style.transform = `translateY(${offset}px)`;
+      mobileSheetCurrentOffsetRef.current = offset;
+      return;
+    }
+
+    mobileSheetPendingOffsetRef.current = offset;
+    if (mobileSheetAnimationFrameRef.current !== null) {
+      return;
+    }
+
+    mobileSheetAnimationFrameRef.current = window.requestAnimationFrame(() => {
+      mobileSheetAnimationFrameRef.current = null;
+      const nextOffset = mobileSheetPendingOffsetRef.current;
+      const currentSheet = mobileSheetRef.current;
+      if (nextOffset === null || !currentSheet) {
+        return;
+      }
+
+      currentSheet.style.transition = "none";
+      currentSheet.style.transform = `translateY(${nextOffset}px)`;
+      mobileSheetCurrentOffsetRef.current = nextOffset;
+      mobileSheetPendingOffsetRef.current = null;
+    });
+  }, []);
+
+  const applyMobileSheetState = useCallback(
+    (state: MobileSheetState, animated: boolean) => {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      const sheetElement = mobileSheetRef.current;
+      if (!sheetElement) {
+        return;
+      }
+
+      const metrics = getMobileSheetMetrics(window.innerHeight);
+      mobileSheetMetricsRef.current = metrics;
+      sheetElement.style.height = `${metrics.height}px`;
+      scheduleMobileSheetOffset(metrics.offsets[state], animated);
+    },
+    [scheduleMobileSheetOffset]
+  );
+
+  const getNearestMobileSheetState = useCallback((offset: number, metrics: MobileSheetMetrics): MobileSheetState => {
+    const offsetEntries = Object.entries(metrics.offsets) as Array<[MobileSheetState, number]>;
+    return offsetEntries.reduce<MobileSheetState>((closestState, [candidateState, candidateOffset]) => {
+      const currentDelta = Math.abs(candidateOffset - offset);
+      const closestDelta = Math.abs(metrics.offsets[closestState] - offset);
+      return currentDelta < closestDelta ? candidateState : closestState;
+    }, "default");
+  }, []);
+
+  const handleMobileSheetHandleTap = useCallback(() => {
+    if (mobileSheetDidDragRef.current) {
+      if (typeof window !== "undefined" && mobileSheetDragResetTimeoutRef.current !== null) {
+        window.clearTimeout(mobileSheetDragResetTimeoutRef.current);
+        mobileSheetDragResetTimeoutRef.current = null;
+      }
+      mobileSheetDidDragRef.current = false;
+      return;
+    }
+
+    setMobileSheetState((current) => {
+      if (current === "collapsed") {
+        return "default";
+      }
+      if (current === "expanded") {
+        return "default";
+      }
+      return "collapsed";
+    });
+  }, []);
+
+  const handleMobileSheetHandleTouchStart = useCallback(
+    (event: TouchEvent<HTMLButtonElement>) => {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      const metrics = getMobileSheetMetrics(window.innerHeight);
+      mobileSheetMetricsRef.current = metrics;
+      const sheetElement = mobileSheetRef.current;
+      if (sheetElement) {
+        sheetElement.style.height = `${metrics.height}px`;
+      }
+
+      const startY = event.touches[0]?.clientY;
+      if (typeof startY !== "number") {
+        mobileSheetTouchStartYRef.current = null;
+        mobileSheetTouchStartOffsetRef.current = null;
+        return;
+      }
+
+      if (typeof window !== "undefined" && mobileSheetDragResetTimeoutRef.current !== null) {
+        window.clearTimeout(mobileSheetDragResetTimeoutRef.current);
+        mobileSheetDragResetTimeoutRef.current = null;
+      }
+      mobileSheetDidDragRef.current = false;
+      mobileSheetTouchStartYRef.current = startY;
+      const currentOffset =
+        mobileSheetCurrentOffsetRef.current === 0 ? metrics.offsets[mobileSheetState] : mobileSheetCurrentOffsetRef.current;
+      mobileSheetCurrentOffsetRef.current = currentOffset;
+      mobileSheetTouchStartOffsetRef.current = currentOffset;
+      scheduleMobileSheetOffset(currentOffset, false);
+    },
+    [mobileSheetState, scheduleMobileSheetOffset]
+  );
+
+  const handleMobileSheetHandleTouchMove = useCallback(
+    (event: TouchEvent<HTMLButtonElement>) => {
+      const startY = mobileSheetTouchStartYRef.current;
+      const startOffset = mobileSheetTouchStartOffsetRef.current;
+      if (typeof startY !== "number" || typeof startOffset !== "number") {
+        return;
+      }
+
+      const touchY = event.touches[0]?.clientY;
+      if (typeof touchY !== "number") {
+        return;
+      }
+
+      const metrics = mobileSheetMetricsRef.current;
+      if (!metrics) {
+        return;
+      }
+
+      if (Math.abs(touchY - startY) > 4) {
+        mobileSheetDidDragRef.current = true;
+      }
+      event.preventDefault();
+      const nextOffset = clampNumber(startOffset + (touchY - startY), metrics.minOffset, metrics.maxOffset);
+      scheduleMobileSheetOffset(nextOffset, false);
+    },
+    [scheduleMobileSheetOffset]
+  );
+
+  const handleMobileSheetHandleTouchCancel = useCallback(() => {
+    const metrics = mobileSheetMetricsRef.current;
+    mobileSheetTouchStartYRef.current = null;
+    mobileSheetTouchStartOffsetRef.current = null;
+    mobileSheetDidDragRef.current = false;
+    if (!metrics) {
+      return;
+    }
+
+    const targetState = getNearestMobileSheetState(mobileSheetCurrentOffsetRef.current, metrics);
+    setMobileSheetState(targetState);
+  }, [getNearestMobileSheetState]);
+
+  const handleMobileSheetHandleTouchEnd = useCallback(
+    (event: TouchEvent<HTMLButtonElement>) => {
+      const startY = mobileSheetTouchStartYRef.current;
+      const startOffset = mobileSheetTouchStartOffsetRef.current;
+      const metrics = mobileSheetMetricsRef.current;
+      mobileSheetTouchStartYRef.current = null;
+      mobileSheetTouchStartOffsetRef.current = null;
+      if (typeof startY !== "number" || typeof startOffset !== "number" || !metrics) {
+        return;
+      }
+
+      const endY = event.changedTouches[0]?.clientY;
+      if (typeof endY !== "number") {
+        return;
+      }
+
+      const endOffset = clampNumber(startOffset + (endY - startY), metrics.minOffset, metrics.maxOffset);
+      const targetState = getNearestMobileSheetState(endOffset, metrics);
+      setMobileSheetState(targetState);
+
+      if (mobileSheetDidDragRef.current && typeof window !== "undefined") {
+        mobileSheetDragResetTimeoutRef.current = window.setTimeout(() => {
+          mobileSheetDidDragRef.current = false;
+          mobileSheetDragResetTimeoutRef.current = null;
+        }, 260);
+      }
+    },
+    [getNearestMobileSheetState]
+  );
 
   const toggleFilter = (filterKey: keyof FilterState) => {
     setFilters((current) => ({
@@ -240,27 +531,44 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
   }, []);
 
+  const persistHomeMapState = useCallback(
+    (overrides?: Partial<PersistedHomeMapState>) => {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      const payload: PersistedHomeMapState = {
+        updatedAt: Date.now(),
+        isMapExpanded,
+        isExpandedListOpen,
+        mapCamera: mapCameraRef.current,
+        sortMode,
+        filters,
+        userLocation,
+        pendingRestore: false,
+        scrollY: window.scrollY,
+        ...overrides
+      };
+
+      window.sessionStorage.setItem(HOME_MAP_STATE_STORAGE_KEY, JSON.stringify(payload));
+    },
+    [filters, isExpandedListOpen, isMapExpanded, sortMode, userLocation]
+  );
+
   useEffect(() => {
     if (typeof window === "undefined" || hasHydratedMapStateRef.current) {
       return;
     }
 
     hasHydratedMapStateRef.current = true;
-
     const rawState = window.sessionStorage.getItem(HOME_MAP_STATE_STORAGE_KEY);
-    if (!rawState) {
-      return;
-    }
 
     try {
-      const parsed = JSON.parse(rawState) as {
-        updatedAt?: number;
-        isMapExpanded?: boolean;
-        isExpandedListOpen?: boolean;
-        mapFocusedRestroomId?: string | null;
-        mapCamera?: MapCamera | null;
-      };
+      if (!rawState) {
+        return;
+      }
 
+      const parsed = JSON.parse(rawState) as Partial<PersistedHomeMapState>;
       const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
       if (!updatedAt || Date.now() - updatedAt > HOME_MAP_STATE_TTL_MS) {
         window.sessionStorage.removeItem(HOME_MAP_STATE_STORAGE_KEY);
@@ -273,17 +581,33 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       if (typeof parsed.isExpandedListOpen === "boolean") {
         setIsExpandedListOpen(parsed.isExpandedListOpen);
       }
-      if (typeof parsed.mapFocusedRestroomId === "string") {
-        setMapFocusedRestroomId(parsed.mapFocusedRestroomId);
-        setListHoveredRestroomId(parsed.mapFocusedRestroomId);
-      }
 
       const restoredMapCamera = parsed.mapCamera ?? null;
       if (isValidMapCamera(restoredMapCamera)) {
+        mapCameraRef.current = restoredMapCamera;
         setMapCamera(restoredMapCamera);
+      }
+
+      if (isValidSortMode(parsed.sortMode)) {
+        setSortMode(parsed.sortMode);
+      }
+
+      if (isValidFilterState(parsed.filters)) {
+        setFilters(parsed.filters);
+      }
+
+      const restoredUserLocation = parsed.userLocation ?? null;
+      if (isValidCoordinate(restoredUserLocation)) {
+        setUserLocation(restoredUserLocation);
+      }
+
+      if (parsed.pendingRestore && typeof parsed.scrollY === "number" && Number.isFinite(parsed.scrollY)) {
+        pendingScrollRestoreRef.current = Math.max(0, parsed.scrollY);
       }
     } catch {
       window.sessionStorage.removeItem(HOME_MAP_STATE_STORAGE_KEY);
+    } finally {
+      setIsHomeStateReady(true);
     }
   }, []);
 
@@ -291,17 +615,85 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     if (typeof window === "undefined" || !hasHydratedMapStateRef.current) {
       return;
     }
+    persistHomeMapState();
+  }, [isExpandedListOpen, isMapExpanded, mapCamera, persistHomeMapState]);
 
-    const payload = {
-      updatedAt: Date.now(),
-      isMapExpanded,
-      isExpandedListOpen,
-      mapFocusedRestroomId,
-      mapCamera
+  useEffect(() => {
+    if (!isHomeStateReady || typeof window === "undefined") {
+      return;
+    }
+
+    if (pendingScrollRestoreRef.current === null) {
+      return;
+    }
+
+    const targetScrollY = pendingScrollRestoreRef.current;
+    pendingScrollRestoreRef.current = null;
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        window.scrollTo({ top: targetScrollY, left: 0, behavior: "auto" });
+      });
+    });
+
+    persistHomeMapState({
+      pendingRestore: false,
+      scrollY: targetScrollY
+    });
+  }, [isHomeStateReady, persistHomeMapState]);
+
+  useEffect(() => {
+    if (!isMapExpanded) {
+      return;
+    }
+
+    applyMobileSheetState(mobileSheetState, true);
+  }, [applyMobileSheetState, isMapExpanded, mobileSheetState]);
+
+  useEffect(() => {
+    if (!isMapExpanded || typeof window === "undefined") {
+      return;
+    }
+
+    const handleResize = () => {
+      applyMobileSheetState(mobileSheetState, false);
     };
 
-    window.sessionStorage.setItem(HOME_MAP_STATE_STORAGE_KEY, JSON.stringify(payload));
-  }, [isExpandedListOpen, isMapExpanded, mapCamera, mapFocusedRestroomId]);
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [applyMobileSheetState, isMapExpanded, mobileSheetState]);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== "undefined" && mobileSheetAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(mobileSheetAnimationFrameRef.current);
+      }
+      mobileSheetAnimationFrameRef.current = null;
+      mobileSheetPendingOffsetRef.current = null;
+      if (typeof window !== "undefined" && mobileSheetDragResetTimeoutRef.current !== null) {
+        window.clearTimeout(mobileSheetDragResetTimeoutRef.current);
+      }
+      mobileSheetDragResetTimeoutRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mapFocusedRestroomId) {
+      return;
+    }
+
+    const isFocusedRestroomVisible = mapRenderableRestrooms.some((restroom) => restroom.id === mapFocusedRestroomId);
+    if (isFocusedRestroomVisible) {
+      return;
+    }
+
+    setMapFocusedRestroomId(null);
+    if (listHoveredRestroomId === mapFocusedRestroomId) {
+      setListHoveredRestroomId(null);
+    }
+  }, [listHoveredRestroomId, mapFocusedRestroomId, mapRenderableRestrooms]);
 
   useEffect(() => {
     if (!isMapExpanded || typeof document === "undefined" || typeof window === "undefined") {
@@ -350,6 +742,29 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       window.removeEventListener("keydown", handleEscape);
     };
   }, [isMapExpanded]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const handlePageShow = (event: PageTransitionEvent) => {
+      const navigationEntry = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+      const isBackForwardNavigation = event.persisted || navigationEntry?.type === "back_forward";
+      if (!isBackForwardNavigation) {
+        return;
+      }
+
+      // Avoid stale "selected without popup" state when returning from detail pages.
+      setMapFocusedRestroomId(null);
+      setListHoveredRestroomId(null);
+    };
+
+    window.addEventListener("pageshow", handlePageShow);
+    return () => {
+      window.removeEventListener("pageshow", handlePageShow);
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -469,8 +884,19 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, []);
 
   const handleMapCameraChange = useCallback((camera: MapCamera) => {
+    mapCameraRef.current = camera;
     setMapCamera(camera);
   }, []);
+
+  const handleNavigateToDetail = useCallback(
+    (_restroomId?: string) => {
+      persistHomeMapState({
+        pendingRestore: true,
+        scrollY: typeof window !== "undefined" ? window.scrollY : 0
+      });
+    },
+    [persistHomeMapState]
+  );
 
   const handleMapFocusedRestroomIdChange = useCallback((restroomId: string | null) => {
     setMapFocusedRestroomId(restroomId);
@@ -483,25 +909,35 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     const isExpandedVariant = variant === "expanded";
 
     return (
-      <div className={cn("space-y-3", isExpandedVariant && "h-full")}>
-        <section className={cn("rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm", isExpandedVariant && "p-3.5 sm:p-4")}>
-          <div className="mb-3 flex items-end justify-between gap-3">
+      <div className={cn("min-w-0 space-y-3", isExpandedVariant && "h-full space-y-2")}>
+        <section
+          className={cn(
+            "rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm",
+            isExpandedVariant && "p-2 sm:p-2.5"
+          )}
+        >
+          <div className={cn("mb-3 flex items-end justify-between gap-3", isExpandedVariant && "mb-1.5")}>
             <div>
-              <h2 className="text-base font-semibold text-slate-900">Browse this area</h2>
-              <p className="mt-1 text-xs text-slate-500">Filter and sort what you see on the map.</p>
+              <h2 className={cn("text-base font-semibold text-slate-900", isExpandedVariant && "text-sm")}>Browse this area</h2>
+              <p className={cn("mt-1 text-xs text-slate-500", isExpandedVariant && "mt-0 text-[11px]")}>
+                Filter and sort what you see on the map.
+              </p>
             </div>
           </div>
 
-          <div className="flex flex-col gap-3">
+          <div className={cn("flex flex-col gap-3", isExpandedVariant && "gap-1.5")}>
             <fieldset>
-              <legend className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Filters</legend>
-              <div className="flex flex-wrap gap-2">
+              <legend className={cn("mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500", isExpandedVariant && "mb-1 text-[11px]")}>
+                Filters
+              </legend>
+              <div className={cn("flex flex-wrap gap-2", isExpandedVariant && "gap-1.5")}>
                 <button
                   type="button"
                   onClick={() => toggleFilter("publicOnly")}
                   aria-pressed={filters.publicOnly}
                   className={cn(
                     "rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                    isExpandedVariant && "px-2.5 py-1 text-xs",
                     filters.publicOnly
                       ? "border-brand-300 bg-brand-50 text-brand-700"
                       : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
@@ -515,6 +951,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                   aria-pressed={filters.accessible}
                   className={cn(
                     "rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                    isExpandedVariant && "px-2.5 py-1 text-xs",
                     filters.accessible
                       ? "border-brand-300 bg-brand-50 text-brand-700"
                       : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
@@ -528,6 +965,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                   aria-pressed={filters.babyStation}
                   className={cn(
                     "rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                    isExpandedVariant && "px-2.5 py-1 text-xs",
                     filters.babyStation
                       ? "border-brand-300 bg-brand-50 text-brand-700"
                       : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
@@ -538,7 +976,12 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               </div>
             </fieldset>
 
-            <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
+            <div
+              className={cn(
+                "flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-2.5",
+                isExpandedVariant && "p-1.5"
+              )}
+            >
               <label htmlFor={`sort-mode-${variant}`} className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Sort
               </label>
@@ -546,7 +989,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 id={`sort-mode-${variant}`}
                 value={sortMode}
                 onChange={(event) => setSortMode(event.target.value as SortMode)}
-                className="h-9 w-[180px] rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                className={cn(
+                  "h-9 min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100 sm:w-[180px]",
+                  isExpandedVariant && "h-7 sm:w-[140px] px-2 text-xs"
+                )}
               >
                 <option value="recommended">Recommended</option>
                 <option value="closest" disabled={!hasRealUserLocation}>
@@ -563,9 +1009,11 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           showDistance={hasRealUserLocation}
           highlightedRestroomId={highlightedListRestroomId}
           onRestroomHoverChange={setListHoveredRestroomId}
-          className={cn(isExpandedVariant && "p-3.5 sm:p-4")}
+          onNavigateToDetail={handleNavigateToDetail}
+          compact={isExpandedVariant}
+          className={cn(isExpandedVariant && "p-2.5 sm:p-3")}
           scrollClassName={
-            isExpandedVariant ? "sm:max-h-[calc(100vh-330px)] sm:overflow-y-auto sm:pr-1 lg:max-h-[calc(100vh-330px)]" : undefined
+            isExpandedVariant ? "sm:max-h-[calc(100vh-290px)] sm:overflow-y-auto sm:pr-1 lg:max-h-[calc(100vh-290px)]" : undefined
           }
         />
       </div>
@@ -588,25 +1036,21 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
             {hasRealUserLocation ? (
               <p className="text-xs font-medium text-emerald-700 sm:text-sm">
-                Showing distance and closest sorting from your live location.
+                Showing straight-line distance and closest sorting from your live location.
               </p>
             ) : (
               <p className="text-xs text-slate-500 sm:text-sm">Browsing this map area. Enable location to see distance from you.</p>
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={handleExpandMap}
-              className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-            >
-              Expand map
-            </button>
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
-              {mapRenderableRestrooms.length} pins in view
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 sm:hidden">
+              {mapDisplayRestrooms.length} pins • {listRestrooms.length} listed
             </span>
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+            <span className="hidden rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 sm:inline-flex">
+              {mapDisplayRestrooms.length} pins in view
+            </span>
+            <span className="hidden rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 sm:inline-flex">
               {listRestrooms.length} in list
             </span>
           </div>
@@ -622,41 +1066,51 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       </section>
 
       {!isMapExpanded ? (
-        <section className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(380px,1fr)] xl:grid-cols-[minmax(0,1.55fr)_430px]">
-          <div className="lg:sticky lg:top-20 lg:self-start">
-            <MapPanel
-              restrooms={mapRenderableRestrooms}
-              userLocation={userLocation}
-              showDistance={hasRealUserLocation}
-              hoveredRestroomId={listHoveredRestroomId}
-              onFocusedRestroomIdChange={handleMapFocusedRestroomIdChange}
-              onViewportBoundsChange={handleViewportBoundsChange}
-              onCameraChange={handleMapCameraChange}
-              initialCamera={mapCamera}
-              onExpandMap={handleExpandMap}
-            />
+        <section className="grid min-w-0 gap-5 overflow-x-clip lg:grid-cols-[minmax(0,1.45fr)_minmax(360px,1fr)] xl:grid-cols-[minmax(0,1.55fr)_420px]">
+          <div className="min-w-0 lg:sticky lg:top-20 lg:self-start">
+            {isHomeStateReady ? (
+              <MapPanel
+                restrooms={mapDisplayRestrooms}
+                userLocation={userLocation}
+                showDistance={hasRealUserLocation}
+                hoveredRestroomId={listHoveredRestroomId}
+                onFocusedRestroomIdChange={handleMapFocusedRestroomIdChange}
+                onViewportBoundsChange={handleViewportBoundsChange}
+                onCameraChange={handleMapCameraChange}
+                onNavigateToDetail={handleNavigateToDetail}
+                initialCamera={mapCamera}
+                onExpandMap={handleExpandMap}
+              />
+            ) : (
+              <div className="h-[340px] rounded-3xl border border-slate-200 bg-slate-100/70 shadow-sm sm:h-[440px] lg:h-[640px]" />
+            )}
           </div>
 
-          {renderListPanel("default")}
+          <div className="min-w-0">{renderListPanel("default")}</div>
         </section>
       ) : null}
 
       {isMapExpanded ? (
         <section className="fixed inset-0 z-[80] overflow-hidden bg-slate-950/45 backdrop-blur-[1.5px]">
           <div className="absolute inset-0 max-w-full overflow-hidden">
-            <MapPanel
-              restrooms={mapRenderableRestrooms}
-              userLocation={userLocation}
-              showDistance={hasRealUserLocation}
-              hoveredRestroomId={listHoveredRestroomId}
-              onFocusedRestroomIdChange={handleMapFocusedRestroomIdChange}
-              onViewportBoundsChange={handleViewportBoundsChange}
-              onCameraChange={handleMapCameraChange}
-              initialCamera={mapCamera}
-              className="h-full rounded-none border-0 shadow-none"
-              mapClassName="h-full min-h-0"
-              showHeader={false}
-            />
+            {isHomeStateReady ? (
+              <MapPanel
+                restrooms={mapDisplayRestrooms}
+                userLocation={userLocation}
+                showDistance={hasRealUserLocation}
+                hoveredRestroomId={listHoveredRestroomId}
+                onFocusedRestroomIdChange={handleMapFocusedRestroomIdChange}
+                onViewportBoundsChange={handleViewportBoundsChange}
+                onCameraChange={handleMapCameraChange}
+                onNavigateToDetail={handleNavigateToDetail}
+                initialCamera={mapCamera}
+                className="h-full rounded-none border-0 shadow-none"
+                mapClassName="h-full min-h-0"
+                showHeader={false}
+              />
+            ) : (
+              <div className="h-full w-full bg-slate-100/80" />
+            )}
 
             <div className="pointer-events-none absolute inset-x-2 top-[max(0.5rem,env(safe-area-inset-top))] sm:inset-x-4 sm:top-4">
               <div className="pointer-events-auto mx-auto flex w-full max-w-[1400px] min-w-0 flex-col gap-2 rounded-2xl border border-white/70 bg-white/95 px-3 py-2.5 shadow-xl backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-4">
@@ -678,7 +1132,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                   <button
                     type="button"
                     onClick={() => setIsExpandedListOpen((current) => !current)}
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                    className="hidden rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 sm:inline-flex"
                   >
                     {isExpandedListOpen ? "Hide list" : "Show list"}
                   </button>
@@ -699,37 +1153,58 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               </div>
             </div>
 
-            {isExpandedListOpen ? (
-              <>
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 overflow-hidden sm:hidden">
-                  <div className="pointer-events-auto rounded-t-3xl border-t border-slate-200 bg-white shadow-2xl">
-                    <div className="flex justify-center pt-2">
-                      <span className="h-1.5 w-10 rounded-full bg-slate-300" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 overflow-hidden sm:hidden">
+              <div
+                ref={mobileSheetRef}
+                className="pointer-events-auto mx-0 overflow-hidden rounded-t-3xl border-t border-slate-200 bg-white shadow-2xl will-change-transform"
+                style={{
+                  height: "72svh",
+                  transform:
+                    mobileSheetState === "collapsed"
+                      ? "translateY(calc(72svh - 88px))"
+                      : mobileSheetState === "expanded"
+                        ? "translateY(calc(72svh - 64svh))"
+                        : "translateY(calc(72svh - 46svh))"
+                }}
+              >
+                <button
+                  type="button"
+                  aria-label={
+                    mobileSheetState === "collapsed" ? "Expand nearby restrooms sheet" : "Collapse nearby restrooms sheet"
+                  }
+                  onClick={handleMobileSheetHandleTap}
+                  onTouchStart={handleMobileSheetHandleTouchStart}
+                  onTouchMove={handleMobileSheetHandleTouchMove}
+                  onTouchEnd={handleMobileSheetHandleTouchEnd}
+                  onTouchCancel={handleMobileSheetHandleTouchCancel}
+                  className="flex w-full touch-none flex-col items-center gap-1.5 border-b border-slate-200 px-4 pb-2 pt-2.5"
+                >
+                  <span className="h-1.5 w-10 rounded-full bg-slate-300" />
+                  <div className="flex w-full items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Nearby results</p>
+                      <p className="text-xs text-slate-500">{listRestrooms.length} in current map area</p>
                     </div>
-                    <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">Nearby results</p>
-                        <p className="text-xs text-slate-500">{listRestrooms.length} in current map area</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setIsExpandedListOpen(false)}
-                        className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700"
-                      >
-                        Hide
-                      </button>
-                    </div>
-                    <div className="max-h-[58svh] overflow-x-hidden overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.65rem)] pt-2">
-                      {renderListPanel("expanded")}
-                    </div>
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      {mobileSheetState === "collapsed" ? "Show" : "Hide"}
+                    </span>
                   </div>
-                </div>
-                <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 hidden max-h-[62vh] sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-[92px] sm:block sm:max-h-none sm:w-[400px]">
-                  <div className="pointer-events-auto h-full overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl sm:p-3">
+                </button>
+
+                {mobileSheetState !== "collapsed" ? (
+                  <div className="h-[calc(100%-68px)] overflow-x-hidden overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.65rem)] pt-2">
                     {renderListPanel("expanded")}
                   </div>
+                ) : null}
+              </div>
+            </div>
+
+            {isExpandedListOpen ? (
+              <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 hidden max-h-[62vh] sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-[92px] sm:block sm:max-h-none sm:w-[400px]">
+                <div className="pointer-events-auto h-full overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl sm:p-3">
+                  {renderListPanel("expanded")}
                 </div>
-              </>
+              </div>
             ) : null}
           </div>
         </section>
