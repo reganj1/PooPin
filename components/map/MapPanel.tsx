@@ -9,6 +9,11 @@ interface MapPanelProps {
     lat: number;
     lng: number;
   } | null;
+  initialCamera?: {
+    lat: number;
+    lng: number;
+    zoom: number;
+  } | null;
   showDistance?: boolean;
   hoveredRestroomId?: string | null;
   onFocusedRestroomIdChange?: (restroomId: string | null) => void;
@@ -18,6 +23,7 @@ interface MapPanelProps {
     minLng: number;
     maxLng: number;
   }) => void;
+  onCameraChange?: (camera: { lat: number; lng: number; zoom: number }) => void;
   className?: string;
   mapClassName?: string;
   showHeader?: boolean;
@@ -27,10 +33,12 @@ interface MapPanelProps {
 export function MapPanel({
   restrooms,
   userLocation = null,
+  initialCamera = null,
   showDistance = false,
   hoveredRestroomId = null,
   onFocusedRestroomIdChange,
   onViewportBoundsChange,
+  onCameraChange,
   className,
   mapClassName,
   showHeader = true,
@@ -122,10 +130,12 @@ export function MapPanel({
           restrooms={restrooms}
           accessToken={MAPBOX_ACCESS_TOKEN}
           userLocation={userLocation}
+          initialCamera={initialCamera}
           showDistance={showDistance}
           hoveredRestroomId={hoveredRestroomId}
           onFocusedRestroomIdChange={onFocusedRestroomIdChange}
           onViewportBoundsChange={onViewportBoundsChange}
+          onCameraChange={onCameraChange}
         />
       </div>
     </section>

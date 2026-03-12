@@ -23,6 +23,12 @@ interface MapBounds {
   maxLng: number;
 }
 
+interface MapCamera {
+  lat: number;
+  lng: number;
+  zoom: number;
+}
+
 type SortMode = "closest" | "recommended";
 
 interface FilterState {
@@ -36,9 +42,24 @@ interface BoundsApiResponse {
 }
 
 const LIST_LIMIT = 20;
+const HOME_MAP_STATE_STORAGE_KEY = "poopin:home-map-state:v1";
+const HOME_MAP_STATE_TTL_MS = 30 * 60_000;
 const roundToOne = (value: number) => Math.round(value * 10) / 10;
 const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
 const isValidMapCoordinate = (lat: number, lng: number) => Number.isFinite(lat) && Number.isFinite(lng);
+const isValidMapCamera = (camera: MapCamera | null): camera is MapCamera =>
+  Boolean(
+    camera &&
+      Number.isFinite(camera.lat) &&
+      Number.isFinite(camera.lng) &&
+      Number.isFinite(camera.zoom) &&
+      camera.lat >= -90 &&
+      camera.lat <= 90 &&
+      camera.lng >= -180 &&
+      camera.lng <= 180 &&
+      camera.zoom >= 0 &&
+      camera.zoom <= 24
+  );
 
 const haversineDistanceMiles = (origin: Coordinate, point: Coordinate) => {
   const earthRadiusMiles = 3958.8;
@@ -81,6 +102,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [isExpandedListOpen, setIsExpandedListOpen] = useState(true);
   const [listHoveredRestroomId, setListHoveredRestroomId] = useState<string | null>(null);
   const [mapFocusedRestroomId, setMapFocusedRestroomId] = useState<string | null>(null);
+  const [mapCamera, setMapCamera] = useState<MapCamera | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("recommended");
   const [filters, setFilters] = useState<FilterState>({
     publicOnly: false,
@@ -93,6 +115,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const activeBoundsRequestIdRef = useRef(0);
   const locationWatchIdRef = useRef<number | null>(null);
   const invalidBoundsCoordinatesLogKeyRef = useRef<string>("");
+  const hasHydratedMapStateRef = useRef(false);
+  const lockedScrollYRef = useRef(0);
   const hasRealUserLocation = userLocation !== null;
   const distanceOrigin = userLocation;
   const mapRenderableRestrooms = useMemo(
@@ -217,21 +241,96 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, []);
 
   useEffect(() => {
-    if (!isMapExpanded || typeof document === "undefined") {
+    if (typeof window === "undefined" || hasHydratedMapStateRef.current) {
+      return;
+    }
+
+    hasHydratedMapStateRef.current = true;
+
+    const rawState = window.sessionStorage.getItem(HOME_MAP_STATE_STORAGE_KEY);
+    if (!rawState) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(rawState) as {
+        updatedAt?: number;
+        isMapExpanded?: boolean;
+        isExpandedListOpen?: boolean;
+        mapFocusedRestroomId?: string | null;
+        mapCamera?: MapCamera | null;
+      };
+
+      const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
+      if (!updatedAt || Date.now() - updatedAt > HOME_MAP_STATE_TTL_MS) {
+        window.sessionStorage.removeItem(HOME_MAP_STATE_STORAGE_KEY);
+        return;
+      }
+
+      if (typeof parsed.isMapExpanded === "boolean") {
+        setIsMapExpanded(parsed.isMapExpanded);
+      }
+      if (typeof parsed.isExpandedListOpen === "boolean") {
+        setIsExpandedListOpen(parsed.isExpandedListOpen);
+      }
+      if (typeof parsed.mapFocusedRestroomId === "string") {
+        setMapFocusedRestroomId(parsed.mapFocusedRestroomId);
+        setListHoveredRestroomId(parsed.mapFocusedRestroomId);
+      }
+
+      const restoredMapCamera = parsed.mapCamera ?? null;
+      if (isValidMapCamera(restoredMapCamera)) {
+        setMapCamera(restoredMapCamera);
+      }
+    } catch {
+      window.sessionStorage.removeItem(HOME_MAP_STATE_STORAGE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !hasHydratedMapStateRef.current) {
+      return;
+    }
+
+    const payload = {
+      updatedAt: Date.now(),
+      isMapExpanded,
+      isExpandedListOpen,
+      mapFocusedRestroomId,
+      mapCamera
+    };
+
+    window.sessionStorage.setItem(HOME_MAP_STATE_STORAGE_KEY, JSON.stringify(payload));
+  }, [isExpandedListOpen, isMapExpanded, mapCamera, mapFocusedRestroomId]);
+
+  useEffect(() => {
+    if (!isMapExpanded || typeof document === "undefined" || typeof window === "undefined") {
       return;
     }
 
     const previousOverflow = document.body.style.overflow;
+    const previousPosition = document.body.style.position;
+    const previousTop = document.body.style.top;
+    const previousWidth = document.body.style.width;
     const previousHtmlOverflow = document.documentElement.style.overflow;
     const previousOverscrollBehavior = document.body.style.overscrollBehavior;
+    lockedScrollYRef.current = window.scrollY;
+
     document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${lockedScrollYRef.current}px`;
+    document.body.style.width = "100%";
     document.documentElement.style.overflow = "hidden";
     document.body.style.overscrollBehavior = "none";
 
     return () => {
       document.body.style.overflow = previousOverflow;
+      document.body.style.position = previousPosition;
+      document.body.style.top = previousTop;
+      document.body.style.width = previousWidth;
       document.documentElement.style.overflow = previousHtmlOverflow;
       document.body.style.overscrollBehavior = previousOverscrollBehavior;
+      window.scrollTo(0, lockedScrollYRef.current);
     };
   }, [isMapExpanded]);
 
@@ -367,6 +466,17 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       .catch(() => {
         // Keep previous map dataset on bounds fetch failure.
       });
+  }, []);
+
+  const handleMapCameraChange = useCallback((camera: MapCamera) => {
+    setMapCamera(camera);
+  }, []);
+
+  const handleMapFocusedRestroomIdChange = useCallback((restroomId: string | null) => {
+    setMapFocusedRestroomId(restroomId);
+    if (restroomId) {
+      setListHoveredRestroomId(null);
+    }
   }, []);
 
   const renderListPanel = (variant: "default" | "expanded") => {
@@ -512,8 +622,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               userLocation={userLocation}
               showDistance={hasRealUserLocation}
               hoveredRestroomId={listHoveredRestroomId}
-              onFocusedRestroomIdChange={setMapFocusedRestroomId}
+              onFocusedRestroomIdChange={handleMapFocusedRestroomIdChange}
               onViewportBoundsChange={handleViewportBoundsChange}
+              onCameraChange={handleMapCameraChange}
+              initialCamera={mapCamera}
               onExpandMap={handleExpandMap}
             />
           </div>
@@ -530,8 +642,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               userLocation={userLocation}
               showDistance={hasRealUserLocation}
               hoveredRestroomId={listHoveredRestroomId}
-              onFocusedRestroomIdChange={setMapFocusedRestroomId}
+              onFocusedRestroomIdChange={handleMapFocusedRestroomIdChange}
               onViewportBoundsChange={handleViewportBoundsChange}
+              onCameraChange={handleMapCameraChange}
+              initialCamera={mapCamera}
               className="h-full rounded-none border-0 shadow-none"
               mapClassName="h-full min-h-0"
               showHeader={false}
@@ -598,7 +712,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                         Hide
                       </button>
                     </div>
-                    <div className="max-h-[54svh] overflow-x-hidden overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.65rem)] pt-2">
+                    <div className="max-h-[58svh] overflow-x-hidden overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.65rem)] pt-2">
                       {renderListPanel("expanded")}
                     </div>
                   </div>
