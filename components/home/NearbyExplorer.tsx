@@ -71,6 +71,8 @@ const toGeoErrorMessage = (error: GeolocationPositionError) => {
 const toBoundsKey = (bounds: MapBounds) =>
   `${bounds.minLat.toFixed(4)}:${bounds.maxLat.toFixed(4)}:${bounds.minLng.toFixed(4)}:${bounds.maxLng.toFixed(4)}`;
 
+const isLocalhostHost = (hostname: string) => hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+
 export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [userLocation, setUserLocation] = useState<Coordinate | null>(null);
   const [geoError, setGeoError] = useState<string | null>(null);
@@ -279,6 +281,13 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const handleUseMyLocation = () => {
     setGeoError(null);
 
+    if (typeof window !== "undefined" && !window.isSecureContext && !isLocalhostHost(window.location.hostname)) {
+      setGeoError("Location needs HTTPS on mobile. Open Poopin over HTTPS (or localhost) to use Locate.");
+      setIsLocating(false);
+      stopLocationWatch();
+      return;
+    }
+
     if (typeof navigator === "undefined" || !navigator.geolocation) {
       setGeoError("Geolocation is not available in this browser. Showing default city-center results.");
       setUserLocation(null);
@@ -286,7 +295,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     if (locationWatchIdRef.current !== null) {
-      return;
+      stopLocationWatch();
     }
 
     setIsLocating(true);
@@ -301,10 +310,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         (error) => {
           setGeoError(toGeoErrorMessage(error));
           setIsLocating(false);
+          stopLocationWatch();
 
           if (error.code === error.PERMISSION_DENIED) {
             setUserLocation(null);
-            stopLocationWatch();
           }
         },
         {
@@ -318,6 +327,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     } catch {
       setGeoError("Could not enable live location updates. Showing map results without user distance.");
       setIsLocating(false);
+      stopLocationWatch();
     }
   };
 
@@ -527,7 +537,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               showHeader={false}
             />
 
-            <div className="pointer-events-none absolute inset-x-2 top-2 sm:inset-x-4 sm:top-4">
+            <div className="pointer-events-none absolute inset-x-2 top-[max(0.5rem,env(safe-area-inset-top))] sm:inset-x-4 sm:top-4">
               <div className="pointer-events-auto mx-auto flex w-full max-w-[1400px] min-w-0 flex-col gap-2 rounded-2xl border border-white/70 bg-white/95 px-3 py-2.5 shadow-xl backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-4">
                 <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Full map mode</p>
@@ -559,6 +569,12 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                     Close map
                   </button>
                 </div>
+
+                {geoError ? (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-medium text-amber-800">
+                    {geoError}
+                  </p>
+                ) : null}
               </div>
             </div>
 
@@ -566,6 +582,9 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               <>
                 <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 overflow-hidden sm:hidden">
                   <div className="pointer-events-auto rounded-t-3xl border-t border-slate-200 bg-white shadow-2xl">
+                    <div className="flex justify-center pt-2">
+                      <span className="h-1.5 w-10 rounded-full bg-slate-300" />
+                    </div>
                     <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
                       <div>
                         <p className="text-sm font-semibold text-slate-900">Nearby results</p>
@@ -579,7 +598,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                         Hide
                       </button>
                     </div>
-                    <div className="max-h-[66vh] overflow-x-hidden overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2">
+                    <div className="max-h-[54svh] overflow-x-hidden overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.65rem)] pt-2">
                       {renderListPanel("expanded")}
                     </div>
                   </div>
