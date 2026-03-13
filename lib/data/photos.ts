@@ -92,3 +92,38 @@ export async function getApprovedBathroomPhotosData(bathroomId: string): Promise
     })
     .filter((row): row is ApprovedBathroomPhoto => row !== null);
 }
+
+export async function getApprovedBathroomPreviewPhotoData(bathroomId: string): Promise<string | null> {
+  const supabase = getSupabaseServerClient();
+  if (!supabase) {
+    return null;
+  }
+
+  const { data: photoRows, error } = await supabase
+    .from("photos")
+    .select("storage_path, status")
+    .eq("bathroom_id", bathroomId)
+    .eq("status", ACTIVE_STATUS)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error || !photoRows || photoRows.length === 0) {
+    return null;
+  }
+
+  const row = photoRows[0] as Pick<PhotoRow, "storage_path" | "status">;
+  if (!isPhotoStatus(row.status) || row.status !== ACTIVE_STATUS || !row.storage_path) {
+    return null;
+  }
+
+  const { data: signedUrls, error: signedUrlError } = await supabase.storage
+    .from(SUPABASE_PHOTOS_BUCKET)
+    .createSignedUrls([row.storage_path], 60 * 60);
+
+  if (!signedUrlError && signedUrls?.[0] && !signedUrls[0].error && signedUrls[0].signedUrl) {
+    return signedUrls[0].signedUrl;
+  }
+
+  const publicUrl = supabase.storage.from(SUPABASE_PHOTOS_BUCKET).getPublicUrl(row.storage_path).data.publicUrl;
+  return publicUrl || null;
+}

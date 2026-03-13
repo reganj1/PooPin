@@ -16,6 +16,7 @@ interface MapPanelProps {
   } | null;
   showDistance?: boolean;
   hoveredRestroomId?: string | null;
+  focusedRestroomId?: string | null;
   onFocusedRestroomIdChange?: (restroomId: string | null) => void;
   onViewportBoundsChange?: (bounds: {
     minLat: number;
@@ -37,6 +38,7 @@ export function MapPanel({
   initialCamera = null,
   showDistance = false,
   hoveredRestroomId = null,
+  focusedRestroomId = null,
   onFocusedRestroomIdChange,
   onViewportBoundsChange,
   onCameraChange,
@@ -142,6 +144,7 @@ export function MapPanel({
           initialCamera={initialCamera}
           showDistance={showDistance}
           hoveredRestroomId={hoveredRestroomId}
+          focusedRestroomId={focusedRestroomId}
           onFocusedRestroomIdChange={onFocusedRestroomIdChange}
           onViewportBoundsChange={onViewportBoundsChange}
           onCameraChange={onCameraChange}

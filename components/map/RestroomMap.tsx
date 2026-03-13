@@ -4,11 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type mapboxgl from "mapbox-gl";
 import type { FeatureCollection, Point } from "geojson";
-import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
 import { NearbyBathroom } from "@/types";
-import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
 import { getRestroomDisplayName, getRestroomPopupAddress } from "@/lib/utils/restroomPresentation";
-import { getReviewQuickTagDescriptor, normalizeReviewQuickTags } from "@/lib/utils/reviewSignals";
+import { getReviewQuickTagDescriptor } from "@/lib/utils/reviewSignals";
 
 interface RestroomMapProps {
   restrooms: NearbyBathroom[];
@@ -24,6 +22,7 @@ interface RestroomMapProps {
   } | null;
   showDistance?: boolean;
   hoveredRestroomId?: string | null;
+  focusedRestroomId?: string | null;
   onFocusedRestroomIdChange?: (restroomId: string | null) => void;
   onViewportBoundsChange?: (bounds: {
     minLat: number;
@@ -58,6 +57,7 @@ const USER_RING_LAYER_ID = "user-location-ring-layer";
 const USER_DOT_LAYER_ID = "user-location-dot-layer";
 const DEFAULT_CENTER: [number, number] = [-122.4194, 37.7749];
 const DEFAULT_ZOOM = 12;
+const DESKTOP_PREVIEW_FETCH_INTENT_DELAY_MS = 130;
 
 const isValidCoordinate = (lat: number, lng: number) => Number.isFinite(lat) && Number.isFinite(lng);
 const isValidCamera = (
@@ -139,6 +139,89 @@ const toDistanceLabel = (value: number) => {
 const getLocationKey = (location: { lat: number; lng: number } | null) =>
   location ? `${location.lat.toFixed(5)}:${location.lng.toFixed(5)}` : "";
 
+const toDisplayRating = (value: number) => (value > 0 ? value.toFixed(1) : "N/A");
+
+const buildDesktopHoverPreviewContent = (
+  restroom: NearbyBathroom,
+  options: {
+    showDistance: boolean;
+    photoUrl: string | null;
+    isPhotoLoading: boolean;
+  }
+) => {
+  const { showDistance, photoUrl, isPhotoLoading } = options;
+  const container = document.createElement("div");
+  container.className = "w-[246px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl";
+
+  const media = document.createElement("div");
+  media.className = "relative h-24 w-full border-b border-slate-100 bg-slate-100";
+  if (photoUrl) {
+    const image = document.createElement("img");
+    image.src = photoUrl;
+    image.alt = `${getRestroomDisplayName(restroom)} preview`;
+    image.className = "h-full w-full object-cover";
+    image.loading = "lazy";
+    media.appendChild(image);
+  } else {
+    const placeholder = document.createElement("div");
+    placeholder.className = "flex h-full w-full items-center justify-center text-[11px] font-semibold text-slate-500";
+    placeholder.textContent = "No photo yet";
+    media.appendChild(placeholder);
+  }
+
+  if (isPhotoLoading) {
+    const loadingOverlay = document.createElement("div");
+    loadingOverlay.className =
+      "absolute inset-0 flex items-center justify-center bg-white/70 text-[11px] font-semibold text-slate-500";
+    loadingOverlay.textContent = "Loading";
+    media.appendChild(loadingOverlay);
+  }
+
+  container.appendChild(media);
+
+  const body = document.createElement("div");
+  body.className = "space-y-1.5 p-3";
+
+  const title = document.createElement("p");
+  title.className = "truncate text-sm font-semibold text-slate-900";
+  title.textContent = getRestroomDisplayName(restroom);
+  body.appendChild(title);
+
+  const subtitle = document.createElement("p");
+  subtitle.className = "truncate text-xs text-slate-500";
+  subtitle.textContent = getRestroomPopupAddress(restroom);
+  body.appendChild(subtitle);
+
+  const ratingLine = document.createElement("p");
+  ratingLine.className = "text-xs font-semibold text-slate-700";
+  ratingLine.textContent = `⭐ ${toDisplayRating(restroom.ratings.overall)} • ${restroom.ratings.reviewCount} review${restroom.ratings.reviewCount === 1 ? "" : "s"}`;
+  body.appendChild(ratingLine);
+
+  const topSignal = restroom.ratings.qualitySignals[0];
+  if (topSignal) {
+    const descriptor = getReviewQuickTagDescriptor(topSignal);
+    if (descriptor) {
+      const signalLine = document.createElement("p");
+      signalLine.className = "text-xs font-medium text-slate-600";
+      signalLine.textContent = `${descriptor.icon} ${descriptor.label}`;
+      body.appendChild(signalLine);
+    }
+  }
+
+  if (showDistance) {
+    const distanceLabel = toDistanceLabel(restroom.distanceMiles);
+    if (distanceLabel) {
+      const distanceLine = document.createElement("p");
+      distanceLine.className = "text-xs font-medium text-slate-500";
+      distanceLine.textContent = distanceLabel;
+      body.appendChild(distanceLine);
+    }
+  }
+
+  container.appendChild(body);
+  return container;
+};
+
 export function RestroomMap({
   restrooms,
   accessToken,
@@ -146,6 +229,7 @@ export function RestroomMap({
   initialCamera = null,
   showDistance = false,
   hoveredRestroomId = null,
+  focusedRestroomId = null,
   onFocusedRestroomIdChange,
   onViewportBoundsChange,
   onCameraChange,
@@ -168,12 +252,20 @@ export function RestroomMap({
   const clickHandlerRef = useRef<((event: mapboxgl.MapLayerMouseEvent) => void) | null>(null);
   const mouseMoveHandlerRef = useRef<((event: mapboxgl.MapLayerMouseEvent) => void) | null>(null);
   const mouseLeaveHandlerRef = useRef<(() => void) | null>(null);
+  const dragStartHandlerRef = useRef<(() => void) | null>(null);
+  const zoomStartHandlerRef = useRef<(() => void) | null>(null);
+  const desktopPopupRestroomIdRef = useRef<string | null>(null);
+  const previewPhotoByRestroomIdRef = useRef<Map<string, string | null>>(new Map());
+  const previewPhotoRequestControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const desktopPreviewFetchIntentTimeoutRef = useRef<number | null>(null);
+  const desktopPreviewFetchIntentRestroomIdRef = useRef<string | null>(null);
   const missingHoveredMarkerLogRef = useRef<Set<string>>(new Set());
   const invalidCoordinatesLogKeyRef = useRef<string>("");
   const isCoarsePointerRef = useRef(false);
   const reenableTouchZoomTimeoutRef = useRef<number | null>(null);
 
   const markerData = useMemo(() => toFeatureCollection(restrooms), [restrooms]);
+  const restroomById = useMemo(() => new Map(restrooms.map((restroom) => [restroom.id, restroom])), [restrooms]);
   const userLocationData = useMemo(() => toUserLocationFeatureCollection(userLocation), [userLocation]);
   const markerFeatureIds = useMemo(() => new Set(markerData.features.map((feature) => feature.properties.id)), [markerData]);
 
@@ -184,6 +276,7 @@ export function RestroomMap({
   useEffect(() => {
     let cancelled = false;
     const missingHoveredMarkerLogSet = missingHoveredMarkerLogRef.current;
+    const previewRequestControllers = previewPhotoRequestControllersRef.current;
 
     const initMap = async () => {
       if (!mapContainerRef.current || mapRef.current) {
@@ -240,6 +333,16 @@ export function RestroomMap({
       cancelled = true;
       setIsMapReady(false);
       activePopupRestroomIdRef.current = null;
+      desktopPopupRestroomIdRef.current = null;
+      if (desktopPreviewFetchIntentTimeoutRef.current !== null && typeof window !== "undefined") {
+        window.clearTimeout(desktopPreviewFetchIntentTimeoutRef.current);
+      }
+      desktopPreviewFetchIntentTimeoutRef.current = null;
+      desktopPreviewFetchIntentRestroomIdRef.current = null;
+      for (const controller of previewRequestControllers.values()) {
+        controller.abort();
+      }
+      previewRequestControllers.clear();
       popupRef.current?.remove();
       popupRef.current = null;
 
@@ -253,6 +356,12 @@ export function RestroomMap({
         }
         if (mouseLeaveHandlerRef.current) {
           map.off("mouseleave", HIT_LAYER_ID, mouseLeaveHandlerRef.current);
+        }
+        if (dragStartHandlerRef.current) {
+          map.off("dragstart", dragStartHandlerRef.current);
+        }
+        if (zoomStartHandlerRef.current) {
+          map.off("zoomstart", zoomStartHandlerRef.current);
         }
 
         if (map.getLayer(MARKER_LAYER_ID)) {
@@ -298,6 +407,8 @@ export function RestroomMap({
       clickHandlerRef.current = null;
       mouseMoveHandlerRef.current = null;
       mouseLeaveHandlerRef.current = null;
+      dragStartHandlerRef.current = null;
+      zoomStartHandlerRef.current = null;
       mapRef.current = null;
       mapboxRef.current = null;
       onFocusedRestroomIdChange?.(null);
@@ -347,10 +458,160 @@ export function RestroomMap({
 
     const resolveHoveredRestroomId = () => {
       if (isCoarsePointerRef.current) {
-        return activePopupRestroomIdRef.current ?? hoveredRestroomId;
+        return focusedRestroomId;
       }
 
-      return hoveredRestroomId ?? mapHoveredRestroomIdRef.current ?? activePopupRestroomIdRef.current;
+      return hoveredRestroomId ?? mapHoveredRestroomIdRef.current;
+    };
+
+    const clearDesktopHoverPopup = () => {
+      if (isCoarsePointerRef.current) {
+        return;
+      }
+
+      if (desktopPreviewFetchIntentTimeoutRef.current !== null && typeof window !== "undefined") {
+        window.clearTimeout(desktopPreviewFetchIntentTimeoutRef.current);
+      }
+      desktopPreviewFetchIntentTimeoutRef.current = null;
+      desktopPreviewFetchIntentRestroomIdRef.current = null;
+
+      popupRef.current?.remove();
+      popupRef.current = null;
+      desktopPopupRestroomIdRef.current = null;
+    };
+
+    const requestDesktopPreviewPhoto = (restroomId: string) => {
+      if (previewPhotoByRestroomIdRef.current.has(restroomId)) {
+        return;
+      }
+
+      if (previewPhotoRequestControllersRef.current.has(restroomId)) {
+        return;
+      }
+
+      const controller = new AbortController();
+      previewPhotoRequestControllersRef.current.set(restroomId, controller);
+
+      void fetch(`/api/restrooms/${encodeURIComponent(restroomId)}/preview`, {
+        method: "GET",
+        signal: controller.signal
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error("Failed to load restroom preview photo.");
+          }
+
+          const payload = (await response.json()) as { success?: boolean; photoUrl?: string | null };
+          const resolvedPhotoUrl = payload.success ? payload.photoUrl ?? null : null;
+          previewPhotoByRestroomIdRef.current.set(restroomId, resolvedPhotoUrl);
+        })
+        .catch((error: unknown) => {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+
+          previewPhotoByRestroomIdRef.current.set(restroomId, null);
+        })
+        .finally(() => {
+          previewPhotoRequestControllersRef.current.delete(restroomId);
+          if (desktopPopupRestroomIdRef.current === restroomId) {
+            showDesktopHoverPopup(restroomId);
+          }
+        });
+    };
+
+    const showDesktopHoverPopup = (restroomId: string) => {
+      if (isCoarsePointerRef.current) {
+        return;
+      }
+
+      const restroom = restroomById.get(restroomId);
+      if (!restroom) {
+        clearDesktopHoverPopup();
+        return;
+      }
+
+      const hasPreviewPhoto = previewPhotoByRestroomIdRef.current.has(restroomId);
+      const photoUrl = hasPreviewPhoto ? previewPhotoByRestroomIdRef.current.get(restroomId) ?? null : null;
+      const popupContent = buildDesktopHoverPreviewContent(restroom, {
+        showDistance,
+        photoUrl,
+        isPhotoLoading: !hasPreviewPhoto
+      });
+
+      let popup = popupRef.current;
+      if (!popup) {
+        popup = new mapbox.Popup({
+          closeButton: false,
+          closeOnClick: false,
+          closeOnMove: false,
+          offset: 14,
+          maxWidth: "280px"
+        });
+        popupRef.current = popup;
+      }
+
+      popup.setLngLat([restroom.lng, restroom.lat]).setDOMContent(popupContent);
+      if (!popup.isOpen()) {
+        popup.addTo(map);
+      }
+      desktopPopupRestroomIdRef.current = restroomId;
+
+      if (hasPreviewPhoto) {
+        if (desktopPreviewFetchIntentTimeoutRef.current !== null && typeof window !== "undefined") {
+          window.clearTimeout(desktopPreviewFetchIntentTimeoutRef.current);
+        }
+        desktopPreviewFetchIntentTimeoutRef.current = null;
+        desktopPreviewFetchIntentRestroomIdRef.current = null;
+        return;
+      }
+
+      if (previewPhotoRequestControllersRef.current.has(restroomId)) {
+        return;
+      }
+
+      if (desktopPreviewFetchIntentRestroomIdRef.current === restroomId) {
+        return;
+      }
+
+      if (desktopPreviewFetchIntentTimeoutRef.current !== null && typeof window !== "undefined") {
+        window.clearTimeout(desktopPreviewFetchIntentTimeoutRef.current);
+      }
+
+      desktopPreviewFetchIntentRestroomIdRef.current = restroomId;
+      if (typeof window === "undefined") {
+        requestDesktopPreviewPhoto(restroomId);
+        return;
+      }
+
+      desktopPreviewFetchIntentTimeoutRef.current = window.setTimeout(() => {
+        desktopPreviewFetchIntentTimeoutRef.current = null;
+        desktopPreviewFetchIntentRestroomIdRef.current = null;
+        if (desktopPopupRestroomIdRef.current !== restroomId) {
+          return;
+        }
+
+        requestDesktopPreviewPhoto(restroomId);
+      }, DESKTOP_PREVIEW_FETCH_INTENT_DELAY_MS);
+    };
+
+    const syncDesktopHoverPopup = () => {
+      if (isCoarsePointerRef.current) {
+        return;
+      }
+
+      const targetRestroomId = hoveredRestroomId ?? mapHoveredRestroomIdRef.current;
+      if (!targetRestroomId) {
+        clearDesktopHoverPopup();
+        return;
+      }
+
+      if (!restroomById.has(targetRestroomId)) {
+        clearDesktopHoverPopup();
+        return;
+      }
+
+      showDesktopHoverPopup(targetRestroomId);
     };
     // Keep hover/active emphasis consistent across desktop/mobile and avoid dramatic size jumps.
     const hoverHaloRadiusZoom10 = 17;
@@ -500,6 +761,15 @@ export function RestroomMap({
     }
 
     if (!hasBoundLayerEventsRef.current) {
+      const clearFocusedSelection = () => {
+        popupRef.current?.remove();
+        popupRef.current = null;
+        activePopupRestroomIdRef.current = null;
+        mapHoveredRestroomIdRef.current = null;
+        onFocusedRestroomIdChange?.(null);
+        setHoveredFeatureState(null);
+      };
+
       const clickHandler = (event: mapboxgl.MapLayerMouseEvent) => {
         const feature = event.features?.[0];
         if (!feature || feature.geometry.type !== "Point") {
@@ -511,14 +781,18 @@ export function RestroomMap({
           return;
         }
 
-        const { id, name, subtitle, distance_miles, overall_rating, quality_signals } = properties;
-        if (!id || !name || !subtitle) {
+        const { id } = properties;
+        if (!id) {
           return;
         }
 
         onFocusedRestroomIdChange?.(id);
         mapHoveredRestroomIdRef.current = null;
         if (isCoarsePointerRef.current) {
+          popupRef.current?.remove();
+          popupRef.current = null;
+          activePopupRestroomIdRef.current = id;
+          setHoveredFeatureState(id);
           map.touchZoomRotate.disable();
           if (reenableTouchZoomTimeoutRef.current !== null && typeof window !== "undefined") {
             window.clearTimeout(reenableTouchZoomTimeoutRef.current);
@@ -533,124 +807,12 @@ export function RestroomMap({
               reenableTouchZoomTimeoutRef.current = null;
             }, 260);
           }
-        }
-
-        if (activePopupRestroomIdRef.current === id) {
-          onNavigateToDetail?.(id);
-          router.push(`/restroom/${id}`);
           return;
         }
 
-        popupRef.current?.remove();
-
-        const popupContent = document.createElement("div");
-        popupContent.className = "min-w-[210px] space-y-2 p-1";
-        popupContent.style.touchAction = "pan-y";
-
-        const title = document.createElement("p");
-        title.className = "text-sm font-semibold text-slate-900";
-        title.textContent = name;
-        popupContent.appendChild(title);
-
-        const subtitleLine = document.createElement("p");
-        subtitleLine.className = "text-xs text-slate-600";
-        subtitleLine.textContent = subtitle;
-        popupContent.appendChild(subtitleLine);
-
-        const qualitySignals = normalizeReviewQuickTags((quality_signals ?? "").split("|")).slice(0, 2);
-        const overallRatingValue =
-          typeof overall_rating === "number"
-            ? overall_rating
-            : typeof overall_rating === "string"
-              ? Number.parseFloat(overall_rating)
-              : NaN;
-        const qualityLine = document.createElement("p");
-        qualityLine.className = "text-xs font-semibold text-slate-700";
-
-        const overallRatingLabel =
-          Number.isFinite(overallRatingValue) && overallRatingValue > 0 ? `⭐ ${overallRatingValue.toFixed(1)}` : "⭐ N/A";
-        if (qualitySignals.length > 0) {
-          const signalLabel = qualitySignals
-            .map((signal) => {
-              const descriptor = getReviewQuickTagDescriptor(signal);
-              return descriptor ? `${descriptor.icon} ${descriptor.label}` : signal;
-            })
-            .join(" • ");
-          qualityLine.textContent = `${overallRatingLabel} • ${signalLabel}`;
-        } else {
-          qualityLine.textContent = overallRatingLabel;
-        }
-        popupContent.appendChild(qualityLine);
-
-        const distanceMilesValue =
-          typeof distance_miles === "number"
-            ? distance_miles
-            : typeof distance_miles === "string"
-              ? Number.parseFloat(distance_miles)
-              : NaN;
-        const distanceLabel = showDistance ? toDistanceLabel(distanceMilesValue) : "";
-        if (showDistance && distanceLabel) {
-          const distanceLine = document.createElement("p");
-          distanceLine.className = "text-xs font-semibold text-slate-700";
-          distanceLine.textContent = distanceLabel;
-          popupContent.appendChild(distanceLine);
-        }
-
-        const actions = document.createElement("div");
-        actions.className = "flex items-center gap-2";
-
-        const detailButton = document.createElement("button");
-        detailButton.type = "button";
-        detailButton.className =
-          "inline-flex rounded-md border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50";
-        detailButton.textContent = "View details";
-        detailButton.addEventListener("click", () => {
-          onNavigateToDetail?.(id);
-          router.push(`/restroom/${id}`);
-        });
-        actions.appendChild(detailButton);
-
-        const [featureLng, featureLat] = feature.geometry.coordinates as [number, number];
-        const navigateLink = document.createElement("a");
-        navigateLink.href = getGoogleMapsDirectionsUrl(featureLat, featureLng);
-        navigateLink.target = "_blank";
-        navigateLink.rel = "noopener noreferrer";
-        navigateLink.className =
-          "inline-flex items-center gap-1 rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-800";
-        navigateLink.textContent = "Navigate";
-        navigateLink.addEventListener("click", () => {
-          captureAnalyticsEvent("navigate_clicked", {
-            bathroom_id: id,
-            source: "map_popup"
-          });
-        });
-        actions.appendChild(navigateLink);
-
-        popupContent.appendChild(actions);
-
-        const popup = new mapbox.Popup({
-          closeButton: false,
-          offset: 14,
-          maxWidth: "260px"
-        })
-          .setLngLat([featureLng, featureLat])
-          .setDOMContent(popupContent)
-          .addTo(map);
-
-        popup.on("close", () => {
-          if (popupRef.current === popup) {
-            popupRef.current = null;
-          }
-          if (activePopupRestroomIdRef.current === id) {
-            activePopupRestroomIdRef.current = null;
-            onFocusedRestroomIdChange?.(null);
-            setHoveredFeatureState(resolveHoveredRestroomId());
-          }
-        });
-
-        popupRef.current = popup;
-        activePopupRestroomIdRef.current = id;
-        setHoveredFeatureState(resolveHoveredRestroomId());
+        clearDesktopHoverPopup();
+        onNavigateToDetail?.(id);
+        router.push(`/restroom/${id}`);
       };
 
       const mouseEnterHandler = (event: mapboxgl.MapLayerMouseEvent) => {
@@ -664,6 +826,7 @@ export function RestroomMap({
           mapHoveredRestroomIdRef.current = restroomId;
           setHoveredFeatureState(resolveHoveredRestroomId());
           onFocusedRestroomIdChange?.(restroomId);
+          syncDesktopHoverPopup();
         }
         map.getCanvas().style.cursor = "pointer";
       };
@@ -675,21 +838,41 @@ export function RestroomMap({
 
         mapHoveredRestroomIdRef.current = null;
         setHoveredFeatureState(resolveHoveredRestroomId());
-        if (activePopupRestroomIdRef.current) {
-          onFocusedRestroomIdChange?.(activePopupRestroomIdRef.current);
-        } else {
-          onFocusedRestroomIdChange?.(null);
-        }
+        onFocusedRestroomIdChange?.(hoveredRestroomId ?? null);
+        syncDesktopHoverPopup();
         map.getCanvas().style.cursor = "";
+      };
+
+      const clearFocusedSelectionOnMapMoveStart = () => {
+        if (isCoarsePointerRef.current) {
+          if (!activePopupRestroomIdRef.current) {
+            return;
+          }
+          clearFocusedSelection();
+          return;
+        }
+
+        if (!mapHoveredRestroomIdRef.current && !hoveredRestroomId) {
+          return;
+        }
+
+        mapHoveredRestroomIdRef.current = null;
+        setHoveredFeatureState(resolveHoveredRestroomId());
+        onFocusedRestroomIdChange?.(hoveredRestroomId ?? null);
+        syncDesktopHoverPopup();
       };
 
       map.on("click", HIT_LAYER_ID, clickHandler);
       map.on("mousemove", HIT_LAYER_ID, mouseEnterHandler);
       map.on("mouseleave", HIT_LAYER_ID, mouseLeaveHandler);
+      map.on("dragstart", clearFocusedSelectionOnMapMoveStart);
+      map.on("zoomstart", clearFocusedSelectionOnMapMoveStart);
 
       clickHandlerRef.current = clickHandler;
       mouseMoveHandlerRef.current = mouseEnterHandler;
       mouseLeaveHandlerRef.current = mouseLeaveHandler;
+      dragStartHandlerRef.current = clearFocusedSelectionOnMapMoveStart;
+      zoomStartHandlerRef.current = clearFocusedSelectionOnMapMoveStart;
       hasBoundLayerEventsRef.current = true;
     }
 
@@ -697,15 +880,19 @@ export function RestroomMap({
       popupRef.current?.remove();
       popupRef.current = null;
       activePopupRestroomIdRef.current = null;
+      desktopPopupRestroomIdRef.current = null;
       mapHoveredRestroomIdRef.current = null;
       setHoveredFeatureState(null);
       onFocusedRestroomIdChange?.(null);
     }
     setHoveredFeatureState(resolveHoveredRestroomId());
+    syncDesktopHoverPopup();
   }, [
+    focusedRestroomId,
     hoveredRestroomId,
     isMapReady,
     markerData,
+    restroomById,
     onFocusedRestroomIdChange,
     onNavigateToDetail,
     restrooms.length,
