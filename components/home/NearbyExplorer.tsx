@@ -1117,8 +1117,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     return (
       <div
         className={cn(
-          "pointer-events-none absolute inset-x-3 z-[24] sm:hidden",
-          isExpandedVariant ? "transition-[bottom] duration-200 ease-out" : "bottom-3"
+          "pointer-events-none absolute inset-x-3 sm:hidden",
+          isExpandedVariant ? "z-[12] transition-[bottom] duration-200 ease-out" : "bottom-3 z-[24]"
         )}
         style={bottomStyle}
       >
@@ -1389,7 +1389,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               </div>
             </div>
 
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 overflow-hidden sm:hidden">
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 overflow-hidden sm:hidden">
               <div
                 ref={mobileSheetRef}
                 className="pointer-events-auto mx-0 overflow-hidden rounded-t-3xl border-t border-slate-200 bg-white shadow-2xl will-change-transform"

@@ -9,7 +9,12 @@ const manrope = Manrope({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Poopin",
-  description: "Discover and rate Bay Area public restrooms based on smell, cleanliness, and access friction."
+  description: "Discover and rate Bay Area public restrooms based on smell, cleanliness, and access friction.",
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+    apple: "/icon.svg"
+  }
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
