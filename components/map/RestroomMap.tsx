@@ -146,10 +146,9 @@ const buildDesktopHoverPreviewContent = (
   options: {
     showDistance: boolean;
     photoUrl: string | null;
-    isPhotoLoading: boolean;
   }
 ) => {
-  const { showDistance, photoUrl, isPhotoLoading } = options;
+  const { showDistance, photoUrl } = options;
   const container = document.createElement("div");
   container.className = "w-[246px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl";
 
@@ -167,14 +166,6 @@ const buildDesktopHoverPreviewContent = (
     placeholder.className = "flex h-full w-full items-center justify-center text-[11px] font-semibold text-slate-500";
     placeholder.textContent = "No photo yet";
     media.appendChild(placeholder);
-  }
-
-  if (isPhotoLoading) {
-    const loadingOverlay = document.createElement("div");
-    loadingOverlay.className =
-      "absolute inset-0 flex items-center justify-center bg-white/70 text-[11px] font-semibold text-slate-500";
-    loadingOverlay.textContent = "Loading";
-    media.appendChild(loadingOverlay);
   }
 
   container.appendChild(media);
@@ -535,8 +526,7 @@ export function RestroomMap({
       const photoUrl = hasPreviewPhoto ? previewPhotoByRestroomIdRef.current.get(restroomId) ?? null : null;
       const popupContent = buildDesktopHoverPreviewContent(restroom, {
         showDistance,
-        photoUrl,
-        isPhotoLoading: !hasPreviewPhoto
+        photoUrl
       });
 
       let popup = popupRef.current;

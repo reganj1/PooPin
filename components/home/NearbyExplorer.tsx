@@ -883,6 +883,14 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, [listHoveredRestroomId, mapFocusedRestroomId, mapRenderableRestrooms]);
 
   useEffect(() => {
+    if (!isMapExpanded || !isMobilePreviewLayout || !mapFocusedRestroomId) {
+      return;
+    }
+
+    setMobileSheetState((current) => (current === "collapsed" ? current : "collapsed"));
+  }, [isMapExpanded, isMobilePreviewLayout, mapFocusedRestroomId]);
+
+  useEffect(() => {
     if (!isMapExpanded || typeof document === "undefined" || typeof window === "undefined") {
       return;
     }
@@ -1109,7 +1117,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     return (
       <div
         className={cn(
-          "pointer-events-none absolute inset-x-3 z-[18] sm:hidden",
+          "pointer-events-none absolute inset-x-3 z-[24] sm:hidden",
           isExpandedVariant ? "transition-[bottom] duration-200 ease-out" : "bottom-3"
         )}
         style={bottomStyle}
