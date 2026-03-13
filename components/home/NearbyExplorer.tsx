@@ -227,7 +227,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const hasRealUserLocation = userLocation !== null;
   const distanceOrigin = userLocation;
   const [mobilePreviewPhotoByRestroomId, setMobilePreviewPhotoByRestroomId] = useState<Record<string, string | null>>({});
-  const [mobilePreviewPhotoLoadingRestroomId, setMobilePreviewPhotoLoadingRestroomId] = useState<string | null>(null);
   const [isMobilePreviewLayout, setIsMobilePreviewLayout] = useState(false);
   const mapRenderableRestrooms = useMemo(
     () => mapRestrooms.filter((restroom) => isValidMapCoordinate(restroom.lat, restroom.lng)),
@@ -807,12 +806,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
   useEffect(() => {
     if (!isMobilePreviewLayout) {
-      setMobilePreviewPhotoLoadingRestroomId(null);
       return;
     }
 
     if (!selectedMapRestroom) {
-      setMobilePreviewPhotoLoadingRestroomId(null);
       return;
     }
 
@@ -822,7 +819,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     const controller = new AbortController();
-    setMobilePreviewPhotoLoadingRestroomId(restroomId);
 
     void fetch(`/api/restrooms/${encodeURIComponent(restroomId)}/preview`, {
       method: "GET",
@@ -849,9 +845,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           ...current,
           [restroomId]: null
         }));
-      })
-      .finally(() => {
-        setMobilePreviewPhotoLoadingRestroomId((current) => (current === restroomId ? null : current));
       });
 
     return () => {
@@ -1126,7 +1119,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
             restroom={selectedMapRestroom}
             showDistance={hasRealUserLocation}
             photoUrl={selectedMapRestroomPreviewPhotoUrl}
-            isPhotoLoading={mobilePreviewPhotoLoadingRestroomId === selectedMapRestroom.id}
             onNavigateToDetail={handleNavigateToDetail}
             onDismiss={handleDismissSelectedMapRestroom}
           />

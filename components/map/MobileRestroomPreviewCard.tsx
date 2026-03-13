@@ -12,7 +12,6 @@ interface MobileRestroomPreviewCardProps {
   restroom: NearbyBathroom;
   showDistance?: boolean;
   photoUrl?: string | null;
-  isPhotoLoading?: boolean;
   onNavigateToDetail?: (restroomId: string) => void;
   onDismiss?: () => void;
 }
@@ -65,7 +64,6 @@ export function MobileRestroomPreviewCard({
   restroom,
   showDistance = false,
   photoUrl = null,
-  isPhotoLoading = false,
   onNavigateToDetail,
   onDismiss
 }: MobileRestroomPreviewCardProps) {
@@ -88,11 +86,6 @@ export function MobileRestroomPreviewCard({
               No photo
             </div>
           )}
-          {isPhotoLoading ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-white/65 text-[11px] font-semibold text-slate-500">
-              Loading
-            </div>
-          ) : null}
         </div>
 
         <div className="min-w-0 flex-1">
