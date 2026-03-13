@@ -165,15 +165,15 @@ export function PhotoUploadForm({ bathroomId }: PhotoUploadFormProps) {
         <button
           type="button"
           onClick={() => setIsOpen(true)}
-          className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          className="inline-flex w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 sm:w-auto"
         >
           Upload photo
         </button>
       ) : (
-        <form onSubmit={handleSubmit} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <p className="text-xs font-medium text-slate-600">Uploads are reviewed before appearing publicly.</p>
+        <form onSubmit={handleSubmit} className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5">
+          <p className="text-xs font-medium text-slate-600">Photos are reviewed before appearing publicly.</p>
 
-          <div className="mt-2 space-y-2">
+          <div className="mt-2.5 space-y-2">
             <input
               type="file"
               accept={photoUploadAcceptAttribute}
@@ -186,7 +186,7 @@ export function PhotoUploadForm({ bathroomId }: PhotoUploadFormProps) {
           {submitError ? <p className="mt-2 text-xs font-medium text-rose-600">{submitError}</p> : null}
           {submitSuccess ? <p className="mt-2 text-xs font-medium text-emerald-700">{submitSuccess}</p> : null}
 
-          <div className="mt-3 flex items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
               type="submit"
               disabled={isSubmitting}

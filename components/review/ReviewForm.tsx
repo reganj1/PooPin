@@ -139,33 +139,36 @@ export function ReviewForm({ bathroomId }: ReviewFormProps) {
   };
 
   return (
-    <section id="add-review" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card sm:p-6">
-      <div className="mb-4">
-        <p className="text-sm font-semibold uppercase tracking-wide text-brand-600">Quick review</p>
+    <section id="add-review" className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+      <div className="mb-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-brand-600">Quick review</p>
         <h2 className="mt-1 text-xl font-semibold text-slate-900">How was it?</h2>
-        <p className="mt-1 text-sm text-slate-600">Leave a fast rating in a few taps.</p>
+        <p className="mt-1 text-sm text-slate-600">Share a quick update in a few taps.</p>
       </div>
 
       {hasResolvedSupabaseClient && !isSupabaseConfigured ? (
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
           Review submission is temporarily unavailable.
         </div>
       ) : null}
 
       {submitError ? (
-        <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{submitError}</div>
+        <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{submitError}</div>
       ) : null}
 
       {submitSuccess ? (
-        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+        <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
           Thanks for sharing. Your review is now live.
         </div>
       ) : null}
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
-        <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Step 1</p>
-          <div className="mt-2 flex flex-wrap items-center gap-1">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-3.5" noValidate>
+        <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Overall rating</p>
+            <span className="text-xs text-slate-400">Required</span>
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1">
             {starRatings.map((ratingValue) => (
               <button
                 key={ratingValue}
@@ -187,18 +190,19 @@ export function ReviewForm({ bathroomId }: ReviewFormProps) {
         </section>
 
         {canPickQuickTags ? (
-          <section className="rounded-xl border border-slate-200 bg-white p-4">
+          <section className="rounded-xl border border-slate-200 bg-white p-3.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Step 2</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">What stood out? <span className="text-slate-400">(optional)</span></p>
+                <p className="text-sm font-semibold text-slate-900">
+                  What stood out? <span className="font-medium text-slate-400">(optional)</span>
+                </p>
               </div>
               <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
                 {selectedQuickTags.length}/{MAX_QUICK_TAGS}
               </span>
             </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
               {reviewQuickTagOptions.map((option) => {
                 const isSelected = selectedQuickTags.includes(option.value);
                 return (
@@ -208,7 +212,7 @@ export function ReviewForm({ bathroomId }: ReviewFormProps) {
                     onClick={() => toggleQuickTag(option.value)}
                     aria-pressed={isSelected}
                     className={cn(
-                      "rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                      "rounded-full border px-2.5 py-1.5 text-xs font-semibold transition sm:text-sm",
                       isSelected
                         ? "border-brand-300 bg-brand-50 text-brand-700"
                         : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
@@ -225,7 +229,7 @@ export function ReviewForm({ bathroomId }: ReviewFormProps) {
           </section>
         ) : null}
 
-        <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <section className="rounded-xl border border-slate-200 bg-white p-3.5">
           {!showNoteField && reviewText.trim().length === 0 ? (
             <button
               type="button"
@@ -256,7 +260,7 @@ export function ReviewForm({ bathroomId }: ReviewFormProps) {
                 rows={3}
                 {...register("review_text")}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                placeholder="Optional tip for others."
+                placeholder="Optional tip to help the next person."
               />
               {errors.review_text?.message ? (
                 <p className="mt-1 text-xs font-medium text-rose-600">{errors.review_text.message}</p>
@@ -268,7 +272,7 @@ export function ReviewForm({ bathroomId }: ReviewFormProps) {
         <button
           type="submit"
           disabled={isSubmitting}
-          className="inline-flex items-center justify-center rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex w-full items-center justify-center rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
         >
           {isSubmitting ? "Submitting..." : "Submit review"}
         </button>

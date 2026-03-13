@@ -67,7 +67,7 @@ export function RestroomConfirmationCard({ bathroomId, initialCount }: RestroomC
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Community trust</p>
           <p className="mt-1 text-sm font-semibold text-slate-800">{toConfirmationLabel(confirmationCount)}</p>
@@ -77,7 +77,7 @@ export function RestroomConfirmationCard({ bathroomId, initialCount }: RestroomC
           type="button"
           onClick={handleConfirm}
           disabled={isSubmitting || hasConfirmed}
-          className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-65"
+          className="inline-flex w-full items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-65 sm:w-auto"
         >
           {hasConfirmed ? "Confirmed" : isSubmitting ? "Confirming..." : "Confirm this restroom exists"}
         </button>
@@ -89,4 +89,3 @@ export function RestroomConfirmationCard({ bathroomId, initialCount }: RestroomC
     </section>
   );
 }
-

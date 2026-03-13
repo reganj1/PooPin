@@ -18,7 +18,7 @@ const formatDate = (value: string) =>
 export function ReviewList({ reviews }: ReviewListProps) {
   if (reviews.length === 0) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600">
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
         <p className="font-semibold text-slate-700">No reviews yet</p>
         <p className="mt-1">Be the first to help others by sharing your experience.</p>
       </div>
@@ -28,15 +28,15 @@ export function ReviewList({ reviews }: ReviewListProps) {
   return (
     <div className="space-y-3">
       {reviews.map((review) => (
-        <article key={review.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+        <article key={review.id} className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm sm:p-4">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 sm:gap-2">
             <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 font-semibold text-slate-700">
               Overall {review.overall_rating.toFixed(1)}
             </span>
             <span>Visited {formatDate(review.visit_time)}</span>
           </div>
 
-          <div className="mt-2.5 flex flex-wrap gap-2">
+          <div className="mt-2.5 flex flex-wrap gap-1.5 sm:gap-2">
             {toReviewQuickTagChips(review).map((tag) => {
               const descriptor = getReviewQuickTagDescriptor(tag);
               if (!descriptor) {

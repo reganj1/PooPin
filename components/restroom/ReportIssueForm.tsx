@@ -60,7 +60,7 @@ export function ReportIssueForm({ bathroomId }: ReportIssueFormProps) {
       </button>
 
       {isOpen ? (
-        <div className="w-full max-w-xs rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+        <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-slate-50 p-2.5">
           <label htmlFor={`restroom-issue-${bathroomId}`} className="mb-1 block text-xs font-medium text-slate-600">
             What is wrong?
           </label>
@@ -77,7 +77,7 @@ export function ReportIssueForm({ bathroomId }: ReportIssueFormProps) {
             ))}
           </select>
 
-          <div className="mt-2 flex items-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={handleSubmit}
@@ -102,4 +102,3 @@ export function ReportIssueForm({ bathroomId }: ReportIssueFormProps) {
     </div>
   );
 }
-

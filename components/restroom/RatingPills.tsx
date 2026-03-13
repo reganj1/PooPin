@@ -5,7 +5,7 @@ interface RatingPillsProps {
 }
 
 const pillClass =
-  "inline-flex min-w-[90px] items-center justify-center rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700";
+  "inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700";
 
 const formatRating = (value: number) => (value > 0 ? value.toFixed(1) : "N/A");
 

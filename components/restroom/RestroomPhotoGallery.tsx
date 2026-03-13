@@ -14,7 +14,7 @@ const formatDate = (value: string) =>
 export function RestroomPhotoGallery({ photos }: RestroomPhotoGalleryProps) {
   if (photos.length === 0) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600">
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
         <p className="font-semibold text-slate-700">No photos yet</p>
         <p className="mt-1">Uploads are reviewed before appearing here. Add a photo to help others know what to expect.</p>
       </div>
@@ -22,7 +22,7 @@ export function RestroomPhotoGallery({ photos }: RestroomPhotoGalleryProps) {
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3">
       {photos.map((photo) => (
         <figure key={photo.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           {/* eslint-disable-next-line @next/next/no-img-element */}

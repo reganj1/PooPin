@@ -96,39 +96,37 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
         </Link>
       </div>
 
-      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-5">
-          <div className="max-w-2xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Restroom Listing</p>
-            <h1 className="mt-1.5 text-3xl font-semibold tracking-tight text-slate-900 sm:text-[2.2rem]">{displayName}</h1>
+      <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 max-w-2xl">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Restroom listing</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">{displayName}</h1>
             <p className="mt-2 text-sm text-slate-600">{locationLine}</p>
 
-            <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-1.5 sm:gap-2">
               <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
                 {sourceLabel}
               </span>
               <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-500">
                 Added {formatDate(restroom.created_at)}
               </span>
-              <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                Enable location on the map for live straight-line distance
-              </span>
             </div>
+            <p className="mt-2 text-xs text-slate-500">Enable location on the map to see live straight-line distance.</p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
             <TrackedNavigateLink
               href={navigateHref}
               bathroomId={restroom.id}
               source="restroom_detail"
-              className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 sm:flex-none"
             >
               <NavigateIcon className="h-4 w-4" />
               Navigate
             </TrackedNavigateLink>
             <Link
               href="#add-review"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 sm:flex-none"
             >
               <NoteIcon className="h-4 w-4" />
               Write a review
@@ -136,7 +134,7 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
           </div>
         </div>
 
-        <div className="mt-5 space-y-3">
+        <div className="mt-4 space-y-2.5">
           <RatingPills ratings={restroom.ratings} />
           {restroom.ratings.qualitySignals.length > 0 ? (
             <div className="flex flex-wrap gap-2">
@@ -160,7 +158,7 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
           <RestroomTags restroom={restroom} />
         </div>
 
-        <div className="mt-5 grid gap-3 lg:grid-cols-2">
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
           <RestroomConfirmationCard bathroomId={restroom.id} initialCount={confirmationCount} />
           <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Listing quality</p>
@@ -172,8 +170,8 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
         </div>
       </section>
 
-      <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <section className="mt-5 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Photos</h2>
             <p className="mt-1 text-sm text-slate-500">Only approved photos appear publicly.</p>
@@ -183,11 +181,16 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
         <RestroomPhotoGallery photos={approvedPhotos} />
       </section>
 
-      <section className="mt-6 space-y-6">
+      <section className="mt-5 space-y-5">
         <ReviewForm bathroomId={restroom.id} />
         {reviews.length > 0 ? <ReviewSummary reviews={reviews} /> : null}
-        <section>
-          <h2 className="mb-3 text-lg font-semibold text-slate-900">Recent reviews ({reviews.length})</h2>
+        <section className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold text-slate-900">Recent reviews</h2>
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+              {reviews.length}
+            </span>
+          </div>
           <ReviewList reviews={reviews} />
         </section>
       </section>

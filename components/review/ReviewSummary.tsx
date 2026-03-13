@@ -44,18 +44,18 @@ export function ReviewSummary({ reviews }: ReviewSummaryProps) {
   ] as const;
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Review Snapshot</p>
-          <h3 className="mt-1 text-lg font-semibold text-slate-900">What visitors report</h3>
+          <h3 className="mt-1 text-base font-semibold text-slate-900 sm:text-lg">What visitors report</h3>
         </div>
         <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
           Overall {summary.overall.toFixed(1)} ({summary.reviewCount} review{summary.reviewCount === 1 ? "" : "s"})
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-2.5 flex flex-wrap gap-1.5 sm:gap-2">
         {summary.topSignals.map((signal) => {
           const descriptor = getReviewQuickTagDescriptor(signal);
           if (!descriptor) {
