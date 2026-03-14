@@ -8,6 +8,7 @@ interface RestroomPhotoGalleryProps {
 }
 
 const SWIPE_THRESHOLD_PX = 44;
+const INLINE_PHOTO_LIMIT = 6;
 
 const formatDate = (value: string) =>
   new Intl.DateTimeFormat("en-US", {
@@ -22,6 +23,8 @@ export function RestroomPhotoGallery({ photos }: RestroomPhotoGalleryProps) {
   const touchStartYRef = useRef<number | null>(null);
   const isLightboxOpen = activePhotoIndex !== null;
   const activePhoto = useMemo(() => (activePhotoIndex === null ? null : photos[activePhotoIndex] ?? null), [activePhotoIndex, photos]);
+  const hiddenPhotoCount = Math.max(0, photos.length - INLINE_PHOTO_LIMIT);
+  const inlinePhotos = useMemo(() => photos.slice(0, INLINE_PHOTO_LIMIT), [photos]);
 
   const closeLightbox = useCallback(() => {
     setActivePhotoIndex(null);
@@ -138,21 +141,41 @@ export function RestroomPhotoGallery({ photos }: RestroomPhotoGalleryProps) {
 
   return (
     <>
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-slate-500">
+          {photos.length} approved photo{photos.length === 1 ? "" : "s"}
+        </p>
+        {photos.length > INLINE_PHOTO_LIMIT ? (
+          <button
+            type="button"
+            onClick={() => setActivePhotoIndex(0)}
+            className="text-xs font-semibold text-brand-600 transition hover:text-brand-700"
+          >
+            View all photos
+          </button>
+        ) : null}
+      </div>
+
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3">
-        {photos.map((photo, index) => (
+        {inlinePhotos.map((photo, index) => {
+          const isOverflowTile = hiddenPhotoCount > 0 && index === inlinePhotos.length - 1;
+          return (
           <button
             key={photo.id}
             type="button"
             onClick={() => setActivePhotoIndex(index)}
-            className="overflow-hidden rounded-xl border border-slate-200 bg-white text-left shadow-sm transition hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
+            className="relative overflow-hidden rounded-xl border border-slate-200 bg-white text-left shadow-sm transition hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={photo.url} alt="Restroom photo" loading="lazy" className="h-36 w-full object-cover sm:h-40" />
-            <span className="block border-t border-slate-100 px-2.5 py-2 text-[11px] text-slate-500">
-              Approved {formatDate(photo.createdAt)}
-            </span>
+            <img src={photo.url} alt="Restroom photo" loading="lazy" className="h-32 w-full object-cover sm:h-36" />
+            {isOverflowTile ? (
+              <span className="absolute inset-0 flex items-center justify-center bg-slate-900/60 text-sm font-semibold text-white">
+                +{hiddenPhotoCount} more
+              </span>
+            ) : null}
           </button>
-        ))}
+          );
+        })}
       </div>
 
       {isLightboxOpen && activePhoto ? (
