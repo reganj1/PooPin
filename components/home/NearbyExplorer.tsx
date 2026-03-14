@@ -1101,11 +1101,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
   }, []);
 
-  const handleDismissSelectedMapRestroom = useCallback(() => {
-    setMapFocusedRestroomId(null);
-    setListHoveredRestroomId(null);
-  }, []);
-
   const renderMobileMapPreviewCard = (variant: "default" | "expanded") => {
     if (!selectedMapRestroom) {
       return null;
@@ -1128,7 +1123,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
             showDistance={hasRealUserLocation}
             photoUrl={selectedMapRestroomPreviewPhotoUrl}
             onNavigateToDetail={handleNavigateToDetail}
-            onDismiss={handleDismissSelectedMapRestroom}
           />
         </div>
       </div>

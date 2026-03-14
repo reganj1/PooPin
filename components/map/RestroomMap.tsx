@@ -241,6 +241,7 @@ export function RestroomMap({
   const mapHoveredRestroomIdRef = useRef<string | null>(null);
   const appliedHoveredRestroomIdRef = useRef<string | null>(null);
   const clickHandlerRef = useRef<((event: mapboxgl.MapLayerMouseEvent) => void) | null>(null);
+  const mapClickHandlerRef = useRef<((event: mapboxgl.MapMouseEvent) => void) | null>(null);
   const mouseMoveHandlerRef = useRef<((event: mapboxgl.MapLayerMouseEvent) => void) | null>(null);
   const mouseLeaveHandlerRef = useRef<(() => void) | null>(null);
   const dragStartHandlerRef = useRef<(() => void) | null>(null);
@@ -342,6 +343,9 @@ export function RestroomMap({
         if (clickHandlerRef.current) {
           map.off("click", HIT_LAYER_ID, clickHandlerRef.current);
         }
+        if (mapClickHandlerRef.current) {
+          map.off("click", mapClickHandlerRef.current);
+        }
         if (mouseMoveHandlerRef.current) {
           map.off("mousemove", HIT_LAYER_ID, mouseMoveHandlerRef.current);
         }
@@ -396,6 +400,7 @@ export function RestroomMap({
       missingHoveredMarkerLogSet.clear();
       invalidCoordinatesLogKeyRef.current = "";
       clickHandlerRef.current = null;
+      mapClickHandlerRef.current = null;
       mouseMoveHandlerRef.current = null;
       mouseLeaveHandlerRef.current = null;
       dragStartHandlerRef.current = null;
@@ -805,6 +810,21 @@ export function RestroomMap({
         router.push(`/restroom/${id}`);
       };
 
+      const mapClickHandler = (event: mapboxgl.MapMouseEvent) => {
+        if (!isCoarsePointerRef.current) {
+          return;
+        }
+
+        const markerFeatures = map.queryRenderedFeatures(event.point, {
+          layers: [HIT_LAYER_ID]
+        });
+        if (markerFeatures.length > 0) {
+          return;
+        }
+
+        clearFocusedSelection();
+      };
+
       const mouseEnterHandler = (event: mapboxgl.MapLayerMouseEvent) => {
         if (isCoarsePointerRef.current) {
           return;
@@ -853,12 +873,14 @@ export function RestroomMap({
       };
 
       map.on("click", HIT_LAYER_ID, clickHandler);
+      map.on("click", mapClickHandler);
       map.on("mousemove", HIT_LAYER_ID, mouseEnterHandler);
       map.on("mouseleave", HIT_LAYER_ID, mouseLeaveHandler);
       map.on("dragstart", clearFocusedSelectionOnMapMoveStart);
       map.on("zoomstart", clearFocusedSelectionOnMapMoveStart);
 
       clickHandlerRef.current = clickHandler;
+      mapClickHandlerRef.current = mapClickHandler;
       mouseMoveHandlerRef.current = mouseEnterHandler;
       mouseLeaveHandlerRef.current = mouseLeaveHandler;
       dragStartHandlerRef.current = clearFocusedSelectionOnMapMoveStart;

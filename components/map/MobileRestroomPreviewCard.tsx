@@ -14,7 +14,6 @@ interface MobileRestroomPreviewCardProps {
   showDistance?: boolean;
   photoUrl?: string | null;
   onNavigateToDetail?: (restroomId: string) => void;
-  onDismiss?: () => void;
 }
 
 const toDisplayRating = (value: number) => (value > 0 ? value.toFixed(1) : "N/A");
@@ -29,14 +28,6 @@ const toDistanceLabel = (value: number) => {
 
   return `${value.toFixed(1)} mi straight-line`;
 };
-
-function CloseIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true" className={className}>
-      <path d="M5.5 5.5 14.5 14.5M14.5 5.5 5.5 14.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
-    </svg>
-  );
-}
 
 function NavigateIcon({ className }: { className?: string }) {
   return (
@@ -65,8 +56,7 @@ export function MobileRestroomPreviewCard({
   restroom,
   showDistance = false,
   photoUrl = null,
-  onNavigateToDetail,
-  onDismiss
+  onNavigateToDetail
 }: MobileRestroomPreviewCardProps) {
   const router = useRouter();
   const detailHref = `/restroom/${restroom.id}`;
@@ -109,24 +99,9 @@ export function MobileRestroomPreviewCard({
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <h3 className="truncate text-sm font-semibold text-slate-900">{displayName}</h3>
-              <p className="mt-0.5 truncate text-xs text-slate-500">{subtitle}</p>
-            </div>
-            {onDismiss ? (
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onDismiss();
-                }}
-                aria-label="Close restroom preview"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:text-slate-700"
-              >
-                <CloseIcon className="h-3.5 w-3.5" />
-              </button>
-            ) : null}
+          <div className="min-w-0">
+            <h3 className="truncate text-sm font-semibold text-slate-900">{displayName}</h3>
+            <p className="mt-0.5 truncate text-xs text-slate-500">{subtitle}</p>
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
