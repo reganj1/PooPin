@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { TouchEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApprovedBathroomPhoto } from "@/lib/data/photos";
 
@@ -19,15 +20,29 @@ const formatDate = (value: string) =>
 
 export function RestroomPhotoGallery({ photos }: RestroomPhotoGalleryProps) {
   const [activePhotoIndex, setActivePhotoIndex] = useState<number | null>(null);
+  const [loadedInlinePhotoIds, setLoadedInlinePhotoIds] = useState<Set<string>>(() => new Set());
   const touchStartXRef = useRef<number | null>(null);
   const touchStartYRef = useRef<number | null>(null);
   const isLightboxOpen = activePhotoIndex !== null;
   const activePhoto = useMemo(() => (activePhotoIndex === null ? null : photos[activePhotoIndex] ?? null), [activePhotoIndex, photos]);
   const hiddenPhotoCount = Math.max(0, photos.length - INLINE_PHOTO_LIMIT);
   const inlinePhotos = useMemo(() => photos.slice(0, INLINE_PHOTO_LIMIT), [photos]);
+  const inlinePhotoSizes = "(max-width: 640px) 48vw, (max-width: 1024px) 30vw, 220px";
 
   const closeLightbox = useCallback(() => {
     setActivePhotoIndex(null);
+  }, []);
+
+  const markInlinePhotoLoaded = useCallback((photoId: string) => {
+    setLoadedInlinePhotoIds((current) => {
+      if (current.has(photoId)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.add(photoId);
+      return next;
+    });
   }, []);
 
   const showPreviousPhoto = useCallback(() => {
@@ -159,21 +174,38 @@ export function RestroomPhotoGallery({ photos }: RestroomPhotoGalleryProps) {
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3">
         {inlinePhotos.map((photo, index) => {
           const isOverflowTile = hiddenPhotoCount > 0 && index === inlinePhotos.length - 1;
+          const isInlinePhotoLoaded = loadedInlinePhotoIds.has(photo.id);
           return (
-          <button
-            key={photo.id}
-            type="button"
-            onClick={() => setActivePhotoIndex(index)}
-            className="relative overflow-hidden rounded-xl border border-slate-200 bg-white text-left shadow-sm transition hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={photo.url} alt="Restroom photo" loading="lazy" className="h-32 w-full object-cover sm:h-36" />
-            {isOverflowTile ? (
-              <span className="absolute inset-0 flex items-center justify-center bg-slate-900/60 text-sm font-semibold text-white">
-                +{hiddenPhotoCount} more
-              </span>
-            ) : null}
-          </button>
+            <button
+              key={photo.id}
+              type="button"
+              onClick={() => setActivePhotoIndex(index)}
+              className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-100 text-left shadow-sm transition hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
+            >
+              <div className="relative h-32 w-full sm:h-36">
+                {!isInlinePhotoLoaded ? (
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-0 animate-pulse bg-gradient-to-br from-slate-200 via-slate-100 to-slate-200"
+                  />
+                ) : null}
+                <Image
+                  src={photo.url}
+                  alt="Restroom photo"
+                  fill
+                  sizes={inlinePhotoSizes}
+                  loading={index === 0 ? "eager" : "lazy"}
+                  priority={index === 0}
+                  onLoad={() => markInlinePhotoLoaded(photo.id)}
+                  className={`object-cover transition-opacity duration-200 ${isInlinePhotoLoaded ? "opacity-100" : "opacity-0"}`}
+                />
+              </div>
+              {isOverflowTile ? (
+                <span className="absolute inset-0 flex items-center justify-center bg-slate-900/60 text-sm font-semibold text-white">
+                  +{hiddenPhotoCount} more
+                </span>
+              ) : null}
+            </button>
           );
         })}
       </div>
