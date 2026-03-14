@@ -187,12 +187,15 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [userLocation, setUserLocation] = useState<Coordinate | null>(null);
   const [geoError, setGeoError] = useState<string | null>(null);
   const [isLocating, setIsLocating] = useState(false);
+  const [isLocationTrackingEnabled, setIsLocationTrackingEnabled] = useState(false);
+  const [isFollowingUserLocation, setIsFollowingUserLocation] = useState(false);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [isExpandedListOpen, setIsExpandedListOpen] = useState(true);
   const [mobileSheetState, setMobileSheetState] = useState<MobileSheetState>("default");
   const [listHoveredRestroomId, setListHoveredRestroomId] = useState<string | null>(null);
   const [mapFocusedRestroomId, setMapFocusedRestroomId] = useState<string | null>(null);
   const [mapCamera, setMapCamera] = useState<MapCamera | null>(null);
+  const [locationCenterRequestKey, setLocationCenterRequestKey] = useState(0);
   const [sortMode, setSortMode] = useState<SortMode>("recommended");
   const [filters, setFilters] = useState<FilterState>({
     publicOnly: false,
@@ -994,20 +997,28 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       setGeoError("Location needs HTTPS on mobile. Open Poopin over HTTPS (or localhost) to use Locate.");
       setIsLocating(false);
       stopLocationWatch();
+      setIsLocationTrackingEnabled(false);
+      setIsFollowingUserLocation(false);
       return;
     }
 
     if (typeof navigator === "undefined" || !navigator.geolocation) {
       setGeoError("Geolocation is not available in this browser. Showing default city-center results.");
       setUserLocation(null);
+      setIsLocationTrackingEnabled(false);
+      setIsFollowingUserLocation(false);
       return;
     }
 
+    setLocationCenterRequestKey((current) => current + 1);
+    setIsFollowingUserLocation(true);
+
     if (locationWatchIdRef.current !== null) {
-      stopLocationWatch();
+      return;
     }
 
     setIsLocating(true);
+    setIsLocationTrackingEnabled(true);
 
     try {
       const watchId = navigator.geolocation.watchPosition(
@@ -1015,14 +1026,17 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           setUserLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
           setGeoError(null);
           setIsLocating(false);
+          setIsLocationTrackingEnabled(true);
         },
         (error) => {
           setGeoError(toGeoErrorMessage(error));
           setIsLocating(false);
-          stopLocationWatch();
 
           if (error.code === error.PERMISSION_DENIED) {
+            stopLocationWatch();
             setUserLocation(null);
+            setIsLocationTrackingEnabled(false);
+            setIsFollowingUserLocation(false);
           }
         },
         {
@@ -1037,7 +1051,18 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       setGeoError("Could not enable live location updates. Showing map results without user distance.");
       setIsLocating(false);
       stopLocationWatch();
+      setIsLocationTrackingEnabled(false);
+      setIsFollowingUserLocation(false);
     }
+  };
+
+  const handleStopLocationTracking = () => {
+    stopLocationWatch();
+    setIsLocating(false);
+    setIsLocationTrackingEnabled(false);
+    setIsFollowingUserLocation(false);
+    setUserLocation(null);
+    setGeoError(null);
   };
 
   const handleViewportBoundsChange = useCallback((bounds: MapBounds) => {
@@ -1257,12 +1282,23 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               disabled={isLocating}
               className="inline-flex h-10 w-fit items-center rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isLocating ? "Locating..." : hasRealUserLocation ? "Location on" : "Use my location"}
+              {isLocating ? "Locating..." : isLocationTrackingEnabled ? "Recenter" : "Use my location"}
             </button>
+            {isLocationTrackingEnabled ? (
+              <button
+                type="button"
+                onClick={handleStopLocationTracking}
+                className="inline-flex h-10 w-fit items-center rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-600 transition hover:border-slate-400 hover:bg-slate-50"
+              >
+                Stop location
+              </button>
+            ) : null}
 
             {hasRealUserLocation ? (
               <p className="text-xs font-medium text-emerald-700 sm:text-sm">
-                Showing straight-line distance and closest sorting from your live location.
+                {isFollowingUserLocation
+                  ? "Live location tracking is on. Move the map to pause follow."
+                  : "Live location tracking is on. Tap Recenter to follow your location again."}
               </p>
             ) : (
               <p className="text-xs text-slate-500 sm:text-sm">Browsing this map area. Enable location to see distance from you.</p>
@@ -1306,6 +1342,9 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 onCameraChange={handleMapCameraChange}
                 onNavigateToDetail={handleNavigateToDetail}
                 initialCamera={mapCamera}
+                locationCenterRequestKey={locationCenterRequestKey}
+                locationFollowEnabled={isFollowingUserLocation}
+                onLocationFollowChange={setIsFollowingUserLocation}
                 onExpandMap={handleExpandMap}
               />
             ) : (
@@ -1333,6 +1372,9 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 onCameraChange={handleMapCameraChange}
                 onNavigateToDetail={handleNavigateToDetail}
                 initialCamera={mapCamera}
+                locationCenterRequestKey={locationCenterRequestKey}
+                locationFollowEnabled={isFollowingUserLocation}
+                onLocationFollowChange={setIsFollowingUserLocation}
                 className="h-full rounded-none border-0 shadow-none"
                 mapClassName="h-full min-h-0"
                 showHeader={false}
@@ -1357,8 +1399,17 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                     disabled={isLocating}
                     className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {isLocating ? "Locating..." : "Locate"}
+                    {isLocating ? "Locating..." : isLocationTrackingEnabled ? "Recenter" : "Locate"}
                   </button>
+                  {isLocationTrackingEnabled ? (
+                    <button
+                      type="button"
+                      onClick={handleStopLocationTracking}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                    >
+                      Stop location
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => setIsExpandedListOpen((current) => !current)}

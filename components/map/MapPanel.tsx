@@ -26,6 +26,9 @@ interface MapPanelProps {
   }) => void;
   onCameraChange?: (camera: { lat: number; lng: number; zoom: number }) => void;
   onNavigateToDetail?: (restroomId: string) => void;
+  locationCenterRequestKey?: number;
+  locationFollowEnabled?: boolean;
+  onLocationFollowChange?: (enabled: boolean) => void;
   className?: string;
   mapClassName?: string;
   showHeader?: boolean;
@@ -43,6 +46,9 @@ export function MapPanel({
   onViewportBoundsChange,
   onCameraChange,
   onNavigateToDetail,
+  locationCenterRequestKey = 0,
+  locationFollowEnabled = false,
+  onLocationFollowChange,
   className,
   mapClassName,
   showHeader = true,
@@ -149,6 +155,9 @@ export function MapPanel({
           onViewportBoundsChange={onViewportBoundsChange}
           onCameraChange={onCameraChange}
           onNavigateToDetail={onNavigateToDetail}
+          locationCenterRequestKey={locationCenterRequestKey}
+          locationFollowEnabled={locationFollowEnabled}
+          onLocationFollowChange={onLocationFollowChange}
         />
       </div>
     </section>

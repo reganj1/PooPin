@@ -36,6 +36,9 @@ interface RestroomMapProps {
     zoom: number;
   }) => void;
   onNavigateToDetail?: (restroomId: string) => void;
+  locationCenterRequestKey?: number;
+  locationFollowEnabled?: boolean;
+  onLocationFollowChange?: (enabled: boolean) => void;
 }
 
 interface RestroomFeatureProperties {
@@ -224,7 +227,10 @@ export function RestroomMap({
   onFocusedRestroomIdChange,
   onViewportBoundsChange,
   onCameraChange,
-  onNavigateToDetail
+  onNavigateToDetail,
+  locationCenterRequestKey = 0,
+  locationFollowEnabled = false,
+  onLocationFollowChange
 }: RestroomMapProps) {
   const router = useRouter();
   const [isMapReady, setIsMapReady] = useState(false);
@@ -255,6 +261,12 @@ export function RestroomMap({
   const invalidCoordinatesLogKeyRef = useRef<string>("");
   const isCoarsePointerRef = useRef(false);
   const reenableTouchZoomTimeoutRef = useRef<number | null>(null);
+  const appliedLocationCenterRequestRef = useRef(locationCenterRequestKey);
+  const userInteractionHandlerRef = useRef<(() => void) | null>(null);
+  const locationFollowEnabledRef = useRef(locationFollowEnabled);
+  const onLocationFollowChangeRef = useRef(onLocationFollowChange);
+  const manualInteractionSignalRef = useRef(false);
+  const manualInteractionResetTimeoutRef = useRef<number | null>(null);
 
   const markerData = useMemo(() => toFeatureCollection(restrooms), [restrooms]);
   const restroomById = useMemo(() => new Map(restrooms.map((restroom) => [restroom.id, restroom])), [restrooms]);
@@ -264,6 +276,14 @@ export function RestroomMap({
   useEffect(() => {
     initialCameraRef.current = initialCamera;
   }, [initialCamera]);
+
+  useEffect(() => {
+    locationFollowEnabledRef.current = locationFollowEnabled;
+  }, [locationFollowEnabled]);
+
+  useEffect(() => {
+    onLocationFollowChangeRef.current = onLocationFollowChange;
+  }, [onLocationFollowChange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -313,6 +333,25 @@ export function RestroomMap({
         hasInitializedCameraRef.current = true;
         hasAppliedRestoredCameraRef.current = true;
       }
+
+      const markUserInteraction = () => {
+        manualInteractionSignalRef.current = true;
+        if (typeof window !== "undefined") {
+          if (manualInteractionResetTimeoutRef.current !== null) {
+            window.clearTimeout(manualInteractionResetTimeoutRef.current);
+          }
+
+          manualInteractionResetTimeoutRef.current = window.setTimeout(() => {
+            manualInteractionSignalRef.current = false;
+            manualInteractionResetTimeoutRef.current = null;
+          }, 320);
+        }
+      };
+      userInteractionHandlerRef.current = markUserInteraction;
+      const canvas = map.getCanvas();
+      canvas.addEventListener("touchstart", markUserInteraction, { passive: true });
+      canvas.addEventListener("mousedown", markUserInteraction, { passive: true });
+      canvas.addEventListener("wheel", markUserInteraction, { passive: true });
       map.on("load", () => {
         setIsMapReady(true);
       });
@@ -384,6 +423,13 @@ export function RestroomMap({
           map.removeSource(USER_SOURCE_ID);
         }
 
+        const canvas = map.getCanvas();
+        const userInteractionHandler = userInteractionHandlerRef.current;
+        if (userInteractionHandler) {
+          canvas.removeEventListener("touchstart", userInteractionHandler);
+          canvas.removeEventListener("mousedown", userInteractionHandler);
+          canvas.removeEventListener("wheel", userInteractionHandler);
+        }
         map.remove();
       }
 
@@ -397,6 +443,11 @@ export function RestroomMap({
         window.clearTimeout(reenableTouchZoomTimeoutRef.current);
       }
       reenableTouchZoomTimeoutRef.current = null;
+      if (manualInteractionResetTimeoutRef.current !== null && typeof window !== "undefined") {
+        window.clearTimeout(manualInteractionResetTimeoutRef.current);
+      }
+      manualInteractionResetTimeoutRef.current = null;
+      manualInteractionSignalRef.current = false;
       missingHoveredMarkerLogSet.clear();
       invalidCoordinatesLogKeyRef.current = "";
       clickHandlerRef.current = null;
@@ -405,6 +456,7 @@ export function RestroomMap({
       mouseLeaveHandlerRef.current = null;
       dragStartHandlerRef.current = null;
       zoomStartHandlerRef.current = null;
+      userInteractionHandlerRef.current = null;
       mapRef.current = null;
       mapboxRef.current = null;
       onFocusedRestroomIdChange?.(null);
@@ -872,19 +924,41 @@ export function RestroomMap({
         syncDesktopHoverPopup();
       };
 
+      const maybeDisableLocationFollow = (requireManualSignal: boolean) => {
+        if (!locationFollowEnabledRef.current) {
+          return;
+        }
+
+        if (requireManualSignal && !manualInteractionSignalRef.current) {
+          return;
+        }
+
+        onLocationFollowChangeRef.current?.(false);
+      };
+
+      const dragStartHandler = () => {
+        maybeDisableLocationFollow(false);
+        clearFocusedSelectionOnMapMoveStart();
+      };
+
+      const zoomStartHandler = () => {
+        maybeDisableLocationFollow(true);
+        clearFocusedSelectionOnMapMoveStart();
+      };
+
       map.on("click", HIT_LAYER_ID, clickHandler);
       map.on("click", mapClickHandler);
       map.on("mousemove", HIT_LAYER_ID, mouseEnterHandler);
       map.on("mouseleave", HIT_LAYER_ID, mouseLeaveHandler);
-      map.on("dragstart", clearFocusedSelectionOnMapMoveStart);
-      map.on("zoomstart", clearFocusedSelectionOnMapMoveStart);
+      map.on("dragstart", dragStartHandler);
+      map.on("zoomstart", zoomStartHandler);
 
       clickHandlerRef.current = clickHandler;
       mapClickHandlerRef.current = mapClickHandler;
       mouseMoveHandlerRef.current = mouseEnterHandler;
       mouseLeaveHandlerRef.current = mouseLeaveHandler;
-      dragStartHandlerRef.current = clearFocusedSelectionOnMapMoveStart;
-      zoomStartHandlerRef.current = clearFocusedSelectionOnMapMoveStart;
+      dragStartHandlerRef.current = dragStartHandler;
+      zoomStartHandlerRef.current = zoomStartHandler;
       hasBoundLayerEventsRef.current = true;
     }
 
@@ -971,15 +1045,25 @@ export function RestroomMap({
     const previousLocationKey = previousLocationKeyRef.current;
     const currentLocationKey = getLocationKey(userLocation);
     const hasLocationChanged = previousLocationKey !== currentLocationKey;
-    const isFirstObservedLocation = previousLocationKey === "";
     previousLocationKeyRef.current = currentLocationKey;
+    const hasPendingLocateRequest = locationCenterRequestKey !== appliedLocationCenterRequestRef.current;
 
-    if (userLocation && isValidCoordinate(userLocation.lat, userLocation.lng) && hasLocationChanged) {
-      const hasRestoredCamera = isValidCamera(initialCameraRef.current);
-      if (hasRestoredCamera && isFirstObservedLocation) {
-        return;
-      }
-      map.easeTo({ center: [userLocation.lng, userLocation.lat], zoom: 13, duration: 700 });
+    if (userLocation && isValidCoordinate(userLocation.lat, userLocation.lng) && hasPendingLocateRequest) {
+      const currentZoom = map.getZoom();
+      const targetZoom = currentZoom < 13 ? 13 : currentZoom;
+      map.easeTo({ center: [userLocation.lng, userLocation.lat], zoom: targetZoom, duration: 700 });
+      hasInitializedCameraRef.current = true;
+      appliedLocationCenterRequestRef.current = locationCenterRequestKey;
+      return;
+    }
+
+    if (
+      userLocation &&
+      isValidCoordinate(userLocation.lat, userLocation.lng) &&
+      hasLocationChanged &&
+      locationFollowEnabled
+    ) {
+      map.easeTo({ center: [userLocation.lng, userLocation.lat], zoom: map.getZoom(), duration: 500 });
       hasInitializedCameraRef.current = true;
       return;
     }
@@ -1017,7 +1101,7 @@ export function RestroomMap({
       duration: 700
     });
     hasInitializedCameraRef.current = true;
-  }, [isMapReady, markerData, userLocation]);
+  }, [isMapReady, locationCenterRequestKey, locationFollowEnabled, markerData, userLocation]);
 
   useEffect(() => {
     if (!isMapReady) {
