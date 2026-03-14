@@ -7,7 +7,7 @@ import {
   getNearbyBathrooms as getMockNearbyBathrooms
 } from "@/lib/mock/restrooms";
 import { bathroomAccessTypeOptions, bathroomPlaceTypeOptions } from "@/lib/validations/bathroom";
-import { buildTopReviewSignals, normalizeReviewQuickTags } from "@/lib/utils/reviewSignals";
+import { buildTopReviewSignals, getReviewCategoryRatingsForAggregation, normalizeReviewQuickTags } from "@/lib/utils/reviewSignals";
 
 const DEFAULT_ORIGIN = { lat: 37.7749, lng: -122.4194 };
 const DEFAULT_LIMIT = 12;
@@ -161,19 +161,27 @@ const buildRatingMap = (reviews: Review[]) => {
     const totals = bathroomReviews.reduce(
       (acc, review) => {
         acc.overall += review.overall_rating;
-        acc.smell += review.smell_rating;
-        acc.cleanliness += review.cleanliness_rating;
+        const categoryRatings = getReviewCategoryRatingsForAggregation(review);
+        if (typeof categoryRatings.smell_rating === "number") {
+          acc.smell += categoryRatings.smell_rating;
+          acc.smellCount += 1;
+        }
+
+        if (typeof categoryRatings.cleanliness_rating === "number") {
+          acc.cleanliness += categoryRatings.cleanliness_rating;
+          acc.cleanlinessCount += 1;
+        }
         return acc;
       },
-      { overall: 0, smell: 0, cleanliness: 0 }
+      { overall: 0, smell: 0, cleanliness: 0, smellCount: 0, cleanlinessCount: 0 }
     );
 
     const qualitySignals = buildTopReviewSignals(bathroomReviews, 2);
 
     ratings.set(bathroomId, {
       overall: roundToOne(totals.overall / bathroomReviews.length),
-      smell: roundToOne(totals.smell / bathroomReviews.length),
-      cleanliness: roundToOne(totals.cleanliness / bathroomReviews.length),
+      smell: totals.smellCount > 0 ? roundToOne(totals.smell / totals.smellCount) : 0,
+      cleanliness: totals.cleanlinessCount > 0 ? roundToOne(totals.cleanliness / totals.cleanlinessCount) : 0,
       reviewCount: bathroomReviews.length,
       qualitySignals
     });

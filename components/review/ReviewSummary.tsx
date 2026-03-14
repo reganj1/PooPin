@@ -21,27 +21,35 @@ export function ReviewSummary({ reviews }: ReviewSummaryProps) {
   }
 
   const aggregateChips = [
-    {
-      title: "Cleanliness",
-      score: summary.cleanliness,
-      descriptor: describeCleanliness(summary.cleanliness)
-    },
-    {
-      title: "Smell",
-      score: summary.smell,
-      descriptor: describeSmell(summary.smell)
-    },
-    {
-      title: "Wait",
-      score: summary.wait,
-      descriptor: describeWait(summary.wait)
-    },
-    {
-      title: "Privacy",
-      score: summary.privacy,
-      descriptor: describePrivacy(summary.privacy)
-    }
-  ] as const;
+    summary.cleanliness === null
+      ? null
+      : {
+          title: "Cleanliness",
+          score: summary.cleanliness,
+          descriptor: describeCleanliness(summary.cleanliness)
+        },
+    summary.smell === null
+      ? null
+      : {
+          title: "Smell",
+          score: summary.smell,
+          descriptor: describeSmell(summary.smell)
+        },
+    summary.wait === null
+      ? null
+      : {
+          title: "Wait",
+          score: summary.wait,
+          descriptor: describeWait(summary.wait)
+        },
+    summary.privacy === null
+      ? null
+      : {
+          title: "Privacy",
+          score: summary.privacy,
+          descriptor: describePrivacy(summary.privacy)
+        }
+  ].filter((chip) => chip !== null);
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -87,6 +95,10 @@ export function ReviewSummary({ reviews }: ReviewSummaryProps) {
           </span>
         ))}
       </div>
+
+      {aggregateChips.length === 0 ? (
+        <p className="mt-2 text-xs text-slate-500">Category breakdown appears as visitors add standout detail tags.</p>
+      ) : null}
     </section>
   );
 }

@@ -1,6 +1,6 @@
 import { Review } from "@/types";
 import { ReviewQuickTag } from "@/types";
-import { buildTopReviewSignals, getReviewQuickTagsForDisplay } from "@/lib/utils/reviewSignals";
+import { buildTopReviewSignals, getReviewCategoryRatingsForAggregation, getReviewQuickTagsForDisplay } from "@/lib/utils/reviewSignals";
 
 type ReviewRatingField = "cleanliness_rating" | "smell_rating" | "wait_rating" | "privacy_rating";
 
@@ -14,10 +14,10 @@ export interface ReviewRatingLabel {
 export interface ReviewAggregateSummary {
   reviewCount: number;
   overall: number;
-  cleanliness: number;
-  smell: number;
-  wait: number;
-  privacy: number;
+  cleanliness: number | null;
+  smell: number | null;
+  wait: number | null;
+  privacy: number | null;
   topSignals: ReviewQuickTag[];
 }
 
@@ -92,10 +92,28 @@ export const buildReviewAggregateSummary = (reviews: Review[]): ReviewAggregateS
   const totals = reviews.reduce(
     (acc, review) => {
       acc.overall += review.overall_rating;
-      acc.cleanliness += review.cleanliness_rating;
-      acc.smell += review.smell_rating;
-      acc.wait += review.wait_rating;
-      acc.privacy += review.privacy_rating;
+      const categoryRatings = getReviewCategoryRatingsForAggregation(review);
+
+      if (typeof categoryRatings.cleanliness_rating === "number") {
+        acc.cleanliness += categoryRatings.cleanliness_rating;
+        acc.cleanlinessCount += 1;
+      }
+
+      if (typeof categoryRatings.smell_rating === "number") {
+        acc.smell += categoryRatings.smell_rating;
+        acc.smellCount += 1;
+      }
+
+      if (typeof categoryRatings.wait_rating === "number") {
+        acc.wait += categoryRatings.wait_rating;
+        acc.waitCount += 1;
+      }
+
+      if (typeof categoryRatings.privacy_rating === "number") {
+        acc.privacy += categoryRatings.privacy_rating;
+        acc.privacyCount += 1;
+      }
+
       return acc;
     },
     {
@@ -103,17 +121,24 @@ export const buildReviewAggregateSummary = (reviews: Review[]): ReviewAggregateS
       cleanliness: 0,
       smell: 0,
       wait: 0,
-      privacy: 0
+      privacy: 0,
+      cleanlinessCount: 0,
+      smellCount: 0,
+      waitCount: 0,
+      privacyCount: 0
     } satisfies Record<"overall" | "cleanliness" | "smell" | "wait" | "privacy", number>
+      & Record<"cleanlinessCount" | "smellCount" | "waitCount" | "privacyCount", number>
   );
+
+  const toAverageOrNull = (total: number, count: number) => (count > 0 ? roundToOne(total / count) : null);
 
   return {
     reviewCount: reviews.length,
     overall: roundToOne(totals.overall / reviews.length),
-    cleanliness: roundToOne(totals.cleanliness / reviews.length),
-    smell: roundToOne(totals.smell / reviews.length),
-    wait: roundToOne(totals.wait / reviews.length),
-    privacy: roundToOne(totals.privacy / reviews.length),
+    cleanliness: toAverageOrNull(totals.cleanliness, totals.cleanlinessCount),
+    smell: toAverageOrNull(totals.smell, totals.smellCount),
+    wait: toAverageOrNull(totals.wait, totals.waitCount),
+    privacy: toAverageOrNull(totals.privacy, totals.privacyCount),
     topSignals: buildTopReviewSignals(reviews, 2)
   };
 };

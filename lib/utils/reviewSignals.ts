@@ -205,6 +205,43 @@ export const mapQuickTagsToDetailedRatings = (tags: ReviewQuickTag[], overallRat
   };
 };
 
+type ReviewCategorySignalSource = Pick<Review, "quick_tags" | "overall_rating" | RatingField>;
+
+export const getReviewCategoryRatingsForAggregation = (
+  review: ReviewCategorySignalSource
+): Partial<Record<RatingField, number>> => {
+  const normalizedTags = normalizeReviewQuickTags(review.quick_tags ?? []);
+  if (normalizedTags.length === 0) {
+    return {
+      smell_rating: review.smell_rating,
+      cleanliness_rating: review.cleanliness_rating,
+      wait_rating: review.wait_rating,
+      privacy_rating: review.privacy_rating
+    };
+  }
+
+  const impactedFields = new Set<RatingField>();
+  for (const tag of normalizedTags) {
+    const descriptor = getReviewQuickTagDescriptor(tag);
+    if (!descriptor) {
+      continue;
+    }
+
+    for (const field of Object.keys(descriptor.ratingImpacts) as RatingField[]) {
+      impactedFields.add(field);
+    }
+  }
+
+  if (impactedFields.size === 0) {
+    return {};
+  }
+
+  return [...impactedFields].reduce<Partial<Record<RatingField, number>>>((acc, field) => {
+    acc[field] = review[field];
+    return acc;
+  }, {});
+};
+
 type ReviewForSignalAggregate = Pick<
   Review,
   "quick_tags" | "smell_rating" | "cleanliness_rating" | "wait_rating" | "privacy_rating" | "created_at"

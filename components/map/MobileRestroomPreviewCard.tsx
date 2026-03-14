@@ -1,6 +1,7 @@
 "use client";
 
-import Link from "next/link";
+import { KeyboardEvent } from "react";
+import { useRouter } from "next/navigation";
 import { NearbyBathroom } from "@/types";
 import { TrackedNavigateLink } from "@/components/analytics/TrackedNavigateLink";
 import { cn } from "@/lib/utils/cn";
@@ -67,15 +68,34 @@ export function MobileRestroomPreviewCard({
   onNavigateToDetail,
   onDismiss
 }: MobileRestroomPreviewCardProps) {
+  const router = useRouter();
   const detailHref = `/restroom/${restroom.id}`;
   const navigateHref = getGoogleMapsDirectionsUrl(restroom.lat, restroom.lng);
   const displayName = getRestroomDisplayName(restroom);
   const subtitle = getRestroomCardSubtitle(restroom);
   const qualitySignal = restroom.ratings.qualitySignals[0];
   const qualitySignalDescriptor = qualitySignal ? getReviewQuickTagDescriptor(qualitySignal) : null;
+  const openRestroomDetails = () => {
+    onNavigateToDetail?.(restroom.id);
+    router.push(detailHref);
+  };
+  const handleCardKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    event.preventDefault();
+    openRestroomDetails();
+  };
 
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-2xl backdrop-blur">
+    <article
+      role="link"
+      tabIndex={0}
+      onClick={openRestroomDetails}
+      onKeyDown={handleCardKeyDown}
+      className="cursor-pointer rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-2xl backdrop-blur transition active:scale-[0.995]"
+    >
       <div className="flex items-start gap-3">
         <div className="relative h-20 w-24 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
           {photoUrl ? (
@@ -97,7 +117,10 @@ export function MobileRestroomPreviewCard({
             {onDismiss ? (
               <button
                 type="button"
-                onClick={onDismiss}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDismiss();
+                }}
                 aria-label="Close restroom preview"
                 className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:text-slate-700"
               >
@@ -132,14 +155,7 @@ export function MobileRestroomPreviewCard({
         </div>
       </div>
 
-      <div className="mt-3 flex items-center gap-2">
-        <Link
-          href={detailHref}
-          onClick={() => onNavigateToDetail?.(restroom.id)}
-          className="inline-flex flex-1 items-center justify-center rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-        >
-          Details
-        </Link>
+      <div className="mt-3 flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
         <TrackedNavigateLink
           href={navigateHref}
           bathroomId={restroom.id}
