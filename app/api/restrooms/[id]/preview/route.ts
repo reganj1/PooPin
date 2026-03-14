@@ -21,10 +21,17 @@ export async function GET(_request: Request, context: RouteContext) {
 
   try {
     const photoUrl = await getApprovedBathroomPreviewPhotoData(id);
-    return NextResponse.json({
-      success: true,
-      photoUrl
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        photoUrl
+      },
+      {
+        headers: {
+          "Cache-Control": "private, max-age=300, stale-while-revalidate=600"
+        }
+      }
+    );
   } catch {
     return NextResponse.json(
       {

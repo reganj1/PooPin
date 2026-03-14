@@ -17,6 +17,12 @@ export interface ApprovedBathroomPhoto {
 
 const ACTIVE_STATUS: Photo["status"] = "active";
 const allowedPhotoStatuses = new Set<Photo["status"]>(["active", "pending", "flagged", "removed"]);
+const PREVIEW_PHOTO_TRANSFORM = {
+  width: 420,
+  height: 280,
+  resize: "cover",
+  quality: 72
+} as const;
 
 const isPhotoStatus = (value: string): value is Photo["status"] => allowedPhotoStatuses.has(value as Photo["status"]);
 
@@ -116,14 +122,20 @@ export async function getApprovedBathroomPreviewPhotoData(bathroomId: string): P
     return null;
   }
 
-  const { data: signedUrls, error: signedUrlError } = await supabase.storage
+  const { data: signedUrlData, error: signedUrlError } = await supabase.storage
     .from(SUPABASE_PHOTOS_BUCKET)
-    .createSignedUrls([row.storage_path], 60 * 60);
+    .createSignedUrl(row.storage_path, 60 * 60, {
+      transform: PREVIEW_PHOTO_TRANSFORM
+    });
 
-  if (!signedUrlError && signedUrls?.[0] && !signedUrls[0].error && signedUrls[0].signedUrl) {
-    return signedUrls[0].signedUrl;
+  if (!signedUrlError && signedUrlData?.signedUrl) {
+    return signedUrlData.signedUrl;
   }
 
-  const publicUrl = supabase.storage.from(SUPABASE_PHOTOS_BUCKET).getPublicUrl(row.storage_path).data.publicUrl;
+  const publicUrl = supabase.storage
+    .from(SUPABASE_PHOTOS_BUCKET)
+    .getPublicUrl(row.storage_path, {
+      transform: PREVIEW_PHOTO_TRANSFORM
+    }).data.publicUrl;
   return publicUrl || null;
 }

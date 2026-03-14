@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import type mapboxgl from "mapbox-gl";
 import type { FeatureCollection, Point } from "geojson";
 import { NearbyBathroom } from "@/types";
+import {
+  fetchRestroomPreviewPhoto,
+  getCachedRestroomPreviewPhoto,
+  prefetchRestroomPreviewPhotos
+} from "@/lib/utils/restroomPreviewClient";
 import { getRestroomDisplayName, getRestroomPopupAddress } from "@/lib/utils/restroomPresentation";
 import { getReviewQuickTagDescriptor } from "@/lib/utils/reviewSignals";
 
@@ -162,7 +167,9 @@ const buildDesktopHoverPreviewContent = (
     image.src = photoUrl;
     image.alt = `${getRestroomDisplayName(restroom)} preview`;
     image.className = "h-full w-full object-cover";
-    image.loading = "lazy";
+    image.loading = "eager";
+    image.decoding = "async";
+    image.setAttribute("fetchpriority", "high");
     media.appendChild(image);
   } else {
     const placeholder = document.createElement("div");
@@ -253,8 +260,6 @@ export function RestroomMap({
   const dragStartHandlerRef = useRef<(() => void) | null>(null);
   const zoomStartHandlerRef = useRef<(() => void) | null>(null);
   const desktopPopupRestroomIdRef = useRef<string | null>(null);
-  const previewPhotoByRestroomIdRef = useRef<Map<string, string | null>>(new Map());
-  const previewPhotoRequestControllersRef = useRef<Map<string, AbortController>>(new Map());
   const desktopPreviewFetchIntentTimeoutRef = useRef<number | null>(null);
   const desktopPreviewFetchIntentRestroomIdRef = useRef<string | null>(null);
   const missingHoveredMarkerLogRef = useRef<Set<string>>(new Set());
@@ -286,9 +291,14 @@ export function RestroomMap({
   }, [onLocationFollowChange]);
 
   useEffect(() => {
+    const prioritizedRestroomIds = [focusedRestroomId, hoveredRestroomId].filter((value): value is string => Boolean(value));
+    const candidateRestroomIds = [...prioritizedRestroomIds, ...restrooms.map((restroom) => restroom.id)];
+    prefetchRestroomPreviewPhotos(candidateRestroomIds, 14);
+  }, [focusedRestroomId, hoveredRestroomId, restrooms]);
+
+  useEffect(() => {
     let cancelled = false;
     const missingHoveredMarkerLogSet = missingHoveredMarkerLogRef.current;
-    const previewRequestControllers = previewPhotoRequestControllersRef.current;
 
     const initMap = async () => {
       if (!mapContainerRef.current || mapRef.current) {
@@ -370,10 +380,6 @@ export function RestroomMap({
       }
       desktopPreviewFetchIntentTimeoutRef.current = null;
       desktopPreviewFetchIntentRestroomIdRef.current = null;
-      for (const controller of previewRequestControllers.values()) {
-        controller.abort();
-      }
-      previewRequestControllers.clear();
       popupRef.current?.remove();
       popupRef.current = null;
 
@@ -529,43 +535,16 @@ export function RestroomMap({
     };
 
     const requestDesktopPreviewPhoto = (restroomId: string) => {
-      if (previewPhotoByRestroomIdRef.current.has(restroomId)) {
+      const cachedPhotoUrl = getCachedRestroomPreviewPhoto(restroomId);
+      if (cachedPhotoUrl !== undefined) {
         return;
       }
 
-      if (previewPhotoRequestControllersRef.current.has(restroomId)) {
-        return;
-      }
-
-      const controller = new AbortController();
-      previewPhotoRequestControllersRef.current.set(restroomId, controller);
-
-      void fetch(`/api/restrooms/${encodeURIComponent(restroomId)}/preview`, {
-        method: "GET",
-        signal: controller.signal
-      })
-        .then(async (response) => {
-          if (!response.ok) {
-            throw new Error("Failed to load restroom preview photo.");
-          }
-
-          const payload = (await response.json()) as { success?: boolean; photoUrl?: string | null };
-          const resolvedPhotoUrl = payload.success ? payload.photoUrl ?? null : null;
-          previewPhotoByRestroomIdRef.current.set(restroomId, resolvedPhotoUrl);
-        })
-        .catch((error: unknown) => {
-          if (error instanceof DOMException && error.name === "AbortError") {
-            return;
-          }
-
-          previewPhotoByRestroomIdRef.current.set(restroomId, null);
-        })
-        .finally(() => {
-          previewPhotoRequestControllersRef.current.delete(restroomId);
-          if (desktopPopupRestroomIdRef.current === restroomId) {
-            showDesktopHoverPopup(restroomId);
-          }
-        });
+      void fetchRestroomPreviewPhoto(restroomId).finally(() => {
+        if (desktopPopupRestroomIdRef.current === restroomId) {
+          showDesktopHoverPopup(restroomId);
+        }
+      });
     };
 
     const showDesktopHoverPopup = (restroomId: string) => {
@@ -579,8 +558,9 @@ export function RestroomMap({
         return;
       }
 
-      const hasPreviewPhoto = previewPhotoByRestroomIdRef.current.has(restroomId);
-      const photoUrl = hasPreviewPhoto ? previewPhotoByRestroomIdRef.current.get(restroomId) ?? null : null;
+      const cachedPhotoUrl = getCachedRestroomPreviewPhoto(restroomId);
+      const hasPreviewPhoto = cachedPhotoUrl !== undefined;
+      const photoUrl = hasPreviewPhoto ? cachedPhotoUrl : null;
       const popupContent = buildDesktopHoverPreviewContent(restroom, {
         showDistance,
         photoUrl
@@ -610,10 +590,6 @@ export function RestroomMap({
         }
         desktopPreviewFetchIntentTimeoutRef.current = null;
         desktopPreviewFetchIntentRestroomIdRef.current = null;
-        return;
-      }
-
-      if (previewPhotoRequestControllersRef.current.has(restroomId)) {
         return;
       }
 

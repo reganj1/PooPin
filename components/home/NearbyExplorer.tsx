@@ -6,6 +6,11 @@ import { MobileRestroomPreviewCard } from "@/components/map/MobileRestroomPrevie
 import { RestroomList } from "@/components/restroom/RestroomList";
 import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
 import { cn } from "@/lib/utils/cn";
+import {
+  fetchRestroomPreviewPhoto,
+  getCachedRestroomPreviewPhoto,
+  prefetchRestroomPreviewPhotos
+} from "@/lib/utils/restroomPreviewClient";
 import { NearbyBathroom } from "@/types";
 
 interface NearbyExplorerProps {
@@ -41,11 +46,6 @@ interface FilterState {
 
 interface BoundsApiResponse {
   restrooms: NearbyBathroom[];
-}
-
-interface RestroomPreviewApiResponse {
-  success: boolean;
-  photoUrl: string | null;
 }
 
 interface PersistedHomeMapState {
@@ -331,9 +331,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     () => (mapFocusedRestroomId ? mapDisplayRestrooms.find((restroom) => restroom.id === mapFocusedRestroomId) ?? null : null),
     [mapDisplayRestrooms, mapFocusedRestroomId]
   );
-  const selectedMapRestroomPreviewPhotoUrl = selectedMapRestroom
-    ? mobilePreviewPhotoByRestroomId[selectedMapRestroom.id] ?? null
-    : null;
+  const selectedMapRestroomId = selectedMapRestroom?.id ?? null;
+  const selectedMapRestroomPreviewPhotoUrl = selectedMapRestroomId ? mobilePreviewPhotoByRestroomId[selectedMapRestroomId] ?? null : null;
 
   const handleExpandMap = () => {
     captureAnalyticsEvent("expand_map_clicked", {
@@ -808,52 +807,66 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, []);
 
   useEffect(() => {
+    const prioritizedPreviewRestroomIds = [
+      selectedMapRestroomId,
+      mapFocusedRestroomId,
+      listHoveredRestroomId
+    ].filter((value): value is string => Boolean(value));
+    const candidatePreviewRestroomIds = [
+      ...prioritizedPreviewRestroomIds,
+      ...listRestrooms.map((restroom) => restroom.id),
+      ...mapDisplayRestrooms.map((restroom) => restroom.id)
+    ];
+    prefetchRestroomPreviewPhotos(candidatePreviewRestroomIds, isMobilePreviewLayout ? 10 : 16);
+  }, [isMobilePreviewLayout, listHoveredRestroomId, listRestrooms, mapDisplayRestrooms, mapFocusedRestroomId, selectedMapRestroomId]);
+
+  useEffect(() => {
     if (!isMobilePreviewLayout) {
       return;
     }
 
-    if (!selectedMapRestroom) {
+    if (!selectedMapRestroomId) {
       return;
     }
 
-    const restroomId = selectedMapRestroom.id;
-    if (restroomId in mobilePreviewPhotoByRestroomId) {
-      return;
-    }
-
-    const controller = new AbortController();
-
-    void fetch(`/api/restrooms/${encodeURIComponent(restroomId)}/preview`, {
-      method: "GET",
-      signal: controller.signal
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("Failed to fetch restroom preview photo.");
+    const restroomId = selectedMapRestroomId;
+    const cachedPhotoUrl = getCachedRestroomPreviewPhoto(restroomId);
+    if (cachedPhotoUrl !== undefined) {
+      setMobilePreviewPhotoByRestroomId((current) => {
+        if (current[restroomId] === cachedPhotoUrl) {
+          return current;
         }
 
-        const payload = (await response.json()) as RestroomPreviewApiResponse;
-        setMobilePreviewPhotoByRestroomId((current) => ({
+        return {
           ...current,
-          [restroomId]: payload.success ? payload.photoUrl : null
-        }));
-      })
-      .catch((error: unknown) => {
-        const isAbortError = error instanceof DOMException && error.name === "AbortError";
-        if (isAbortError) {
-          return;
-        }
-
-        setMobilePreviewPhotoByRestroomId((current) => ({
-          ...current,
-          [restroomId]: null
-        }));
+          [restroomId]: cachedPhotoUrl
+        };
       });
+      return;
+    }
+
+    let cancelled = false;
+    void fetchRestroomPreviewPhoto(restroomId).then((photoUrl) => {
+      if (cancelled) {
+        return;
+      }
+
+      setMobilePreviewPhotoByRestroomId((current) => {
+        if (current[restroomId] === photoUrl) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [restroomId]: photoUrl
+        };
+      });
+    });
 
     return () => {
-      controller.abort();
+      cancelled = true;
     };
-  }, [isMobilePreviewLayout, mobilePreviewPhotoByRestroomId, selectedMapRestroom]);
+  }, [isMobilePreviewLayout, selectedMapRestroomId]);
 
   useEffect(() => {
     return () => {

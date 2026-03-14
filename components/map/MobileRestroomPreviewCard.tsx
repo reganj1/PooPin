@@ -90,7 +90,7 @@ export function MobileRestroomPreviewCard({
         <div className="relative h-20 w-24 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
           {photoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={photoUrl} alt={`${displayName} photo`} className="h-full w-full object-cover" loading="lazy" />
+            <img src={photoUrl} alt={`${displayName} photo`} className="h-full w-full object-cover" loading="eager" decoding="async" />
           ) : (
             <div className="flex h-full w-full items-center justify-center bg-slate-100 text-[11px] font-semibold text-slate-500">
               No photo
