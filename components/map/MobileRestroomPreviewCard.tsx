@@ -141,8 +141,6 @@ export function MobileRestroomPreviewCard({
           sourceSurface="mobile_preview"
           viewportMode={viewportMode}
           hasUserLocation={showDistance}
-          city={restroom.city}
-          accessType={restroom.access_type}
           className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
         >
           <NavigateIcon className="h-3.5 w-3.5" />

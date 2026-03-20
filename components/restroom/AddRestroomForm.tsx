@@ -73,6 +73,13 @@ interface SubmitRestroomResponse {
 }
 
 type ServerFieldErrors = Partial<Record<keyof BathroomCreateInput, string>>;
+type LocationFeedbackTone = "info" | "loading" | "success" | "warning";
+
+interface LocationFeedback {
+  tone: LocationFeedbackTone;
+  title: string;
+  message: string;
+}
 
 const toFirstFieldErrors = (
   fieldErrors: Partial<Record<keyof BathroomCreateInput, string[]>> | undefined
@@ -107,10 +114,43 @@ const getClientCooldownRemainingMs = () => {
   return Math.max(0, SUBMISSION_COOLDOWN_MS - elapsed);
 };
 
+const inputClassName =
+  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100";
+const selectClassName =
+  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100";
+const secondaryButtonClassName =
+  "inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60";
+const loadingSpinnerClassName = "h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent";
+
+const getLocationFeedbackStyles = (tone: LocationFeedbackTone) => {
+  switch (tone) {
+    case "loading":
+      return {
+        container: "border-brand-200 bg-brand-50 text-brand-900",
+        badge: "bg-brand-100 text-brand-700"
+      };
+    case "success":
+      return {
+        container: "border-emerald-200 bg-emerald-50 text-emerald-900",
+        badge: "bg-emerald-100 text-emerald-700"
+      };
+    case "warning":
+      return {
+        container: "border-amber-200 bg-amber-50 text-amber-900",
+        badge: "bg-amber-100 text-amber-700"
+      };
+    default:
+      return {
+        container: "border-slate-200 bg-slate-50 text-slate-900",
+        badge: "bg-white text-slate-600"
+      };
+  }
+};
+
 function Field({ label, htmlFor, error, children }: FieldProps) {
   return (
     <div>
-      <label htmlFor={htmlFor} className="mb-1 block text-sm font-medium text-slate-700">
+      <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-slate-700">
         {label}
       </label>
       {children}
@@ -126,7 +166,7 @@ export function AddRestroomForm() {
   const [isLocating, setIsLocating] = useState(false);
   const [isResolvingFromAddress, setIsResolvingFromAddress] = useState(false);
   const [isResolvingAddress, setIsResolvingAddress] = useState(false);
-  const [addressAssistMessage, setAddressAssistMessage] = useState<string | null>(null);
+  const [locationFeedback, setLocationFeedback] = useState<LocationFeedback | null>(null);
   const [selectedCoordinates, setSelectedCoordinates] = useState(DEFAULT_COORDINATES);
   const [serverFieldErrors, setServerFieldErrors] = useState<ServerFieldErrors>({});
   const reverseGeocodeAbortRef = useRef<AbortController | null>(null);
@@ -140,6 +180,7 @@ export function AddRestroomForm() {
     reset,
     getValues,
     setValue,
+    watch,
     formState: { errors, isSubmitting }
   } = useForm<BathroomCreateInput>({
     resolver: zodResolver(bathroomCreateSchema),
@@ -147,6 +188,20 @@ export function AddRestroomForm() {
   });
 
   const getFieldError = (field: keyof BathroomCreateInput) => errors[field]?.message ?? serverFieldErrors[field];
+  const addressValue = watch("address");
+  const cityValue = watch("city");
+  const stateValue = watch("state");
+  const hasTypedLocation = [addressValue, cityValue, stateValue].some((value) => value.trim().length > 0);
+  const locationFeedbackState =
+    locationFeedback ??
+    ({
+      tone: "info",
+      title: "Move the pin or type a location",
+      message: "The map and address fields stay in sync as you refine the spot."
+    } satisfies LocationFeedback);
+  const locationFeedbackStyles = getLocationFeedbackStyles(locationFeedbackState.tone);
+  const addressLookupButtonLabel =
+    isResolvingFromAddress ? "Finding..." : hasTypedLocation ? "Find on map" : "Enter a location first";
 
   const trackAddRestroomStarted = useCallback(() => {
     if (hasTrackedAddRestroomStartedRef.current) {
@@ -172,7 +227,11 @@ export function AddRestroomForm() {
       reverseGeocodeAbortRef.current = controller;
 
       setIsResolvingAddress(true);
-      setAddressAssistMessage("Finding nearby location details...");
+      setLocationFeedback({
+        tone: "loading",
+        title: "Updating address",
+        message: "Finding the closest street and area for this pin."
+      });
 
       try {
         const geocodeResult = await reverseGeocodeCoordinates(coordinates, controller.signal);
@@ -181,7 +240,11 @@ export function AddRestroomForm() {
         }
 
         if (!geocodeResult) {
-          setAddressAssistMessage("We couldn't fetch location details right now. You can enter address details manually.");
+          setLocationFeedback({
+            tone: "warning",
+            title: "Add the details manually",
+            message: "We could not fill the address from this pin, but you can still submit it."
+          });
           return;
         }
 
@@ -197,14 +260,26 @@ export function AddRestroomForm() {
           setValue("state", geocodeResult.state, { shouldDirty: true, shouldValidate: true });
         }
 
-        setAddressAssistMessage(
+        setLocationFeedback(
           geocodeResult.resolution === "exact_address" || geocodeResult.resolution === "street"
-            ? "Address filled from map location. Edit if needed."
-            : "We found the nearby area. You can adjust the details if needed."
+            ? {
+                tone: "success",
+                title: "Address updated",
+                message: "We filled in the nearby address from your pin. Edit anything if needed."
+              }
+            : {
+                tone: "success",
+                title: "Area details updated",
+                message: "We found the nearby area. Fine-tune anything if needed."
+              }
         );
       } catch {
         if (!controller.signal.aborted) {
-          setAddressAssistMessage("We couldn't fetch location details right now. You can enter address details manually.");
+          setLocationFeedback({
+            tone: "warning",
+            title: "Could not update the address",
+            message: "You can still enter the address details manually and submit the listing."
+          });
         }
       } finally {
         if (!controller.signal.aborted) {
@@ -250,9 +325,18 @@ export function AddRestroomForm() {
       status: "requested"
     });
     setSubmitError(null);
+    setLocationFeedback({
+      tone: "loading",
+      title: "Finding your location",
+      message: "Dropping the pin where you are now."
+    });
 
     if (typeof navigator === "undefined" || !navigator.geolocation) {
-      setSubmitError("Location access is unavailable in this browser.");
+      setLocationFeedback({
+        tone: "warning",
+        title: "Location is unavailable",
+        message: "Use the map pin or type an address instead."
+      });
       return;
     }
 
@@ -266,19 +350,12 @@ export function AddRestroomForm() {
         });
         setIsLocating(false);
       },
-      (error) => {
-        // GeolocationPositionError code values: 1 denied, 2 unavailable, 3 timeout.
-        if (error?.code === 1) {
-          captureAnalyticsEvent("location_permission_denied", {
-            source_surface: "add_restroom_form",
-            geolocation_error_code: error.code
-          });
-        } else if (error?.code === 3) {
-          captureAnalyticsEvent("geolocation_timeout", {
-            source_surface: "add_restroom_form"
-          });
-        }
-        setSubmitError("Could not get your location. You can still drop a pin on the map or enter an address.");
+      () => {
+        setLocationFeedback({
+          tone: "warning",
+          title: "Could not find your location",
+          message: "Move the pin on the map or type an address instead."
+        });
         setIsLocating(false);
       },
       {
@@ -294,14 +371,12 @@ export function AddRestroomForm() {
     const address = getValues("address").trim();
     const city = getValues("city").trim();
     const state = getValues("state").trim();
-    captureAnalyticsEvent("add_restroom_find_on_map_clicked", {
-      source_surface: "add_restroom_form",
-      has_address: address.length > 0,
-      has_city: city.length > 0,
-      has_state: state.length > 0
-    });
     if (!address && !city && !state) {
-      setAddressAssistMessage("Enter an address first, then use Find on map.");
+      setLocationFeedback({
+        tone: "warning",
+        title: "Enter a location first",
+        message: "Add an address or area, then place the pin from the form."
+      });
       return;
     }
 
@@ -313,7 +388,11 @@ export function AddRestroomForm() {
 
     setSubmitError(null);
     setIsResolvingFromAddress(true);
-    setAddressAssistMessage("Placing pin from address...");
+    setLocationFeedback({
+      tone: "loading",
+      title: "Placing the pin",
+      message: "Matching your typed location on the map."
+    });
 
     try {
       const lookupResult = await forwardGeocodeAddress(
@@ -330,7 +409,11 @@ export function AddRestroomForm() {
       }
 
       if (!lookupResult) {
-        setAddressAssistMessage("Couldn't place a pin from that address. Move the pin on the map or edit details manually.");
+        setLocationFeedback({
+          tone: "warning",
+          title: "Could not place the pin",
+          message: "Try a clearer address, or move the pin on the map instead."
+        });
         return;
       }
 
@@ -352,14 +435,26 @@ export function AddRestroomForm() {
         { skipReverseGeocode: true }
       );
 
-      setAddressAssistMessage(
+      setLocationFeedback(
         lookupResult.resolution === "exact_address" || lookupResult.resolution === "street"
-          ? "Pin placed from address. You can move it to refine the location."
-          : "Pin placed from nearby area details. You can refine by moving the pin."
+          ? {
+              tone: "success",
+              title: "Pin updated",
+              message: "We moved the pin to your address. Drag it if you want to fine-tune the spot."
+            }
+          : {
+              tone: "success",
+              title: "Pin updated",
+              message: "We found a close match. Move the pin if you want to refine it."
+            }
       );
     } catch {
       if (!controller.signal.aborted) {
-        setAddressAssistMessage("Couldn't place a pin from that address right now. Move the pin on the map or try again.");
+        setLocationFeedback({
+          tone: "warning",
+          title: "Could not place the pin",
+          message: "Try again, or move the pin on the map to set the location manually."
+        });
       }
     } finally {
       if (!controller.signal.aborted) {
@@ -428,9 +523,7 @@ export function AddRestroomForm() {
         captureAnalyticsEvent("restroom_submitted", {
           bathroom_id: payload.bathroomId,
           status: payload.status,
-          source_surface: "add_restroom_form",
-          city: values.city,
-          access_type: values.access_type
+          source_surface: "add_restroom_form"
         });
       }
 
@@ -445,7 +538,7 @@ export function AddRestroomForm() {
       setIsResolvingAddress(false);
       setIsResolvingFromAddress(false);
       setSelectedCoordinates(DEFAULT_COORDINATES);
-      setAddressAssistMessage(null);
+      setLocationFeedback(null);
       lastResolvedCoordinateKeyRef.current = "";
     } catch {
       setSubmitError("Could not submit this restroom right now. Please check your connection and try again.");
@@ -458,12 +551,12 @@ export function AddRestroomForm() {
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-600">Bay Area Beta</p>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 sm:text-[2.05rem]">Submit a restroom</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-          Share a restroom with the community. New submissions may be reviewed before they appear publicly.
+          Drop a pin, fill in a few details, and send it in. We review submissions before they appear publicly.
         </p>
       </div>
 
-      <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
-        To protect listing quality, submissions are limited to one per minute per device.
+      <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600">
+        Submissions are reviewed so the map stays accurate. Each device can send one restroom per minute.
       </div>
 
       {submitError ? (
@@ -471,15 +564,15 @@ export function AddRestroomForm() {
       ) : null}
 
       {submitSuccessId ? (
-        <div className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-          <p className="text-sm font-semibold text-emerald-700">Thanks, your restroom submission was received.</p>
-          <p className="mt-1 text-xs text-emerald-700">Our team may review it before it appears in public results.</p>
+        <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 sm:p-5">
+          <p className="text-sm font-semibold text-emerald-700">Thanks. Your restroom was submitted for review.</p>
+          <p className="mt-1 text-sm text-emerald-700">If everything looks right, it should show up on the map soon.</p>
           <p className="mt-1 text-xs text-emerald-700">
             Submission reference: <span className="font-semibold">{submitSuccessId}</span>
           </p>
           <Link
             href="/"
-            className="mt-3 inline-flex rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+            className="mt-3 inline-flex rounded-xl border border-emerald-300 bg-white px-3.5 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"
           >
             Back to map
           </Link>
@@ -487,120 +580,154 @@ export function AddRestroomForm() {
       ) : null}
 
       {duplicateBathroomId ? (
-        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-semibold text-amber-800">A similar restroom already appears nearby.</p>
+        <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:p-5">
+          <p className="text-sm font-semibold text-amber-800">This spot may already be on the map.</p>
+          <p className="mt-1 text-sm text-amber-800">Check the nearby listing before sending a duplicate.</p>
           <Link
             href={`/restroom/${duplicateBathroomId}`}
-            className="mt-2 inline-flex rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+            className="mt-3 inline-flex rounded-xl border border-amber-300 bg-white px-3.5 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100"
           >
             View existing listing
           </Link>
         </div>
       ) : null}
 
-      <form onSubmit={handleSubmit(onSubmit)} onFocusCapture={trackAddRestroomStarted} className="space-y-6" noValidate>
-        <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
-          <div className="mb-4">
+      <form onSubmit={handleSubmit(onSubmit)} onFocusCapture={trackAddRestroomStarted} className="space-y-5 sm:space-y-6" noValidate>
+        <section className="rounded-2xl border border-slate-200 p-4 sm:p-5 lg:p-6">
+          <div className="mb-4 sm:mb-5">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Step 1</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Choose location</h2>
-            <p className="mt-1 text-sm text-slate-600">Move the pin or enter a location.</p>
+            <p className="mt-1 text-sm text-slate-600">Move the pin or enter a location. The map and address fields stay in sync.</p>
           </div>
 
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={handleUseMyLocation}
-              disabled={isLocating || isSubmitting || isResolvingFromAddress}
-              className="inline-flex rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isLocating ? "Locating..." : "Use my current location"}
-            </button>
-            <p className="text-xs text-slate-500">Tap or drag the pin to refine the spot.</p>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.12fr)_minmax(320px,0.88fr)]">
+            <div className="space-y-3">
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Pin location</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">Tap the map or drag the pin to the right spot.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleUseMyLocation}
+                  disabled={isLocating || isSubmitting || isResolvingFromAddress}
+                  className={`${secondaryButtonClassName} min-h-[44px] w-full sm:w-auto`}
+                >
+                  {isLocating ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className={loadingSpinnerClassName} />
+                      Finding you
+                    </span>
+                  ) : (
+                    "Use my location"
+                  )}
+                </button>
+              </div>
+
+              <LocationPickerMap
+                coordinates={selectedCoordinates}
+                onCoordinatesChange={handleCoordinatesChange}
+                className="shadow-sm"
+              />
+
+              <div
+                aria-live="polite"
+                className={`rounded-2xl border px-4 py-3 ${locationFeedbackStyles.container}`}
+              >
+                <div className="flex items-start gap-3">
+                  <span
+                    className={`mt-0.5 inline-flex shrink-0 items-center rounded-full px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${locationFeedbackStyles.badge}`}
+                  >
+                    {locationFeedbackState.tone === "loading"
+                      ? "Updating"
+                      : locationFeedbackState.tone === "success"
+                        ? "Ready"
+                        : locationFeedbackState.tone === "warning"
+                          ? "Check"
+                          : "Tip"}
+                  </span>
+                  <div>
+                    <p className="text-sm font-semibold">{locationFeedbackState.title}</p>
+                    <p className="mt-1 text-xs leading-5 opacity-90">{locationFeedbackState.message}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+              <div className="mb-4">
+                <p className="text-sm font-semibold text-slate-900">Type a location</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">Enter an address or area and we will move the pin for you.</p>
+              </div>
+
+              <div className="space-y-3">
+                <Field label="Address" htmlFor="address" error={getFieldError("address")}>
+                  <input
+                    id="address"
+                    {...register("address")}
+                    onKeyDown={handleAddressLookupKeyDown}
+                    className={inputClassName}
+                    placeholder="123 Market St"
+                  />
+                </Field>
+
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_112px]">
+                  <Field label="City" htmlFor="city" error={getFieldError("city")}>
+                    <input
+                      id="city"
+                      {...register("city")}
+                      onKeyDown={handleAddressLookupKeyDown}
+                      className={inputClassName}
+                      placeholder="San Francisco"
+                    />
+                  </Field>
+
+                  <Field label="State" htmlFor="state" error={getFieldError("state")}>
+                    <input
+                      id="state"
+                      {...register("state")}
+                      onKeyDown={handleAddressLookupKeyDown}
+                      className={`${inputClassName} uppercase`}
+                      placeholder="CA"
+                      maxLength={30}
+                    />
+                  </Field>
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleAddressLookup();
+                  }}
+                  disabled={!hasTypedLocation || isSubmitting || isResolvingAddress || isResolvingFromAddress}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {addressLookupButtonLabel}
+                </button>
+                <p className="text-xs leading-5 text-slate-500">Press Enter or tap the button to update the pin.</p>
+              </div>
+            </div>
           </div>
-
-          <LocationPickerMap
-            coordinates={selectedCoordinates}
-            onCoordinatesChange={handleCoordinatesChange}
-          />
-
-          <p className="mt-2 text-xs text-slate-500">
-            {isResolvingFromAddress
-              ? "Placing pin from address..."
-              : isResolvingAddress
-                ? "Finding address details..."
-                : addressAssistMessage ?? "Address details fill in automatically from your pin."}
-          </p>
 
           <input type="hidden" {...register("lat", { valueAsNumber: true })} />
           <input type="hidden" {...register("lng", { valueAsNumber: true })} />
-
-          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/50 p-3 sm:p-4">
-            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-semibold text-slate-900">Location details</p>
-                <p className="text-xs text-slate-500">Use Address, City, and State to move the pin.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleAddressLookup();
-                }}
-                disabled={isSubmitting || isResolvingAddress || isResolvingFromAddress}
-                className="inline-flex w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:min-w-28"
-              >
-                {isResolvingFromAddress ? "Finding..." : "Find on map"}
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <Field label="Address" htmlFor="address" error={getFieldError("address")}>
-                <input
-                  id="address"
-                  {...register("address")}
-                  onKeyDown={handleAddressLookupKeyDown}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                  placeholder="123 Market St"
-                />
-              </Field>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="City" htmlFor="city" error={getFieldError("city")}>
-                  <input
-                    id="city"
-                    {...register("city")}
-                    onKeyDown={handleAddressLookupKeyDown}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                    placeholder="San Francisco"
-                  />
-                </Field>
-
-                <Field label="State" htmlFor="state" error={getFieldError("state")}>
-                  <input
-                    id="state"
-                    {...register("state")}
-                    onKeyDown={handleAddressLookupKeyDown}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm uppercase outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                    placeholder="CA"
-                    maxLength={30}
-                  />
-                </Field>
-              </div>
-            </div>
-          </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
+        <section className="rounded-2xl border border-slate-200 p-4 sm:p-5 lg:p-6">
           <div className="mb-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Step 2</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Add restroom details</h2>
+            <p className="mt-1 text-sm text-slate-600">Add the basics so people can recognize the spot quickly.</p>
           </div>
 
           <div className="space-y-4">
-            <Field label="Listing name" htmlFor="name" error={getFieldError("name")}>
+            <Field label="Restroom name" htmlFor="name" error={getFieldError("name")}>
               <input
                 id="name"
                 {...register("name")}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                className={inputClassName}
                 placeholder="Civic Center Plaza Restroom"
               />
             </Field>
@@ -610,7 +737,7 @@ export function AddRestroomForm() {
                 <select
                   id="place_type"
                   {...register("place_type")}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                  className={selectClassName}
                 >
                   {bathroomPlaceTypeOptions.map((value) => (
                     <option key={value} value={value}>
@@ -624,7 +751,7 @@ export function AddRestroomForm() {
                 <select
                   id="access_type"
                   {...register("access_type")}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                  className={selectClassName}
                 >
                   {bathroomAccessTypeOptions.map((value) => (
                     <option key={value} value={value}>
@@ -635,9 +762,9 @@ export function AddRestroomForm() {
               </Field>
             </div>
 
-            <fieldset className="rounded-xl border border-slate-200 p-4">
+            <fieldset className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4">
               <legend className="px-1 text-sm font-semibold text-slate-700">Amenities and access</legend>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <div className="mt-2 grid gap-2.5 sm:grid-cols-2">
                 <label className="flex items-center gap-2 text-sm text-slate-700">
                   <input type="checkbox" {...register("has_baby_station")} className="h-4 w-4 rounded border-slate-300" />
                   Has baby station
@@ -659,21 +786,24 @@ export function AddRestroomForm() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
+        <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5 lg:p-6">
           <div className="mb-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Step 3</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Submit for review</h2>
             <p className="mt-1 text-sm text-slate-600">
-              Restroom submissions and photo uploads may be reviewed before appearing publicly to help keep listings
-              reliable.
+              We review new listings before they go live so the map stays useful and trustworthy.
             </p>
+          </div>
+
+          <div className="mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600">
+            After you submit, we review the listing before it appears publicly. Photos added later may be reviewed too.
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
               type="submit"
               disabled={isSubmitting}
-              className="inline-flex items-center justify-center rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex min-h-[44px] items-center justify-center rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSubmitting ? "Submitting..." : "Submit restroom"}
             </button>
@@ -690,11 +820,11 @@ export function AddRestroomForm() {
                 setIsResolvingAddress(false);
                 setIsResolvingFromAddress(false);
                 setSelectedCoordinates(DEFAULT_COORDINATES);
-                setAddressAssistMessage(null);
+                setLocationFeedback(null);
                 lastResolvedCoordinateKeyRef.current = "";
               }}
               disabled={isSubmitting}
-              className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className={`${secondaryButtonClassName} min-h-[44px]`}
             >
               Reset
             </button>

@@ -154,9 +154,9 @@ export function LocationPickerMap({ coordinates, onCoordinatesChange, className 
   if (!isMapboxConfigured) {
     return (
       <div className={cn("rounded-2xl border border-slate-200 bg-slate-50 p-4", className)}>
-        <p className="text-sm font-semibold text-slate-800">Map setup pending</p>
+        <p className="text-sm font-semibold text-slate-800">Map unavailable right now</p>
         <p className="mt-1 text-xs text-slate-600">
-          Pin placement is temporarily unavailable. You can still submit using your current location and address details.
+          You can still submit a restroom by using your current location or entering the address details below.
         </p>
       </div>
     );
@@ -164,7 +164,7 @@ export function LocationPickerMap({ coordinates, onCoordinatesChange, className 
 
   return (
     <div className={cn("overflow-hidden rounded-2xl border border-slate-200 bg-white", className)}>
-      <div ref={containerRef} className="h-[280px] w-full sm:h-[320px]" />
+      <div ref={containerRef} className="h-[244px] w-full sm:h-[320px] lg:h-[340px]" />
     </div>
   );
 }

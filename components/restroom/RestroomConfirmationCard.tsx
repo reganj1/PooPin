@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { hasExistingReportReason, insertReport, toReportSubmissionErrorMessage } from "@/lib/supabase/reports";
 import {
@@ -59,10 +58,6 @@ export function RestroomConfirmationCard({ bathroomId, initialCount }: RestroomC
       recordRestroomConfirmationLocally(bathroomId);
       setHasConfirmed(true);
       setSuccessMessage("Thanks for confirming this restroom.");
-      captureAnalyticsEvent("restroom_confirmed", {
-        bathroom_id: bathroomId,
-        source_surface: "confirmation_card"
-      });
     } catch (error) {
       setErrorMessage(toReportSubmissionErrorMessage(error));
     } finally {

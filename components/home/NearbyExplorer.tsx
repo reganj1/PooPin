@@ -339,8 +339,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       source: "homepage_map",
       source_surface: "homepage_controls",
       viewport_mode: "homepage",
-      has_user_location: hasRealUserLocation,
-      sort_mode: sortMode
+      has_user_location: hasRealUserLocation
     });
     setIsExpandedListOpen(true);
     setMobileSheetState("default");
@@ -1014,18 +1013,12 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       source_surface: sourceSurface,
       viewport_mode: viewportMode,
       has_user_location: hasRealUserLocation,
-      sort_mode: sortMode,
       status: isLocationTrackingEnabled ? "recenter_requested" : "requested"
     });
 
     setGeoError(null);
 
     if (typeof window !== "undefined" && !window.isSecureContext && !isLocalhostHost(window.location.hostname)) {
-      captureAnalyticsEvent("location_permission_denied", {
-        source_surface: sourceSurface,
-        viewport_mode: viewportMode,
-        geolocation_error_code: 0
-      });
       setGeoError("Location needs HTTPS on mobile. Open Poopin over HTTPS (or localhost) to use Locate.");
       setIsLocating(false);
       stopLocationWatch();
@@ -1035,11 +1028,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     if (typeof navigator === "undefined" || !navigator.geolocation) {
-      captureAnalyticsEvent("location_permission_denied", {
-        source_surface: sourceSurface,
-        viewport_mode: viewportMode,
-        geolocation_error_code: 0
-      });
       setGeoError("Geolocation is not available in this browser. Showing default city-center results.");
       setUserLocation(null);
       setIsLocationTrackingEnabled(false);
@@ -1068,19 +1056,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         (error) => {
           setGeoError(toGeoErrorMessage(error));
           setIsLocating(false);
-
-          if (error.code === error.PERMISSION_DENIED) {
-            captureAnalyticsEvent("location_permission_denied", {
-              source_surface: sourceSurface,
-              viewport_mode: viewportMode,
-              geolocation_error_code: error.code
-            });
-          } else if (error.code === error.TIMEOUT) {
-            captureAnalyticsEvent("geolocation_timeout", {
-              source_surface: sourceSurface,
-              viewport_mode: viewportMode
-            });
-          }
 
           if (error.code === error.PERMISSION_DENIED) {
             stopLocationWatch();
@@ -1309,7 +1284,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           helperText={listHelperText}
           showDistance={hasRealUserLocation}
           viewportMode={viewportMode}
-          sortMode={sortMode}
           hasUserLocation={hasRealUserLocation}
           highlightedRestroomId={highlightedListRestroomId}
           onRestroomHoverChange={setListHoveredRestroomId}
@@ -1391,7 +1365,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 userLocation={userLocation}
                 showDistance={hasRealUserLocation}
                 hasUserLocation={hasRealUserLocation}
-                analyticsSortMode={sortMode}
                 hoveredRestroomId={listHoveredRestroomId}
                 focusedRestroomId={mapFocusedRestroomId}
                 onFocusedRestroomIdChange={handleMapFocusedRestroomIdChange}
@@ -1424,7 +1397,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 userLocation={userLocation}
                 showDistance={hasRealUserLocation}
                 hasUserLocation={hasRealUserLocation}
-                analyticsSortMode={sortMode}
                 hoveredRestroomId={listHoveredRestroomId}
                 focusedRestroomId={mapFocusedRestroomId}
                 onFocusedRestroomIdChange={handleMapFocusedRestroomIdChange}

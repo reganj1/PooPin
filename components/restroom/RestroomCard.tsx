@@ -2,8 +2,7 @@ import Link from "next/link";
 import type { FocusEvent } from "react";
 import { NearbyBathroom } from "@/types";
 import { TrackedNavigateLink } from "@/components/analytics/TrackedNavigateLink";
-import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
-import type { AnalyticsSortMode, AnalyticsViewportMode } from "@/lib/analytics/posthog";
+import type { AnalyticsViewportMode } from "@/lib/analytics/posthog";
 import { RatingPills } from "@/components/restroom/RatingPills";
 import { RestroomTags } from "@/components/restroom/RestroomTags";
 import { cn } from "@/lib/utils/cn";
@@ -16,7 +15,6 @@ interface RestroomCardProps {
   showDistance?: boolean;
   isHighlighted?: boolean;
   viewportMode?: AnalyticsViewportMode;
-  sortMode?: AnalyticsSortMode;
   hasUserLocation?: boolean;
   onHoverChange?: (isHovering: boolean) => void;
   onNavigateToDetail?: (restroomId: string) => void;
@@ -64,7 +62,6 @@ export function RestroomCard({
   showDistance = false,
   isHighlighted = false,
   viewportMode = "homepage",
-  sortMode = "recommended",
   hasUserLocation = false,
   onHoverChange,
   onNavigateToDetail
@@ -83,15 +80,6 @@ export function RestroomCard({
   };
 
   const handleNavigateToDetail = () => {
-    captureAnalyticsEvent("restroom_list_item_clicked", {
-      bathroom_id: restroom.id,
-      source_surface: "list",
-      viewport_mode: viewportMode,
-      has_user_location: hasUserLocation,
-      sort_mode: sortMode,
-      city: restroom.city,
-      access_type: restroom.access_type
-    });
     onNavigateToDetail?.(restroom.id);
   };
 
@@ -177,9 +165,6 @@ export function RestroomCard({
           sourceSurface="restroom_card"
           viewportMode={viewportMode}
           hasUserLocation={hasUserLocation}
-          sortMode={sortMode}
-          city={restroom.city}
-          accessType={restroom.access_type}
           className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
         >
           <NavigateIcon className="h-3.5 w-3.5" />

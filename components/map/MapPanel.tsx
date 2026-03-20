@@ -1,5 +1,5 @@
 import { NearbyBathroom } from "@/types";
-import type { AnalyticsSortMode, AnalyticsViewportMode } from "@/lib/analytics/posthog";
+import type { AnalyticsViewportMode } from "@/lib/analytics/posthog";
 import { MAPBOX_ACCESS_TOKEN, isMapboxConfigured } from "@/lib/mapbox/config";
 import { RestroomMap } from "@/components/map/RestroomMap";
 import { cn } from "@/lib/utils/cn";
@@ -17,7 +17,6 @@ interface MapPanelProps {
   } | null;
   showDistance?: boolean;
   hasUserLocation?: boolean;
-  analyticsSortMode?: AnalyticsSortMode;
   analyticsViewportMode?: AnalyticsViewportMode;
   hoveredRestroomId?: string | null;
   focusedRestroomId?: string | null;
@@ -45,7 +44,6 @@ export function MapPanel({
   initialCamera = null,
   showDistance = false,
   hasUserLocation = false,
-  analyticsSortMode = "recommended",
   analyticsViewportMode = "homepage",
   hoveredRestroomId = null,
   focusedRestroomId = null,
@@ -157,7 +155,6 @@ export function MapPanel({
           initialCamera={initialCamera}
           showDistance={showDistance}
           hasUserLocation={hasUserLocation}
-          analyticsSortMode={analyticsSortMode}
           analyticsViewportMode={analyticsViewportMode}
           hoveredRestroomId={hoveredRestroomId}
           focusedRestroomId={focusedRestroomId}

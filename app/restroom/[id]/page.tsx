@@ -119,6 +119,7 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
               href={navigateHref}
               bathroomId={restroom.id}
               source="restroom_detail"
+              sourceSurface="restroom_detail"
               className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 sm:flex-none"
             >
               <NavigateIcon className="h-4 w-4" />

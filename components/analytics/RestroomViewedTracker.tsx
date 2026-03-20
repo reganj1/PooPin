@@ -2,24 +2,28 @@
 
 import { useEffect } from "react";
 import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
-import type { BathroomAccessType } from "@/types";
 
 interface RestroomViewedTrackerProps {
   bathroomId: string;
-  city?: string;
-  accessType?: BathroomAccessType;
 }
 
-export function RestroomViewedTracker({ bathroomId, city, accessType }: RestroomViewedTrackerProps) {
+const viewedEventLastSentAtByBathroomId = new Map<string, number>();
+
+export function RestroomViewedTracker({ bathroomId }: RestroomViewedTrackerProps) {
   useEffect(() => {
+    const now = Date.now();
+    const previousSentAt = viewedEventLastSentAtByBathroomId.get(bathroomId) ?? 0;
+    if (now - previousSentAt < 2000) {
+      return;
+    }
+
+    viewedEventLastSentAtByBathroomId.set(bathroomId, now);
     captureAnalyticsEvent("restroom_viewed", {
       bathroom_id: bathroomId,
       source: "detail_page",
-      source_surface: "detail_page",
-      city,
-      access_type: accessType
+      source_surface: "detail_page"
     });
-  }, [accessType, bathroomId, city]);
+  }, [bathroomId]);
 
   return null;
 }
