@@ -981,20 +981,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      window.dispatchEvent(new Event("resize"));
-    }, 80);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [isMapExpanded, isExpandedListOpen]);
-
-  useEffect(() => {
     if (!hasRealUserLocation && sortMode === "closest") {
       setSortMode("recommended");
     }
@@ -1299,6 +1285,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   };
 
   const isMobileSheetCollapsed = mobileSheetState === "collapsed";
+  const activeMapPreviewVariant = isMapExpanded ? "expanded" : "default";
 
   return (
     <>
@@ -1356,9 +1343,16 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         Community submissions, photos, and reviews may be reviewed before appearing publicly.
       </section>
 
-      {!isMapExpanded ? (
-        <section className="grid min-w-0 gap-5 overflow-x-clip lg:grid-cols-[minmax(0,1.45fr)_minmax(360px,1fr)] xl:grid-cols-[minmax(0,1.55fr)_420px]">
-          <div className="relative min-w-0 lg:sticky lg:top-20 lg:self-start">
+      <section className="grid min-w-0 gap-5 overflow-x-clip lg:grid-cols-[minmax(0,1.45fr)_minmax(360px,1fr)] xl:grid-cols-[minmax(0,1.55fr)_420px]">
+        <div
+          className={cn(
+            "min-w-0",
+            isMapExpanded ? "fixed inset-0 z-[80]" : "relative lg:sticky lg:top-20 lg:self-start"
+          )}
+        >
+          {isMapExpanded ? <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-[1.5px]" /> : null}
+
+          <div className={cn("min-w-0", isMapExpanded && "absolute inset-0 max-w-full overflow-hidden")}>
             {isHomeStateReady ? (
               <MapPanel
                 restrooms={mapDisplayRestrooms}
@@ -1375,168 +1369,149 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 locationCenterRequestKey={locationCenterRequestKey}
                 locationFollowEnabled={isFollowingUserLocation}
                 onLocationFollowChange={setIsFollowingUserLocation}
-                analyticsViewportMode="homepage"
-                onExpandMap={handleExpandMap}
+                analyticsViewportMode={isMapExpanded ? "expanded_map" : "homepage"}
+                resizeKey={`${isMapExpanded ? "expanded" : "default"}:${isExpandedListOpen ? "list-open" : "list-closed"}`}
+                className={cn(isMapExpanded && "relative z-10 h-full rounded-none border-0 shadow-none")}
+                mapClassName={cn(isMapExpanded && "h-full min-h-0")}
+                showHeader={!isMapExpanded}
+                onExpandMap={!isMapExpanded ? handleExpandMap : undefined}
               />
             ) : (
-              <div className="h-[340px] rounded-3xl border border-slate-200 bg-slate-100/70 shadow-sm sm:h-[440px] lg:h-[640px]" />
-            )}
-            {renderMobileMapPreviewCard("default")}
-          </div>
-
-          <div className="min-w-0">{renderListPanel("default")}</div>
-        </section>
-      ) : null}
-
-      {isMapExpanded ? (
-        <section className="fixed inset-0 z-[80] overflow-hidden bg-slate-950/45 backdrop-blur-[1.5px]">
-          <div className="absolute inset-0 max-w-full overflow-hidden">
-            {isHomeStateReady ? (
-              <MapPanel
-                restrooms={mapDisplayRestrooms}
-                userLocation={userLocation}
-                showDistance={hasRealUserLocation}
-                hasUserLocation={hasRealUserLocation}
-                hoveredRestroomId={listHoveredRestroomId}
-                focusedRestroomId={mapFocusedRestroomId}
-                onFocusedRestroomIdChange={handleMapFocusedRestroomIdChange}
-                onViewportBoundsChange={handleViewportBoundsChange}
-                onCameraChange={handleMapCameraChange}
-                onNavigateToDetail={handleNavigateToDetail}
-                initialCamera={mapCamera}
-                locationCenterRequestKey={locationCenterRequestKey}
-                locationFollowEnabled={isFollowingUserLocation}
-                onLocationFollowChange={setIsFollowingUserLocation}
-                analyticsViewportMode="expanded_map"
-                className="h-full rounded-none border-0 shadow-none"
-                mapClassName="h-full min-h-0"
-                showHeader={false}
+              <div
+                className={cn(
+                  "rounded-3xl border border-slate-200 bg-slate-100/70 shadow-sm",
+                  isMapExpanded ? "h-full w-full rounded-none border-0" : "h-[340px] sm:h-[440px] lg:h-[640px]"
+                )}
               />
-            ) : (
-              <div className="h-full w-full bg-slate-100/80" />
             )}
-            {renderMobileMapPreviewCard("expanded")}
+            {renderMobileMapPreviewCard(activeMapPreviewVariant)}
 
-            <div className="pointer-events-none absolute inset-x-2 top-[max(0.5rem,env(safe-area-inset-top))] sm:inset-x-4 sm:top-4">
-              <div className="pointer-events-auto mx-auto flex w-full max-w-[1400px] min-w-0 flex-col gap-2 rounded-2xl border border-white/70 bg-white/95 px-3 py-2.5 shadow-xl backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-4">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Full map mode</p>
-                  <p className="mt-1 hidden text-xs text-slate-700 sm:block">
-                    Bay Area restroom map with live markers and nearby results.
-                  </p>
+            {isMapExpanded ? (
+              <>
+                <div className="pointer-events-none absolute inset-x-2 top-[max(0.5rem,env(safe-area-inset-top))] z-20 sm:inset-x-4 sm:top-4">
+                  <div className="pointer-events-auto mx-auto flex w-full max-w-[1400px] min-w-0 flex-col gap-2 rounded-2xl border border-white/70 bg-white/95 px-3 py-2.5 shadow-xl backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Full map mode</p>
+                      <p className="mt-1 hidden text-xs text-slate-700 sm:block">
+                        Bay Area restroom map with live markers and nearby results.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                      <button
+                        type="button"
+                        onClick={handleUseMyLocation}
+                        disabled={isLocating}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isLocating ? "Locating..." : isLocationTrackingEnabled ? "Recenter" : "Locate"}
+                      </button>
+                      {isLocationTrackingEnabled ? (
+                        <button
+                          type="button"
+                          onClick={handleStopLocationTracking}
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                        >
+                          Stop location
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => setIsExpandedListOpen((current) => !current)}
+                        className="hidden rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 sm:inline-flex"
+                      >
+                        {isExpandedListOpen ? "Hide list" : "Show list"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsMapExpanded(false)}
+                        className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                      >
+                        Close map
+                      </button>
+                    </div>
+
+                    {geoError ? (
+                      <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-medium text-amber-800">
+                        {geoError}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                  <button
-                    type="button"
-                    onClick={handleUseMyLocation}
-                    disabled={isLocating}
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 overflow-hidden sm:hidden">
+                  <div
+                    ref={mobileSheetRef}
+                    className="pointer-events-auto mx-0 overflow-hidden rounded-t-3xl border-t border-slate-200 bg-white shadow-2xl will-change-transform"
+                    style={{
+                      height: `${Math.round(MOBILE_SHEET_MAX_HEIGHT_RATIO * 100)}svh`,
+                      transform:
+                        mobileSheetState === "collapsed"
+                          ? `translateY(calc(${Math.round(MOBILE_SHEET_MAX_HEIGHT_RATIO * 100)}svh - ${MOBILE_SHEET_COLLAPSED_VISIBLE_PX}px))`
+                          : mobileSheetState === "expanded"
+                            ? `translateY(calc(${Math.round(MOBILE_SHEET_MAX_HEIGHT_RATIO * 100)}svh - ${Math.round(MOBILE_SHEET_EXPANDED_VISIBLE_RATIO * 100)}svh))`
+                            : `translateY(calc(${Math.round(MOBILE_SHEET_MAX_HEIGHT_RATIO * 100)}svh - ${Math.round(MOBILE_SHEET_DEFAULT_VISIBLE_RATIO * 100)}svh))`
+                    }}
                   >
-                    {isLocating ? "Locating..." : isLocationTrackingEnabled ? "Recenter" : "Locate"}
-                  </button>
-                  {isLocationTrackingEnabled ? (
                     <button
                       type="button"
-                      onClick={handleStopLocationTracking}
-                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                      aria-label={
+                        mobileSheetState === "collapsed" ? "Expand nearby restrooms sheet" : "Collapse nearby restrooms sheet"
+                      }
+                      onClick={handleMobileSheetHandleTap}
+                      onTouchStart={handleMobileSheetHandleTouchStart}
+                      onTouchMove={handleMobileSheetHandleTouchMove}
+                      onTouchEnd={handleMobileSheetHandleTouchEnd}
+                      onTouchCancel={handleMobileSheetHandleTouchCancel}
+                      className={cn(
+                        "flex w-full touch-none flex-col items-center border-b border-slate-200 px-4",
+                        isMobileSheetCollapsed ? "gap-1 pb-1.5 pt-2" : "gap-1.5 pb-2 pt-2.5"
+                      )}
                     >
-                      Stop location
+                      <span className="h-1.5 w-10 rounded-full bg-slate-300" />
+                      {isMobileSheetCollapsed ? (
+                        <div className="flex w-full items-center justify-between">
+                          <p className="text-xs font-semibold text-slate-700">Nearby results</p>
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Show</span>
+                        </div>
+                      ) : (
+                        <div className="flex w-full items-center justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">Nearby results</p>
+                            <p className="text-xs text-slate-500">{listRestrooms.length} in current map area</p>
+                          </div>
+                          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Hide</span>
+                        </div>
+                      )}
                     </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => setIsExpandedListOpen((current) => !current)}
-                    className="hidden rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 sm:inline-flex"
-                  >
-                    {isExpandedListOpen ? "Hide list" : "Show list"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsMapExpanded(false)}
-                    className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800"
-                  >
-                    Close map
-                  </button>
+
+                    {mobileSheetState !== "collapsed" ? (
+                      <div
+                        className="h-[calc(100%-68px)] overflow-x-hidden overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.65rem)] pt-2"
+                        onTouchStart={handleMobileSheetContentTouchStart}
+                        onTouchMove={handleMobileSheetContentTouchMove}
+                        onTouchEnd={finishMobileSheetContentTouchGesture}
+                        onTouchCancel={finishMobileSheetContentTouchGesture}
+                      >
+                        {renderListPanel("expanded")}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
 
-                {geoError ? (
-                  <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-medium text-amber-800">
-                    {geoError}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 overflow-hidden sm:hidden">
-              <div
-                ref={mobileSheetRef}
-                className="pointer-events-auto mx-0 overflow-hidden rounded-t-3xl border-t border-slate-200 bg-white shadow-2xl will-change-transform"
-                style={{
-                  height: `${Math.round(MOBILE_SHEET_MAX_HEIGHT_RATIO * 100)}svh`,
-                  transform:
-                    mobileSheetState === "collapsed"
-                      ? `translateY(calc(${Math.round(MOBILE_SHEET_MAX_HEIGHT_RATIO * 100)}svh - ${MOBILE_SHEET_COLLAPSED_VISIBLE_PX}px))`
-                      : mobileSheetState === "expanded"
-                        ? `translateY(calc(${Math.round(MOBILE_SHEET_MAX_HEIGHT_RATIO * 100)}svh - ${Math.round(MOBILE_SHEET_EXPANDED_VISIBLE_RATIO * 100)}svh))`
-                        : `translateY(calc(${Math.round(MOBILE_SHEET_MAX_HEIGHT_RATIO * 100)}svh - ${Math.round(MOBILE_SHEET_DEFAULT_VISIBLE_RATIO * 100)}svh))`
-                }}
-              >
-                <button
-                  type="button"
-                  aria-label={
-                    mobileSheetState === "collapsed" ? "Expand nearby restrooms sheet" : "Collapse nearby restrooms sheet"
-                  }
-                  onClick={handleMobileSheetHandleTap}
-                  onTouchStart={handleMobileSheetHandleTouchStart}
-                  onTouchMove={handleMobileSheetHandleTouchMove}
-                  onTouchEnd={handleMobileSheetHandleTouchEnd}
-                  onTouchCancel={handleMobileSheetHandleTouchCancel}
-                  className={cn(
-                    "flex w-full touch-none flex-col items-center border-b border-slate-200 px-4",
-                    isMobileSheetCollapsed ? "gap-1 pb-1.5 pt-2" : "gap-1.5 pb-2 pt-2.5"
-                  )}
-                >
-                  <span className="h-1.5 w-10 rounded-full bg-slate-300" />
-                  {isMobileSheetCollapsed ? (
-                    <div className="flex w-full items-center justify-between">
-                      <p className="text-xs font-semibold text-slate-700">Nearby results</p>
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Show</span>
+                {isExpandedListOpen ? (
+                  <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 hidden max-h-[62vh] sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-[92px] sm:block sm:max-h-none sm:w-[400px]">
+                    <div className="pointer-events-auto h-full overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl sm:p-3">
+                      {renderListPanel("expanded")}
                     </div>
-                  ) : (
-                    <div className="flex w-full items-center justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">Nearby results</p>
-                        <p className="text-xs text-slate-500">{listRestrooms.length} in current map area</p>
-                      </div>
-                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Hide</span>
-                    </div>
-                  )}
-                </button>
-
-                {mobileSheetState !== "collapsed" ? (
-                  <div
-                    className="h-[calc(100%-68px)] overflow-x-hidden overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)+0.65rem)] pt-2"
-                    onTouchStart={handleMobileSheetContentTouchStart}
-                    onTouchMove={handleMobileSheetContentTouchMove}
-                    onTouchEnd={finishMobileSheetContentTouchGesture}
-                    onTouchCancel={finishMobileSheetContentTouchGesture}
-                  >
-                    {renderListPanel("expanded")}
                   </div>
                 ) : null}
-              </div>
-            </div>
-
-            {isExpandedListOpen ? (
-              <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 hidden max-h-[62vh] sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-[92px] sm:block sm:max-h-none sm:w-[400px]">
-                <div className="pointer-events-auto h-full overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl sm:p-3">
-                  {renderListPanel("expanded")}
-                </div>
-              </div>
+              </>
             ) : null}
           </div>
-        </section>
-      ) : null}
+        </div>
+
+        {!isMapExpanded ? <div className="min-w-0">{renderListPanel("default")}</div> : null}
+      </section>
     </>
   );
 }

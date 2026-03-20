@@ -48,6 +48,7 @@ interface RestroomMapProps {
   locationCenterRequestKey?: number;
   locationFollowEnabled?: boolean;
   onLocationFollowChange?: (enabled: boolean) => void;
+  resizeKey?: string | number;
 }
 
 interface RestroomFeatureProperties {
@@ -243,7 +244,8 @@ export function RestroomMap({
   onNavigateToDetail,
   locationCenterRequestKey = 0,
   locationFollowEnabled = false,
-  onLocationFollowChange
+  onLocationFollowChange,
+  resizeKey
 }: RestroomMapProps) {
   const router = useRouter();
   const [isMapReady, setIsMapReady] = useState(false);
@@ -1175,6 +1177,55 @@ export function RestroomMap({
       map.off("moveend", emitBounds);
     };
   }, [isMapReady, onCameraChange, onViewportBoundsChange]);
+
+  useEffect(() => {
+    if (!isMapReady || typeof window === "undefined") {
+      return;
+    }
+
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const resizeMap = () => {
+      if (mapRef.current !== map) {
+        return;
+      }
+
+      map.resize();
+    };
+
+    const firstFrame = window.requestAnimationFrame(() => {
+      resizeMap();
+      window.requestAnimationFrame(resizeMap);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+    };
+  }, [isMapReady, resizeKey]);
+
+  useEffect(() => {
+    if (!isMapReady || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const map = mapRef.current;
+    const container = mapContainerRef.current;
+    if (!map || !container) {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      map.resize();
+    });
+
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+    };
+  }, [isMapReady]);
 
   return <div ref={mapContainerRef} className="h-full w-full" />;
 }
