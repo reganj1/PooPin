@@ -213,6 +213,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const hasHydratedMapStateRef = useRef(false);
   const lockedScrollYRef = useRef(0);
   const pendingScrollRestoreRef = useRef<number | null>(null);
+  const pendingExpandedMapScrollRestoreRef = useRef<number | null>(null);
+  const hasCapturedExpandScrollRef = useRef(false);
   const mobileSheetRef = useRef<HTMLDivElement | null>(null);
   const mobileSheetAnimationFrameRef = useRef<number | null>(null);
   const mobileSheetPendingOffsetRef = useRef<number | null>(null);
@@ -335,6 +337,11 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const selectedMapRestroomPreviewPhotoUrl = selectedMapRestroomId ? mobilePreviewPhotoByRestroomId[selectedMapRestroomId] ?? null : null;
 
   const handleExpandMap = () => {
+    if (typeof window !== "undefined") {
+      lockedScrollYRef.current = window.scrollY;
+      hasCapturedExpandScrollRef.current = true;
+    }
+
     captureAnalyticsEvent("expand_map_clicked", {
       source: "homepage_map",
       source_surface: "homepage_controls",
@@ -673,7 +680,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         filters,
         userLocation,
         pendingRestore: false,
-        scrollY: window.scrollY,
+        scrollY: pendingExpandedMapScrollRestoreRef.current ?? window.scrollY,
         ...overrides
       };
 
@@ -920,11 +927,13 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     const previousWidth = document.body.style.width;
     const previousHtmlOverflow = document.documentElement.style.overflow;
     const previousOverscrollBehavior = document.body.style.overscrollBehavior;
-    lockedScrollYRef.current = window.scrollY;
+    const scrollYToLock = hasCapturedExpandScrollRef.current ? lockedScrollYRef.current : window.scrollY;
+    lockedScrollYRef.current = scrollYToLock;
+    hasCapturedExpandScrollRef.current = false;
 
     document.body.style.overflow = "hidden";
     document.body.style.position = "fixed";
-    document.body.style.top = `-${lockedScrollYRef.current}px`;
+    document.body.style.top = `-${scrollYToLock}px`;
     document.body.style.width = "100%";
     document.documentElement.style.overflow = "hidden";
     document.body.style.overscrollBehavior = "none";
@@ -936,7 +945,33 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       document.body.style.width = previousWidth;
       document.documentElement.style.overflow = previousHtmlOverflow;
       document.body.style.overscrollBehavior = previousOverscrollBehavior;
-      window.scrollTo(0, lockedScrollYRef.current);
+      pendingExpandedMapScrollRestoreRef.current = lockedScrollYRef.current;
+    };
+  }, [isMapExpanded]);
+
+  useEffect(() => {
+    if (isMapExpanded || typeof window === "undefined") {
+      return;
+    }
+
+    const targetScrollY = pendingExpandedMapScrollRestoreRef.current;
+    if (targetScrollY === null) {
+      return;
+    }
+
+    pendingExpandedMapScrollRestoreRef.current = null;
+    let secondFrameId: number | null = null;
+    const firstFrameId = window.requestAnimationFrame(() => {
+      secondFrameId = window.requestAnimationFrame(() => {
+        window.scrollTo({ top: targetScrollY, left: 0, behavior: "auto" });
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(firstFrameId);
+      if (secondFrameId !== null) {
+        window.cancelAnimationFrame(secondFrameId);
+      }
     };
   }, [isMapExpanded]);
 
