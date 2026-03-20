@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -67,6 +67,19 @@ export function PhotoUploadForm({ bathroomId }: PhotoUploadFormProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const hasTrackedUploadStartedRef = useRef(false);
+
+  const trackPhotoUploadStarted = () => {
+    if (hasTrackedUploadStartedRef.current) {
+      return;
+    }
+
+    hasTrackedUploadStartedRef.current = true;
+    captureAnalyticsEvent("photo_upload_started", {
+      bathroom_id: bathroomId,
+      source_surface: "photo_upload_form"
+    });
+  };
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     setSubmitError(null);
@@ -145,7 +158,8 @@ export function PhotoUploadForm({ bathroomId }: PhotoUploadFormProps) {
 
       captureAnalyticsEvent("photo_uploaded", {
         bathroom_id: bathroomId,
-        moderation_state: "pending"
+        moderation_state: "pending",
+        source_surface: "photo_upload_form"
       });
 
       incrementSessionUploadCount(bathroomId);
@@ -164,7 +178,10 @@ export function PhotoUploadForm({ bathroomId }: PhotoUploadFormProps) {
       {!isOpen ? (
         <button
           type="button"
-          onClick={() => setIsOpen(true)}
+          onClick={() => {
+            trackPhotoUploadStarted();
+            setIsOpen(true);
+          }}
           className="inline-flex w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 sm:w-auto"
         >
           Upload photo
@@ -201,6 +218,7 @@ export function PhotoUploadForm({ bathroomId }: PhotoUploadFormProps) {
                 setSubmitError(null);
                 setSubmitSuccess(null);
                 setSelectedFile(null);
+                hasTrackedUploadStartedRef.current = false;
               }}
               className="inline-flex items-center rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
             >

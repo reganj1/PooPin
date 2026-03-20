@@ -4,6 +4,7 @@ import { KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import { NearbyBathroom } from "@/types";
 import { TrackedNavigateLink } from "@/components/analytics/TrackedNavigateLink";
+import type { AnalyticsViewportMode } from "@/lib/analytics/posthog";
 import { cn } from "@/lib/utils/cn";
 import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
 import { getRestroomCardSubtitle, getRestroomDisplayName } from "@/lib/utils/restroomPresentation";
@@ -13,6 +14,7 @@ interface MobileRestroomPreviewCardProps {
   restroom: NearbyBathroom;
   showDistance?: boolean;
   photoUrl?: string | null;
+  viewportMode?: AnalyticsViewportMode;
   onNavigateToDetail?: (restroomId: string) => void;
 }
 
@@ -56,6 +58,7 @@ export function MobileRestroomPreviewCard({
   restroom,
   showDistance = false,
   photoUrl = null,
+  viewportMode = "homepage",
   onNavigateToDetail
 }: MobileRestroomPreviewCardProps) {
   const router = useRouter();
@@ -134,7 +137,12 @@ export function MobileRestroomPreviewCard({
         <TrackedNavigateLink
           href={navigateHref}
           bathroomId={restroom.id}
-          source="map_popup"
+          source="mobile_preview"
+          sourceSurface="mobile_preview"
+          viewportMode={viewportMode}
+          hasUserLocation={showDistance}
+          city={restroom.city}
+          accessType={restroom.access_type}
           className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
         >
           <NavigateIcon className="h-3.5 w-3.5" />

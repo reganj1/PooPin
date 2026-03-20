@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { insertReport, toReportSubmissionErrorMessage } from "@/lib/supabase/reports";
 import {
@@ -50,7 +51,16 @@ export function ReportIssueForm({ bathroomId }: ReportIssueFormProps) {
       <button
         type="button"
         onClick={() => {
-          setIsOpen((current) => !current);
+          setIsOpen((current) => {
+            const nextValue = !current;
+            if (nextValue) {
+              captureAnalyticsEvent("report_listing_clicked", {
+                bathroom_id: bathroomId,
+                source_surface: "report_issue_form"
+              });
+            }
+            return nextValue;
+          });
           setErrorMessage(null);
           setSuccessMessage(null);
         }}

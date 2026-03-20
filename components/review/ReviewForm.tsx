@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -50,6 +50,7 @@ export function ReviewForm({ bathroomId }: ReviewFormProps) {
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [showNoteField, setShowNoteField] = useState(false);
   const [quickTagHint, setQuickTagHint] = useState<string | null>(null);
+  const hasTrackedReviewStartedRef = useRef(false);
 
   useEffect(() => {
     setSupabaseClient(getSupabaseBrowserClient());
@@ -68,12 +69,25 @@ export function ReviewForm({ bathroomId }: ReviewFormProps) {
     defaultValues
   });
 
+  const trackReviewStarted = () => {
+    if (hasTrackedReviewStartedRef.current) {
+      return;
+    }
+
+    hasTrackedReviewStartedRef.current = true;
+    captureAnalyticsEvent("review_started", {
+      bathroom_id: bathroomId,
+      source_surface: "review_form"
+    });
+  };
+
   const overallRating = watch("overall_rating");
   const selectedQuickTags = watch("quick_tags");
   const reviewText = watch("review_text");
   const canPickQuickTags = overallRating >= 1;
 
   const toggleQuickTag = (tag: ReviewFormInput["quick_tags"][number]) => {
+    trackReviewStarted();
     const hasTag = selectedQuickTags.includes(tag);
     if (hasTag) {
       setValue(
@@ -124,7 +138,8 @@ export function ReviewForm({ bathroomId }: ReviewFormProps) {
       captureAnalyticsEvent("review_submitted", {
         bathroom_id: bathroomId,
         overall_rating: values.overall_rating,
-        quick_tag_count: values.quick_tags.length
+        quick_tag_count: values.quick_tags.length,
+        source_surface: "review_form"
       });
 
       setSubmitSuccess(true);
@@ -173,7 +188,10 @@ export function ReviewForm({ bathroomId }: ReviewFormProps) {
               <button
                 key={ratingValue}
                 type="button"
-                onClick={() => setValue("overall_rating", ratingValue, { shouldDirty: true, shouldValidate: true })}
+                onClick={() => {
+                  trackReviewStarted();
+                  setValue("overall_rating", ratingValue, { shouldDirty: true, shouldValidate: true });
+                }}
                 className="rounded-md p-1 transition hover:scale-[1.03]"
                 aria-label={`Rate ${ratingValue} out of 5`}
               >

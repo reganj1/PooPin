@@ -132,6 +132,7 @@ export function AddRestroomForm() {
   const reverseGeocodeAbortRef = useRef<AbortController | null>(null);
   const forwardGeocodeAbortRef = useRef<AbortController | null>(null);
   const lastResolvedCoordinateKeyRef = useRef<string>("");
+  const hasTrackedAddRestroomStartedRef = useRef(false);
 
   const {
     register,
@@ -146,6 +147,17 @@ export function AddRestroomForm() {
   });
 
   const getFieldError = (field: keyof BathroomCreateInput) => errors[field]?.message ?? serverFieldErrors[field];
+
+  const trackAddRestroomStarted = useCallback(() => {
+    if (hasTrackedAddRestroomStartedRef.current) {
+      return;
+    }
+
+    hasTrackedAddRestroomStartedRef.current = true;
+    captureAnalyticsEvent("add_restroom_started", {
+      source_surface: "add_restroom_form"
+    });
+  }, []);
 
   const resolveAddressFromCoordinates = useCallback(
     async (coordinates: { lat: number; lng: number }) => {
@@ -225,12 +237,18 @@ export function AddRestroomForm() {
 
   const handleCoordinatesChange = useCallback(
     (coordinates: { lat: number; lng: number }) => {
+      trackAddRestroomStarted();
       applySelectedCoordinates(coordinates);
     },
-    [applySelectedCoordinates]
+    [applySelectedCoordinates, trackAddRestroomStarted]
   );
 
   const handleUseMyLocation = () => {
+    trackAddRestroomStarted();
+    captureAnalyticsEvent("locate_clicked", {
+      source_surface: "add_restroom_form",
+      status: "requested"
+    });
     setSubmitError(null);
 
     if (typeof navigator === "undefined" || !navigator.geolocation) {
@@ -248,7 +266,18 @@ export function AddRestroomForm() {
         });
         setIsLocating(false);
       },
-      () => {
+      (error) => {
+        // GeolocationPositionError code values: 1 denied, 2 unavailable, 3 timeout.
+        if (error?.code === 1) {
+          captureAnalyticsEvent("location_permission_denied", {
+            source_surface: "add_restroom_form",
+            geolocation_error_code: error.code
+          });
+        } else if (error?.code === 3) {
+          captureAnalyticsEvent("geolocation_timeout", {
+            source_surface: "add_restroom_form"
+          });
+        }
         setSubmitError("Could not get your location. You can still drop a pin on the map or enter an address.");
         setIsLocating(false);
       },
@@ -261,9 +290,16 @@ export function AddRestroomForm() {
   };
 
   const handleAddressLookup = useCallback(async () => {
+    trackAddRestroomStarted();
     const address = getValues("address").trim();
     const city = getValues("city").trim();
     const state = getValues("state").trim();
+    captureAnalyticsEvent("add_restroom_find_on_map_clicked", {
+      source_surface: "add_restroom_form",
+      has_address: address.length > 0,
+      has_city: city.length > 0,
+      has_state: state.length > 0
+    });
     if (!address && !city && !state) {
       setAddressAssistMessage("Enter an address first, then use Find on map.");
       return;
@@ -330,7 +366,7 @@ export function AddRestroomForm() {
         setIsResolvingFromAddress(false);
       }
     }
-  }, [applySelectedCoordinates, getValues, setValue]);
+  }, [applySelectedCoordinates, getValues, setValue, trackAddRestroomStarted]);
 
   const handleAddressLookupKeyDown = useCallback(
     (event: KeyboardEvent<HTMLInputElement>) => {
@@ -391,7 +427,10 @@ export function AddRestroomForm() {
       if (payload.bathroomId && payload.status) {
         captureAnalyticsEvent("restroom_submitted", {
           bathroom_id: payload.bathroomId,
-          status: payload.status
+          status: payload.status,
+          source_surface: "add_restroom_form",
+          city: values.city,
+          access_type: values.access_type
         });
       }
 
@@ -459,7 +498,7 @@ export function AddRestroomForm() {
         </div>
       ) : null}
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
+      <form onSubmit={handleSubmit(onSubmit)} onFocusCapture={trackAddRestroomStarted} className="space-y-6" noValidate>
         <section className="rounded-2xl border border-slate-200 p-4 sm:p-5">
           <div className="mb-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Step 1</p>

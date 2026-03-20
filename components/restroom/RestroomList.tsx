@@ -1,11 +1,15 @@
 import { NearbyBathroom } from "@/types";
 import { RestroomCard } from "@/components/restroom/RestroomCard";
+import type { AnalyticsSortMode, AnalyticsViewportMode } from "@/lib/analytics/posthog";
 import { cn } from "@/lib/utils/cn";
 
 interface RestroomListProps {
   restrooms: NearbyBathroom[];
   helperText?: string;
   showDistance?: boolean;
+  viewportMode?: AnalyticsViewportMode;
+  sortMode?: AnalyticsSortMode;
+  hasUserLocation?: boolean;
   highlightedRestroomId?: string | null;
   onRestroomHoverChange?: (restroomId: string | null) => void;
   onNavigateToDetail?: (restroomId: string) => void;
@@ -18,6 +22,9 @@ export function RestroomList({
   restrooms,
   helperText = "Showing nearby restrooms for the current map context.",
   showDistance = false,
+  viewportMode = "homepage",
+  sortMode = "recommended",
+  hasUserLocation = false,
   highlightedRestroomId = null,
   onRestroomHoverChange,
   onNavigateToDetail,
@@ -54,6 +61,9 @@ export function RestroomList({
               key={restroom.id}
               restroom={restroom}
               showDistance={showDistance}
+              viewportMode={viewportMode}
+              sortMode={sortMode}
+              hasUserLocation={hasUserLocation}
               isHighlighted={highlightedRestroomId === restroom.id}
               onHoverChange={(isHovering) => onRestroomHoverChange?.(isHovering ? restroom.id : null)}
               onNavigateToDetail={onNavigateToDetail}

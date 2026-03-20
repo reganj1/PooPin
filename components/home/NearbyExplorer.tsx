@@ -336,7 +336,11 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
   const handleExpandMap = () => {
     captureAnalyticsEvent("expand_map_clicked", {
-      source: "homepage_map"
+      source: "homepage_map",
+      source_surface: "homepage_controls",
+      viewport_mode: "homepage",
+      has_user_location: hasRealUserLocation,
+      sort_mode: sortMode
     });
     setIsExpandedListOpen(true);
     setMobileSheetState("default");
@@ -1004,9 +1008,24 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, [stopLocationWatch]);
 
   const handleUseMyLocation = () => {
+    const sourceSurface = isMapExpanded ? "expanded_map_controls" : "homepage_controls";
+    const viewportMode = isMapExpanded ? "expanded_map" : "homepage";
+    captureAnalyticsEvent("locate_clicked", {
+      source_surface: sourceSurface,
+      viewport_mode: viewportMode,
+      has_user_location: hasRealUserLocation,
+      sort_mode: sortMode,
+      status: isLocationTrackingEnabled ? "recenter_requested" : "requested"
+    });
+
     setGeoError(null);
 
     if (typeof window !== "undefined" && !window.isSecureContext && !isLocalhostHost(window.location.hostname)) {
+      captureAnalyticsEvent("location_permission_denied", {
+        source_surface: sourceSurface,
+        viewport_mode: viewportMode,
+        geolocation_error_code: 0
+      });
       setGeoError("Location needs HTTPS on mobile. Open Poopin over HTTPS (or localhost) to use Locate.");
       setIsLocating(false);
       stopLocationWatch();
@@ -1016,6 +1035,11 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     if (typeof navigator === "undefined" || !navigator.geolocation) {
+      captureAnalyticsEvent("location_permission_denied", {
+        source_surface: sourceSurface,
+        viewport_mode: viewportMode,
+        geolocation_error_code: 0
+      });
       setGeoError("Geolocation is not available in this browser. Showing default city-center results.");
       setUserLocation(null);
       setIsLocationTrackingEnabled(false);
@@ -1044,6 +1068,19 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         (error) => {
           setGeoError(toGeoErrorMessage(error));
           setIsLocating(false);
+
+          if (error.code === error.PERMISSION_DENIED) {
+            captureAnalyticsEvent("location_permission_denied", {
+              source_surface: sourceSurface,
+              viewport_mode: viewportMode,
+              geolocation_error_code: error.code
+            });
+          } else if (error.code === error.TIMEOUT) {
+            captureAnalyticsEvent("geolocation_timeout", {
+              source_surface: sourceSurface,
+              viewport_mode: viewportMode
+            });
+          }
 
           if (error.code === error.PERMISSION_DENIED) {
             stopLocationWatch();
@@ -1160,6 +1197,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
             restroom={selectedMapRestroom}
             showDistance={hasRealUserLocation}
             photoUrl={selectedMapRestroomPreviewPhotoUrl}
+            viewportMode={isExpandedVariant ? "expanded_map" : "homepage"}
             onNavigateToDetail={handleNavigateToDetail}
           />
         </div>
@@ -1169,6 +1207,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
   const renderListPanel = (variant: "default" | "expanded") => {
     const isExpandedVariant = variant === "expanded";
+    const viewportMode = isExpandedVariant ? "expanded_map" : "homepage";
 
     return (
       <div className={cn("min-w-0 space-y-3", isExpandedVariant && "h-full space-y-2")}>
@@ -1269,6 +1308,9 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           restrooms={listRestrooms}
           helperText={listHelperText}
           showDistance={hasRealUserLocation}
+          viewportMode={viewportMode}
+          sortMode={sortMode}
+          hasUserLocation={hasRealUserLocation}
           highlightedRestroomId={highlightedListRestroomId}
           onRestroomHoverChange={setListHoveredRestroomId}
           onNavigateToDetail={handleNavigateToDetail}
@@ -1348,6 +1390,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 restrooms={mapDisplayRestrooms}
                 userLocation={userLocation}
                 showDistance={hasRealUserLocation}
+                hasUserLocation={hasRealUserLocation}
+                analyticsSortMode={sortMode}
                 hoveredRestroomId={listHoveredRestroomId}
                 focusedRestroomId={mapFocusedRestroomId}
                 onFocusedRestroomIdChange={handleMapFocusedRestroomIdChange}
@@ -1358,6 +1402,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 locationCenterRequestKey={locationCenterRequestKey}
                 locationFollowEnabled={isFollowingUserLocation}
                 onLocationFollowChange={setIsFollowingUserLocation}
+                analyticsViewportMode="homepage"
                 onExpandMap={handleExpandMap}
               />
             ) : (
@@ -1378,6 +1423,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 restrooms={mapDisplayRestrooms}
                 userLocation={userLocation}
                 showDistance={hasRealUserLocation}
+                hasUserLocation={hasRealUserLocation}
+                analyticsSortMode={sortMode}
                 hoveredRestroomId={listHoveredRestroomId}
                 focusedRestroomId={mapFocusedRestroomId}
                 onFocusedRestroomIdChange={handleMapFocusedRestroomIdChange}
@@ -1388,6 +1435,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 locationCenterRequestKey={locationCenterRequestKey}
                 locationFollowEnabled={isFollowingUserLocation}
                 onLocationFollowChange={setIsFollowingUserLocation}
+                analyticsViewportMode="expanded_map"
                 className="h-full rounded-none border-0 shadow-none"
                 mapClassName="h-full min-h-0"
                 showHeader={false}

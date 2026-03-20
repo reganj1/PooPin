@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import type mapboxgl from "mapbox-gl";
 import type { FeatureCollection, Point } from "geojson";
 import { NearbyBathroom } from "@/types";
+import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
+import type { AnalyticsSortMode, AnalyticsViewportMode } from "@/lib/analytics/posthog";
 import {
   fetchRestroomPreviewPhoto,
   getCachedRestroomPreviewPhoto,
@@ -26,6 +28,9 @@ interface RestroomMapProps {
     zoom: number;
   } | null;
   showDistance?: boolean;
+  hasUserLocation?: boolean;
+  analyticsSortMode?: AnalyticsSortMode;
+  analyticsViewportMode?: AnalyticsViewportMode;
   hoveredRestroomId?: string | null;
   focusedRestroomId?: string | null;
   onFocusedRestroomIdChange?: (restroomId: string | null) => void;
@@ -229,6 +234,9 @@ export function RestroomMap({
   userLocation = null,
   initialCamera = null,
   showDistance = false,
+  hasUserLocation = false,
+  analyticsSortMode = "recommended",
+  analyticsViewportMode = "homepage",
   hoveredRestroomId = null,
   focusedRestroomId = null,
   onFocusedRestroomIdChange,
@@ -582,6 +590,17 @@ export function RestroomMap({
       if (!popup.isOpen()) {
         popup.addTo(map);
       }
+      if (desktopPopupRestroomIdRef.current !== restroomId) {
+        captureAnalyticsEvent("restroom_popup_opened", {
+          bathroom_id: restroomId,
+          source_surface: "desktop_hover_popup",
+          viewport_mode: analyticsViewportMode,
+          has_user_location: hasUserLocation,
+          sort_mode: analyticsSortMode,
+          city: restroom.city,
+          access_type: restroom.access_type
+        });
+      }
       desktopPopupRestroomIdRef.current = restroomId;
 
       if (hasPreviewPhoto) {
@@ -809,9 +828,31 @@ export function RestroomMap({
           return;
         }
 
+        const restroom = restroomById.get(id);
+        captureAnalyticsEvent("restroom_marker_clicked", {
+          bathroom_id: id,
+          source_surface: "map_marker",
+          viewport_mode: analyticsViewportMode,
+          has_user_location: hasUserLocation,
+          sort_mode: analyticsSortMode,
+          city: restroom?.city,
+          access_type: restroom?.access_type
+        });
+
         onFocusedRestroomIdChange?.(id);
         mapHoveredRestroomIdRef.current = null;
         if (isCoarsePointerRef.current) {
+          if (activePopupRestroomIdRef.current !== id) {
+            captureAnalyticsEvent("restroom_popup_opened", {
+              bathroom_id: id,
+              source_surface: "mobile_preview",
+              viewport_mode: analyticsViewportMode,
+              has_user_location: hasUserLocation,
+              sort_mode: analyticsSortMode,
+              city: restroom?.city,
+              access_type: restroom?.access_type
+            });
+          }
           popupRef.current?.remove();
           popupRef.current = null;
           activePopupRestroomIdRef.current = id;
@@ -950,7 +991,10 @@ export function RestroomMap({
     setHoveredFeatureState(resolveHoveredRestroomId());
     syncDesktopHoverPopup();
   }, [
+    analyticsSortMode,
+    analyticsViewportMode,
     focusedRestroomId,
+    hasUserLocation,
     hoveredRestroomId,
     isMapReady,
     markerData,
