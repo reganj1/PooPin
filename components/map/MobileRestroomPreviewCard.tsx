@@ -25,10 +25,10 @@ const toDistanceLabel = (value: number) => {
   }
 
   if (value < 0.1) {
-    return "<0.1 mi straight-line";
+    return "Very close";
   }
 
-  return `${value.toFixed(1)} mi straight-line`;
+  return `~${value.toFixed(1)} mi away`;
 };
 
 function NavigateIcon({ className }: { className?: string }) {

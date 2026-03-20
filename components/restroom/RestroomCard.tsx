@@ -17,6 +17,7 @@ interface RestroomCardProps {
   viewportMode?: AnalyticsViewportMode;
   hasUserLocation?: boolean;
   onHoverChange?: (isHovering: boolean) => void;
+  onTouchSelect?: (restroomId: string) => void;
   onNavigateToDetail?: (restroomId: string) => void;
 }
 
@@ -28,10 +29,10 @@ const toDistanceLabel = (value: number) => {
   }
 
   if (value < 0.1) {
-    return "<0.1 mi straight-line";
+    return "Very close";
   }
 
-  return `${value.toFixed(1)} mi straight-line`;
+  return `~${value.toFixed(1)} mi away`;
 };
 
 function NavigateIcon({ className }: { className?: string }) {
@@ -64,6 +65,7 @@ export function RestroomCard({
   viewportMode = "homepage",
   hasUserLocation = false,
   onHoverChange,
+  onTouchSelect,
   onNavigateToDetail
 }: RestroomCardProps) {
   const detailHref = `/restroom/${restroom.id}`;
@@ -89,6 +91,7 @@ export function RestroomCard({
       onMouseLeave={() => onHoverChange?.(false)}
       onFocusCapture={() => onHoverChange?.(true)}
       onBlurCapture={handleBlurCapture}
+      onTouchStart={() => onTouchSelect?.(restroom.id)}
       className={cn(
         "group rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition duration-150 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md sm:p-5",
         isHighlighted && "border-brand-300 shadow-md ring-2 ring-brand-100"

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
 import type { AnalyticsViewportMode, NavigateClickSource } from "@/lib/analytics/posthog";
 
@@ -13,6 +13,7 @@ interface TrackedNavigateLinkProps {
   sourceSurface?: "restroom_card" | "restroom_detail" | "map_popup" | "mobile_preview" | "desktop_hover_popup";
   viewportMode?: AnalyticsViewportMode;
   hasUserLocation?: boolean;
+  onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
 }
 
 export function TrackedNavigateLink({
@@ -23,9 +24,10 @@ export function TrackedNavigateLink({
   children,
   sourceSurface,
   viewportMode,
-  hasUserLocation
+  hasUserLocation,
+  onClick
 }: TrackedNavigateLinkProps) {
-  const handleClick = () => {
+  const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
     captureAnalyticsEvent("navigate_clicked", {
       bathroom_id: bathroomId,
       source,
@@ -33,6 +35,7 @@ export function TrackedNavigateLink({
       viewport_mode: viewportMode,
       has_user_location: hasUserLocation
     });
+    onClick?.(event);
   };
 
   return (

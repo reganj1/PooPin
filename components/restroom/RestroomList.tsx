@@ -5,12 +5,14 @@ import { cn } from "@/lib/utils/cn";
 
 interface RestroomListProps {
   restrooms: NearbyBathroom[];
+  title?: string;
   helperText?: string;
   showDistance?: boolean;
   viewportMode?: AnalyticsViewportMode;
   hasUserLocation?: boolean;
   highlightedRestroomId?: string | null;
   onRestroomHoverChange?: (restroomId: string | null) => void;
+  onRestroomTouchSelect?: (restroomId: string) => void;
   onNavigateToDetail?: (restroomId: string) => void;
   compact?: boolean;
   className?: string;
@@ -19,12 +21,14 @@ interface RestroomListProps {
 
 export function RestroomList({
   restrooms,
+  title = "Nearby restrooms",
   helperText = "Showing nearby restrooms for the current map context.",
   showDistance = false,
   viewportMode = "homepage",
   hasUserLocation = false,
   highlightedRestroomId = null,
   onRestroomHoverChange,
+  onRestroomTouchSelect,
   onNavigateToDetail,
   compact = false,
   className,
@@ -40,7 +44,7 @@ export function RestroomList({
     >
       <div className={cn("mb-4 flex items-start justify-between gap-3 border-b border-slate-100 pb-3", compact && "mb-2 pb-2")}>
         <div className="min-w-0">
-          <h2 className={cn("text-lg font-semibold text-slate-900", compact && "text-sm")}>Nearby Restrooms</h2>
+          <h2 className={cn("text-lg font-semibold text-slate-900", compact && "text-sm")}>{title}</h2>
           <p className={cn("mt-1 text-sm leading-5 text-slate-500", compact && "mt-0.5 text-xs leading-4")}>{helperText}</p>
         </div>
         <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
@@ -63,6 +67,7 @@ export function RestroomList({
               hasUserLocation={hasUserLocation}
               isHighlighted={highlightedRestroomId === restroom.id}
               onHoverChange={(isHovering) => onRestroomHoverChange?.(isHovering ? restroom.id : null)}
+              onTouchSelect={onRestroomTouchSelect}
               onNavigateToDetail={onNavigateToDetail}
             />
           ))}

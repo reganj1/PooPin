@@ -1,10 +1,27 @@
 "use client";
 
-import { type TouchEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  type FocusEvent as ReactFocusEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type TouchEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
+import { TrackedNavigateLink } from "@/components/analytics/TrackedNavigateLink";
 import { MapPanel } from "@/components/map/MapPanel";
 import { MobileRestroomPreviewCard } from "@/components/map/MobileRestroomPreviewCard";
 import { RestroomList } from "@/components/restroom/RestroomList";
 import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
+import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
+import { getRecentRestrooms, type RecentRestroomSnapshot, storeRecentRestroom } from "@/lib/utils/recentRestrooms";
+import { getRestroomCardSubtitle, getRestroomDisplayName, getRestroomSourceLabel } from "@/lib/utils/restroomPresentation";
+import { getReviewQuickTagDescriptor, reviewQuickTagToneClassName } from "@/lib/utils/reviewSignals";
 import { cn } from "@/lib/utils/cn";
 import {
   fetchRestroomPreviewPhoto,
@@ -137,6 +154,36 @@ const MOBILE_SHEET_DEFAULT_VISIBLE_RATIO = 0.5;
 const MOBILE_SHEET_EXPANDED_VISIBLE_RATIO = 0.84;
 const MOBILE_SHEET_MAX_HEIGHT_RATIO = 0.86;
 const MOBILE_SHEET_SWIPE_VELOCITY_THRESHOLD = 0.55;
+const accessTypeDisplayLabel: Record<NearbyBathroom["access_type"], string> = {
+  public: "Public",
+  customer_only: "Customer only",
+  code_required: "Code required",
+  staff_assisted: "Staff assisted"
+};
+const topPickAccessScore: Record<NearbyBathroom["access_type"], number> = {
+  public: 12,
+  customer_only: 6,
+  code_required: 4,
+  staff_assisted: 3
+};
+const topPickSignalScore: Record<string, number> = {
+  clean: 1.5,
+  no_line: 1.25,
+  smelly: -1.5,
+  crowded: -1,
+  no_toilet_paper: -1.75,
+  locked: -2
+};
+const RECOMMENDATION_NEARBY_RADIUS_MILES = 2.5;
+const RECOMMENDATION_EXTENDED_RADIUS_MILES = 6;
+const RECOMMENDATION_FALLBACK_RADIUS_MILES = 12;
+
+interface RecommendationResult {
+  restroom: NearbyBathroom;
+  label: string;
+  description: string;
+  isFallback: boolean;
+}
 
 interface MobileSheetMetrics {
   height: number;
@@ -183,7 +230,37 @@ const getMobileSheetMetrics = (viewportHeight: number): MobileSheetMetrics => {
   };
 };
 
+const toApproximateDistanceLabel = (value: number) => {
+  if (!Number.isFinite(value) || value < 0) {
+    return "";
+  }
+
+  if (value < 0.1) {
+    return "Very close";
+  }
+
+  return `~${value.toFixed(1)} mi away`;
+};
+
+const getTopPickScore = (restroom: NearbyBathroom) => {
+  const signalScore = restroom.ratings.qualitySignals.slice(0, 2).reduce((total, signal) => total + (topPickSignalScore[signal] ?? 0), 0);
+  const reviewCountBonus = Math.min(restroom.ratings.reviewCount, 5) * 0.35;
+
+  return (
+    100 -
+    restroom.distanceMiles * 28 +
+    topPickAccessScore[restroom.access_type] +
+    signalScore +
+    reviewCountBonus +
+    (restroom.is_accessible ? 2 : 0) +
+    (restroom.has_baby_station ? 0.75 : 0) +
+    (!restroom.requires_purchase ? 1.5 : -2.5) +
+    (restroom.ratings.reviewCount > 0 ? restroom.ratings.overall * 1.8 : 0)
+  );
+};
+
 export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
+  const router = useRouter();
   const [userLocation, setUserLocation] = useState<Coordinate | null>(null);
   const [geoError, setGeoError] = useState<string | null>(null);
   const [isLocating, setIsLocating] = useState(false);
@@ -197,6 +274,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [mapCamera, setMapCamera] = useState<MapCamera | null>(null);
   const [locationCenterRequestKey, setLocationCenterRequestKey] = useState(0);
   const [sortMode, setSortMode] = useState<SortMode>("recommended");
+  const [recentlyViewedRestrooms, setRecentlyViewedRestrooms] = useState<RecentRestroomSnapshot[]>([]);
   const [filters, setFilters] = useState<FilterState>({
     publicOnly: false,
     accessible: false,
@@ -216,6 +294,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const pendingExpandedMapScrollRestoreRef = useRef<number | null>(null);
   const hasCapturedExpandScrollRef = useRef(false);
   const mobileSheetRef = useRef<HTMLDivElement | null>(null);
+  const primaryLocationActionRef = useRef<HTMLDivElement | null>(null);
   const mobileSheetAnimationFrameRef = useRef<number | null>(null);
   const mobileSheetPendingOffsetRef = useRef<number | null>(null);
   const mobileSheetCurrentOffsetRef = useRef(0);
@@ -233,6 +312,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const distanceOrigin = userLocation;
   const [mobilePreviewPhotoByRestroomId, setMobilePreviewPhotoByRestroomId] = useState<Record<string, string | null>>({});
   const [isMobilePreviewLayout, setIsMobilePreviewLayout] = useState(false);
+  const [isPrimaryLocationActionVisible, setIsPrimaryLocationActionVisible] = useState(true);
   const mapRenderableRestrooms = useMemo(
     () => mapRestrooms.filter((restroom) => isValidMapCoordinate(restroom.lat, restroom.lng)),
     [mapRestrooms]
@@ -281,19 +361,25 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, [distanceOrigin, mapRenderableRestrooms]);
   const mapDisplayRestrooms = listBaseRestrooms;
 
+  const filteredRestrooms = useMemo(
+    () =>
+      listBaseRestrooms.filter((restroom) => {
+        if (filters.publicOnly && restroom.access_type !== "public") {
+          return false;
+        }
+        if (filters.accessible && !restroom.is_accessible) {
+          return false;
+        }
+        if (filters.babyStation && !restroom.has_baby_station) {
+          return false;
+        }
+        return true;
+      }),
+    [filters, listBaseRestrooms]
+  );
+
   const listRestrooms = useMemo(() => {
-    const filtered = listBaseRestrooms.filter((restroom) => {
-      if (filters.publicOnly && restroom.access_type !== "public") {
-        return false;
-      }
-      if (filters.accessible && !restroom.is_accessible) {
-        return false;
-      }
-      if (filters.babyStation && !restroom.has_baby_station) {
-        return false;
-      }
-      return true;
-    });
+    const filtered = filteredRestrooms;
 
     if (sortMode === "closest" && hasRealUserLocation) {
       return [...filtered].sort((a, b) => a.distanceMiles - b.distanceMiles).slice(0, LIST_LIMIT);
@@ -314,7 +400,95 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     return filtered.slice(0, LIST_LIMIT);
-  }, [filters, hasRealUserLocation, listBaseRestrooms, sortMode]);
+  }, [filteredRestrooms, hasRealUserLocation, sortMode]);
+
+  const recommendation = useMemo<RecommendationResult | null>(() => {
+    if (!hasRealUserLocation || filteredRestrooms.length === 0) {
+      return null;
+    }
+
+    const distanceSortedRestrooms = [...filteredRestrooms].sort((a, b) => a.distanceMiles - b.distanceMiles);
+    const nearbyCandidates = distanceSortedRestrooms.filter((restroom) => restroom.distanceMiles <= RECOMMENDATION_NEARBY_RADIUS_MILES);
+    const extendedCandidates = distanceSortedRestrooms.filter((restroom) => restroom.distanceMiles <= RECOMMENDATION_EXTENDED_RADIUS_MILES);
+    const fallbackCandidates = distanceSortedRestrooms.filter((restroom) => restroom.distanceMiles <= RECOMMENDATION_FALLBACK_RADIUS_MILES);
+    const farAwayCandidates = distanceSortedRestrooms.slice(0, 8);
+
+    const scopedCandidates =
+      nearbyCandidates.length > 0
+        ? nearbyCandidates.slice(0, 8)
+        : extendedCandidates.length > 0
+          ? extendedCandidates.slice(0, 10)
+          : fallbackCandidates.length > 0
+            ? fallbackCandidates.slice(0, 10)
+            : farAwayCandidates;
+
+    if (scopedCandidates.length === 0) {
+      return null;
+    }
+
+    const restroom = [...scopedCandidates].sort((a, b) => getTopPickScore(b) - getTopPickScore(a))[0] ?? null;
+    if (!restroom) {
+      return null;
+    }
+
+    if (nearbyCandidates.length > 0) {
+      const hasSupportiveQualitySignal = restroom.ratings.reviewCount >= 3 && restroom.ratings.overall >= 4;
+      return {
+        restroom,
+        label: hasSupportiveQualitySignal ? "Good nearby option" : "Closest nearby option",
+        description: hasSupportiveQualitySignal
+          ? "Close to you with solid early quality signals."
+          : "A close option with straightforward access details.",
+        isFallback: false
+      };
+    }
+
+    if (extendedCandidates.length > 0) {
+      return {
+        restroom,
+        label: "Closest nearby option",
+        description: "A practical nearby option a bit farther out.",
+        isFallback: false
+      };
+    }
+
+    return {
+      restroom,
+      label: fallbackCandidates.length > 0 ? "Closest option in this map area" : "Option in this map area",
+      description:
+        fallbackCandidates.length > 0
+          ? "The closest reasonable option in the area you are browsing."
+          : "You are browsing farther from your current location, so this is the closest visible option.",
+      isFallback: true
+    };
+  }, [filteredRestrooms, hasRealUserLocation]);
+
+  const topPickRestroom = recommendation?.restroom ?? null;
+  const mapVisibleRestroomIds = useMemo(() => new Set(mapDisplayRestrooms.map((restroom) => restroom.id)), [mapDisplayRestrooms]);
+
+  const restroomLookup = useMemo(() => {
+    const lookup = new Map<string, NearbyBathroom>();
+    for (const restroom of [...initialRestrooms, ...mapRestrooms, ...listBaseRestrooms, ...listRestrooms]) {
+      lookup.set(restroom.id, restroom);
+    }
+    return lookup;
+  }, [initialRestrooms, listBaseRestrooms, listRestrooms, mapRestrooms]);
+
+  const recentRestroomsForDisplay = useMemo(() => {
+    const seenRestroomIds = new Set<string>();
+    const restroomsForDisplay: RecentRestroomSnapshot[] = [];
+
+    for (const restroom of recentlyViewedRestrooms) {
+      if (restroom.id === topPickRestroom?.id || seenRestroomIds.has(restroom.id)) {
+        continue;
+      }
+
+      seenRestroomIds.add(restroom.id);
+      restroomsForDisplay.push(restroom);
+    }
+
+    return restroomsForDisplay;
+  }, [recentlyViewedRestrooms, topPickRestroom?.id]);
 
   const listHelperText = useMemo(() => {
     if (!hasRealUserLocation) {
@@ -329,6 +503,44 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, [hasRealUserLocation, sortMode]);
 
   const highlightedListRestroomId = listHoveredRestroomId ?? mapFocusedRestroomId;
+  const isRailRestroomHighlighted = useCallback(
+    (restroomId: string) => mapVisibleRestroomIds.has(restroomId) && highlightedListRestroomId === restroomId,
+    [highlightedListRestroomId, mapVisibleRestroomIds]
+  );
+  const handleRailRestroomHoverChange = useCallback(
+    (restroomId: string, isHovering: boolean) => {
+      if (isHovering) {
+        if (!mapVisibleRestroomIds.has(restroomId)) {
+          return;
+        }
+
+        setListHoveredRestroomId(restroomId);
+        return;
+      }
+
+      setListHoveredRestroomId((current) => (current === restroomId ? null : current));
+    },
+    [mapVisibleRestroomIds]
+  );
+  const handleRailRestroomBlur = useCallback(
+    (restroomId: string, event: ReactFocusEvent<HTMLElement>) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+        handleRailRestroomHoverChange(restroomId, false);
+      }
+    },
+    [handleRailRestroomHoverChange]
+  );
+  const handleRailRestroomTouchSelect = useCallback(
+    (restroomId: string) => {
+      if (!mapVisibleRestroomIds.has(restroomId)) {
+        return;
+      }
+
+      setMapFocusedRestroomId(restroomId);
+      setListHoveredRestroomId(null);
+    },
+    [mapVisibleRestroomIds]
+  );
   const selectedMapRestroom = useMemo(
     () => (mapFocusedRestroomId ? mapDisplayRestrooms.find((restroom) => restroom.id === mapFocusedRestroomId) ?? null : null),
     [mapDisplayRestrooms, mapFocusedRestroomId]
@@ -746,6 +958,35 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, []);
 
   useEffect(() => {
+    setRecentlyViewedRestrooms(getRecentRestrooms());
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof IntersectionObserver === "undefined") {
+      return;
+    }
+
+    const element = primaryLocationActionRef.current;
+    if (!element) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsPrimaryLocationActionVisible(entry?.isIntersecting ?? false);
+      },
+      {
+        threshold: 0.35
+      }
+    );
+
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof window === "undefined" || !hasHydratedMapStateRef.current) {
       return;
     }
@@ -1155,14 +1396,20 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, []);
 
   const handleNavigateToDetail = useCallback(
-    (_restroomId?: string) => {
-      void _restroomId;
+    (restroomId?: string) => {
+      if (restroomId) {
+        const restroom = restroomLookup.get(restroomId);
+        if (restroom) {
+          setRecentlyViewedRestrooms(storeRecentRestroom(restroom));
+        }
+      }
+
       persistHomeMapState({
         pendingRestore: true,
         scrollY: typeof window !== "undefined" ? window.scrollY : 0
       });
     },
-    [persistHomeMapState]
+    [persistHomeMapState, restroomLookup]
   );
 
   const handleMapFocusedRestroomIdChange = useCallback((restroomId: string | null) => {
@@ -1201,184 +1448,444 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     );
   };
 
-  const renderListPanel = (variant: "default" | "expanded") => {
+  const renderTopPickCard = (variant: "mobile" | "desktop") => {
+    if (!recommendation || !topPickRestroom) {
+      return null;
+    }
+
+    const isDesktopVariant = variant === "desktop";
+    const subtitle = getRestroomCardSubtitle(topPickRestroom);
+    const topSignalDescriptor = topPickRestroom.ratings.qualitySignals[0]
+      ? getReviewQuickTagDescriptor(topPickRestroom.ratings.qualitySignals[0])
+      : null;
+    const distanceLabel = toApproximateDistanceLabel(topPickRestroom.distanceMiles);
+    const isHighlighted = isRailRestroomHighlighted(topPickRestroom.id);
+    const openRecommendationDetails = () => {
+      handleNavigateToDetail(topPickRestroom.id);
+      router.push(`/restroom/${topPickRestroom.id}`);
+    };
+    const handleRecommendationCardKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+
+      event.preventDefault();
+      openRecommendationDetails();
+    };
+    const stopRecommendationCardClick = (event: ReactMouseEvent<HTMLElement>) => {
+      event.stopPropagation();
+    };
+
+    return (
+      <article
+        role="link"
+        tabIndex={0}
+        onClick={openRecommendationDetails}
+        onKeyDown={handleRecommendationCardKeyDown}
+        onMouseEnter={() => handleRailRestroomHoverChange(topPickRestroom.id, true)}
+        onMouseLeave={() => handleRailRestroomHoverChange(topPickRestroom.id, false)}
+        onFocusCapture={() => handleRailRestroomHoverChange(topPickRestroom.id, true)}
+        onBlurCapture={(event) => handleRailRestroomBlur(topPickRestroom.id, event)}
+        onTouchStart={() => handleRailRestroomTouchSelect(topPickRestroom.id)}
+        className={cn(
+          "cursor-pointer rounded-2xl border border-brand-200 bg-white p-4 shadow-md ring-1 ring-brand-100/80 transition hover:border-brand-300 hover:shadow-lg",
+          isHighlighted && "border-brand-300 shadow-lg ring-2 ring-brand-100",
+          isDesktopVariant ? "hidden lg:block" : "lg:hidden"
+        )}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-600">{recommendation.label}</p>
+            <h2 className="mt-1 truncate text-lg font-semibold text-slate-900">{getRestroomDisplayName(topPickRestroom)}</h2>
+            <p className="mt-1 text-sm leading-5 text-slate-600">{subtitle}</p>
+            <p className="mt-1 text-xs font-medium text-slate-500">{recommendation.description}</p>
+          </div>
+          {distanceLabel ? (
+            <div className="shrink-0 text-right">
+              <p className="text-lg font-semibold tracking-tight text-slate-900">{distanceLabel.replace(" away", "")}</p>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                {recommendation.isFallback ? "from you" : "away"}
+              </p>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+            {getRestroomSourceLabel(topPickRestroom.source)}
+          </span>
+          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+            {accessTypeDisplayLabel[topPickRestroom.access_type]}
+          </span>
+          {topPickRestroom.is_accessible ? (
+            <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+              Accessible
+            </span>
+          ) : null}
+          {topSignalDescriptor ? (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                reviewQuickTagToneClassName[topSignalDescriptor.tone]
+              )}
+            >
+              {topSignalDescriptor.icon} {topSignalDescriptor.label}
+            </span>
+          ) : null}
+        </div>
+
+        <div className="mt-3 flex items-center gap-2">
+          <TrackedNavigateLink
+            href={getGoogleMapsDirectionsUrl(topPickRestroom.lat, topPickRestroom.lng)}
+            bathroomId={topPickRestroom.id}
+            source="restroom_card"
+            sourceSurface="restroom_card"
+            viewportMode="homepage"
+            hasUserLocation={hasRealUserLocation}
+            onClick={stopRecommendationCardClick}
+            className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
+          >
+            Navigate
+          </TrackedNavigateLink>
+          <Link
+            href={`/restroom/${topPickRestroom.id}`}
+            onClick={(event) => {
+              stopRecommendationCardClick(event);
+              handleNavigateToDetail(topPickRestroom.id);
+            }}
+            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            View
+          </Link>
+        </div>
+      </article>
+    );
+  };
+
+  const renderRecentlyViewedSection = (variant: "mobile" | "desktop") => {
+    if (recentRestroomsForDisplay.length < 2) {
+      return null;
+    }
+
+    const isDesktopVariant = variant === "desktop";
+
+    return (
+      <section
+        className={cn(
+          "rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm",
+          isDesktopVariant ? "hidden lg:block" : "lg:hidden"
+        )}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Recently viewed</h2>
+            <p className="mt-1 text-xs text-slate-500">Jump back into a restroom you already checked.</p>
+          </div>
+        </div>
+
+        {isDesktopVariant ? (
+          <div className="mt-3 space-y-2">
+            {recentRestroomsForDisplay.slice(0, 4).map((restroom) => {
+              const topSignalDescriptor = restroom.ratings.qualitySignals[0]
+                ? getReviewQuickTagDescriptor(restroom.ratings.qualitySignals[0])
+                : null;
+              const isHighlighted = isRailRestroomHighlighted(restroom.id);
+
+              return (
+                <Link
+                  key={restroom.id}
+                  href={`/restroom/${restroom.id}`}
+                  onClick={() => handleNavigateToDetail(restroom.id)}
+                  onMouseEnter={() => handleRailRestroomHoverChange(restroom.id, true)}
+                  onMouseLeave={() => handleRailRestroomHoverChange(restroom.id, false)}
+                  onFocusCapture={() => handleRailRestroomHoverChange(restroom.id, true)}
+                  onBlurCapture={(event) => handleRailRestroomBlur(restroom.id, event)}
+                  onTouchStart={() => handleRailRestroomTouchSelect(restroom.id)}
+                  className={cn(
+                    "block rounded-xl border border-slate-200 px-3 py-2.5 transition hover:border-slate-300 hover:bg-slate-50",
+                    isHighlighted && "border-brand-300 bg-brand-50/40 shadow-md ring-2 ring-brand-100"
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-900">{getRestroomDisplayName(restroom)}</p>
+                      <p className="mt-0.5 truncate text-xs text-slate-500">{getRestroomCardSubtitle(restroom)}</p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                      ⭐ {restroom.ratings.overall > 0 ? restroom.ratings.overall.toFixed(1) : "N/A"}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                      {getRestroomSourceLabel(restroom.source)}
+                    </span>
+                    {topSignalDescriptor ? (
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                          reviewQuickTagToneClassName[topSignalDescriptor.tone]
+                        )}
+                      >
+                        {topSignalDescriptor.icon} {topSignalDescriptor.label}
+                      </span>
+                    ) : null}
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="-mx-1 mt-3 flex snap-x gap-3 overflow-x-auto px-1 pb-1">
+            {recentRestroomsForDisplay.map((restroom) => {
+              const isHighlighted = isRailRestroomHighlighted(restroom.id);
+
+              return (
+                <Link
+                  key={restroom.id}
+                  href={`/restroom/${restroom.id}`}
+                  onClick={() => handleNavigateToDetail(restroom.id)}
+                  onTouchStart={() => handleRailRestroomTouchSelect(restroom.id)}
+                  className={cn(
+                    "min-w-[220px] snap-start rounded-2xl border border-slate-200 bg-slate-50/60 p-3 transition hover:border-slate-300 hover:bg-slate-50",
+                    isHighlighted && "border-brand-300 bg-brand-50/50 shadow-md ring-2 ring-brand-100"
+                  )}
+                >
+                  <p className="truncate text-sm font-semibold text-slate-900">{getRestroomDisplayName(restroom)}</p>
+                  <p className="mt-1 truncate text-xs text-slate-500">{getRestroomCardSubtitle(restroom)}</p>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                      ⭐ {restroom.ratings.overall > 0 ? restroom.ratings.overall.toFixed(1) : "N/A"}
+                    </span>
+                    <span className="text-[11px] font-medium text-slate-500">{getRestroomSourceLabel(restroom.source)}</span>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    );
+  };
+
+  const renderBrowseControls = (variant: "default" | "expanded") => {
+    const isExpandedVariant = variant === "expanded";
+
+    return (
+      <section
+        className={cn(
+          "rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm",
+          isExpandedVariant && "p-2 sm:p-2.5"
+        )}
+      >
+        <div className={cn("mb-3 flex items-end justify-between gap-3", isExpandedVariant && "mb-1.5")}>
+          <div>
+            <h2 className={cn("text-base font-semibold text-slate-900", isExpandedVariant && "text-sm")}>Browse this area</h2>
+            <p className={cn("mt-1 text-xs text-slate-500", isExpandedVariant && "mt-0 text-[11px]")}>
+              Filter and sort what you see on the map.
+            </p>
+          </div>
+        </div>
+
+        <div className={cn("flex flex-col gap-3", isExpandedVariant && "gap-1.5")}>
+          <fieldset>
+            <legend className={cn("mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500", isExpandedVariant && "mb-1 text-[11px]")}>
+              Filters
+            </legend>
+            <div className={cn("flex flex-wrap gap-2", isExpandedVariant && "gap-1.5")}>
+              <button
+                type="button"
+                onClick={() => toggleFilter("publicOnly")}
+                aria-pressed={filters.publicOnly}
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                  isExpandedVariant && "px-2.5 py-1 text-xs",
+                  filters.publicOnly
+                    ? "border-brand-300 bg-brand-50 text-brand-700"
+                    : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
+                )}
+              >
+                Public only
+              </button>
+              <button
+                type="button"
+                onClick={() => toggleFilter("accessible")}
+                aria-pressed={filters.accessible}
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                  isExpandedVariant && "px-2.5 py-1 text-xs",
+                  filters.accessible
+                    ? "border-brand-300 bg-brand-50 text-brand-700"
+                    : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
+                )}
+              >
+                Accessible
+              </button>
+              <button
+                type="button"
+                onClick={() => toggleFilter("babyStation")}
+                aria-pressed={filters.babyStation}
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                  isExpandedVariant && "px-2.5 py-1 text-xs",
+                  filters.babyStation
+                    ? "border-brand-300 bg-brand-50 text-brand-700"
+                    : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
+                )}
+              >
+                Baby station
+              </button>
+            </div>
+          </fieldset>
+
+          <div
+            className={cn(
+              "flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-2.5",
+              isExpandedVariant && "p-1.5"
+            )}
+          >
+            <label htmlFor={`sort-mode-${variant}`} className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Sort
+            </label>
+            <select
+              id={`sort-mode-${variant}`}
+              value={sortMode}
+              onChange={(event) => setSortMode(event.target.value as SortMode)}
+              className={cn(
+                "h-9 min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100 sm:w-[180px]",
+                isExpandedVariant && "h-7 px-2 text-xs sm:w-[140px]"
+              )}
+            >
+              <option value="recommended">Recommended</option>
+              <option value="closest" disabled={!hasRealUserLocation}>
+                Closest to you
+              </option>
+            </select>
+          </div>
+        </div>
+      </section>
+    );
+  };
+
+  const renderRestroomListSection = (variant: "default" | "expanded") => {
     const isExpandedVariant = variant === "expanded";
     const viewportMode = isExpandedVariant ? "expanded_map" : "homepage";
 
     return (
-      <div className={cn("min-w-0 space-y-3", isExpandedVariant && "h-full space-y-2")}>
-        <section
-          className={cn(
-            "rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm",
-            isExpandedVariant && "p-2 sm:p-2.5"
-          )}
-        >
-          <div className={cn("mb-3 flex items-end justify-between gap-3", isExpandedVariant && "mb-1.5")}>
-            <div>
-              <h2 className={cn("text-base font-semibold text-slate-900", isExpandedVariant && "text-sm")}>Browse this area</h2>
-              <p className={cn("mt-1 text-xs text-slate-500", isExpandedVariant && "mt-0 text-[11px]")}>
-                Filter and sort what you see on the map.
-              </p>
-            </div>
-          </div>
+      <RestroomList
+        restrooms={listRestrooms}
+        title={!isExpandedVariant && topPickRestroom ? "More nearby restrooms" : "Nearby restrooms"}
+        helperText={
+          !isExpandedVariant && topPickRestroom
+            ? "Start with the recommended option above, then compare a few more close choices here."
+            : listHelperText
+        }
+        showDistance={hasRealUserLocation}
+        viewportMode={viewportMode}
+        hasUserLocation={hasRealUserLocation}
+        highlightedRestroomId={highlightedListRestroomId}
+        onRestroomHoverChange={setListHoveredRestroomId}
+        onRestroomTouchSelect={handleRailRestroomTouchSelect}
+        onNavigateToDetail={handleNavigateToDetail}
+        compact={isExpandedVariant}
+        className={cn(isExpandedVariant && "p-2.5 sm:p-3")}
+        scrollClassName={
+          isExpandedVariant ? "sm:max-h-[calc(100vh-290px)] sm:overflow-y-auto sm:pr-1 lg:max-h-[calc(100vh-290px)]" : undefined
+        }
+      />
+    );
+  };
 
-          <div className={cn("flex flex-col gap-3", isExpandedVariant && "gap-1.5")}>
-            <fieldset>
-              <legend className={cn("mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500", isExpandedVariant && "mb-1 text-[11px]")}>
-                Filters
-              </legend>
-              <div className={cn("flex flex-wrap gap-2", isExpandedVariant && "gap-1.5")}>
-                <button
-                  type="button"
-                  onClick={() => toggleFilter("publicOnly")}
-                  aria-pressed={filters.publicOnly}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-sm font-medium transition",
-                    isExpandedVariant && "px-2.5 py-1 text-xs",
-                    filters.publicOnly
-                      ? "border-brand-300 bg-brand-50 text-brand-700"
-                      : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
-                  )}
-                >
-                  Public only
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleFilter("accessible")}
-                  aria-pressed={filters.accessible}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-sm font-medium transition",
-                    isExpandedVariant && "px-2.5 py-1 text-xs",
-                    filters.accessible
-                      ? "border-brand-300 bg-brand-50 text-brand-700"
-                      : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
-                  )}
-                >
-                  Accessible
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleFilter("babyStation")}
-                  aria-pressed={filters.babyStation}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-sm font-medium transition",
-                    isExpandedVariant && "px-2.5 py-1 text-xs",
-                    filters.babyStation
-                      ? "border-brand-300 bg-brand-50 text-brand-700"
-                      : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
-                  )}
-                >
-                  Baby station
-                </button>
-              </div>
-            </fieldset>
+  const renderExpandedListPanel = () => {
+    return (
+      <div className="min-w-0 space-y-3">
+        {renderBrowseControls("expanded")}
+        {renderRestroomListSection("expanded")}
+      </div>
+    );
+  };
 
-            <div
-              className={cn(
-                "flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-2.5",
-                isExpandedVariant && "p-1.5"
-              )}
-            >
-              <label htmlFor={`sort-mode-${variant}`} className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Sort
-              </label>
-              <select
-                id={`sort-mode-${variant}`}
-                value={sortMode}
-                onChange={(event) => setSortMode(event.target.value as SortMode)}
-                className={cn(
-                  "h-9 min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100 sm:w-[180px]",
-                  isExpandedVariant && "h-7 sm:w-[140px] px-2 text-xs"
-                )}
-              >
-                <option value="recommended">Recommended</option>
-                <option value="closest" disabled={!hasRealUserLocation}>
-                  Closest to you
-                </option>
-              </select>
-            </div>
-          </div>
+  const renderDefaultListColumn = () => {
+    return (
+      <div className="min-w-0">
+        <section className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600 lg:hidden">
+          {mapDisplayRestrooms.length} pins in view • {listRestrooms.length} listed • Reviewed submissions help keep results trustworthy
         </section>
-
-        <RestroomList
-          restrooms={listRestrooms}
-          helperText={listHelperText}
-          showDistance={hasRealUserLocation}
-          viewportMode={viewportMode}
-          hasUserLocation={hasRealUserLocation}
-          highlightedRestroomId={highlightedListRestroomId}
-          onRestroomHoverChange={setListHoveredRestroomId}
-          onNavigateToDetail={handleNavigateToDetail}
-          compact={isExpandedVariant}
-          className={cn(isExpandedVariant && "p-2.5 sm:p-3")}
-          scrollClassName={
-            isExpandedVariant ? "sm:max-h-[calc(100vh-290px)] sm:overflow-y-auto sm:pr-1 lg:max-h-[calc(100vh-290px)]" : undefined
-          }
-        />
+        <div className="mt-4 flex min-w-0 flex-col gap-4">
+          <div className="order-1">{renderTopPickCard("mobile")}</div>
+          <div className="order-1">{renderTopPickCard("desktop")}</div>
+          <div className="order-2">{renderRestroomListSection("default")}</div>
+          <div className="order-3">{renderRecentlyViewedSection("mobile")}</div>
+          <div className="order-3">{renderRecentlyViewedSection("desktop")}</div>
+          <div className="order-4">{renderBrowseControls("default")}</div>
+        </div>
       </div>
     );
   };
 
   const isMobileSheetCollapsed = mobileSheetState === "collapsed";
   const activeMapPreviewVariant = isMapExpanded ? "expanded" : "default";
+  const isLocationFollowing = isLocationTrackingEnabled && isFollowingUserLocation;
+  const isLocationTrackingPaused = isLocationTrackingEnabled && !isFollowingUserLocation;
+  const shouldShowStickyMobilePrimaryAction =
+    !isMapExpanded && !isLocationTrackingEnabled && !isLocating && !isPrimaryLocationActionVisible;
 
   return (
     <>
-      <section className="mb-4 rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-sm sm:p-4 lg:mb-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <button
-              type="button"
-              onClick={handleUseMyLocation}
-              disabled={isLocating}
-              className="inline-flex h-10 w-fit items-center rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isLocating ? "Locating..." : isLocationTrackingEnabled ? "Recenter" : "Use my location"}
-            </button>
-            {isLocationTrackingEnabled ? (
-              <button
-                type="button"
-                onClick={handleStopLocationTracking}
-                className="inline-flex h-10 w-fit items-center rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-600 transition hover:border-slate-400 hover:bg-slate-50"
-              >
-                Stop location
-              </button>
-            ) : null}
+      <div className={cn(shouldShowStickyMobilePrimaryAction && "pb-24 sm:pb-0")}>
+        <section
+          ref={primaryLocationActionRef}
+          className="mb-3 rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-sm sm:mb-4 sm:p-5 lg:mb-5"
+        >
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              {!isLocationTrackingEnabled ? (
+                <button
+                  type="button"
+                  onClick={handleUseMyLocation}
+                  disabled={isLocating}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                >
+                  {isLocating ? "Finding bathrooms..." : "Find bathroom now"}
+                </button>
+              ) : null}
 
-            {hasRealUserLocation ? (
-              <p className="text-xs font-medium text-emerald-700 sm:text-sm">
-                {isFollowingUserLocation
-                  ? "Live location tracking is on. Move the map to pause follow."
-                  : "Live location tracking is on. Tap Recenter to follow your location again."}
-              </p>
-            ) : (
-              <p className="text-xs text-slate-500 sm:text-sm">Browsing this map area. Enable location to see distance from you.</p>
-            )}
+              {isLocationFollowing ? (
+                <span className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700">
+                  📍 Following you
+                </span>
+              ) : null}
+
+              {isLocationTrackingPaused ? (
+                <button
+                  type="button"
+                  onClick={handleUseMyLocation}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 sm:w-auto"
+                >
+                  Return to me
+                </button>
+              ) : null}
+
+              {isLocationTrackingEnabled ? (
+                <button
+                  type="button"
+                  onClick={handleStopLocationTracking}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 sm:w-auto"
+                >
+                  Stop
+                </button>
+              ) : null}
+            </div>
+
+            <div className="min-w-0">
+              {!isLocationTrackingEnabled ? <p className="text-xs font-medium text-slate-500">Uses your location</p> : null}
+              {geoError ? (
+                <p className="mt-1 text-xs font-medium text-amber-700">{geoError}</p>
+              ) : null}
+            </div>
           </div>
+        </section>
 
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 sm:hidden">
-              {mapDisplayRestrooms.length} pins • {listRestrooms.length} listed
-            </span>
-            <span className="hidden rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 sm:inline-flex">
-              {mapDisplayRestrooms.length} pins in view
-            </span>
-            <span className="hidden rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 sm:inline-flex">
-              {listRestrooms.length} in list
-            </span>
-          </div>
-        </div>
-      </section>
-
-      {geoError ? (
-        <section className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">{geoError}</section>
-      ) : null}
-
-      <section className="mb-5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600 sm:px-4">
-        Community submissions, photos, and reviews may be reviewed before appearing publicly.
-      </section>
-
-      <section className="grid min-w-0 gap-5 overflow-x-clip lg:grid-cols-[minmax(0,1.45fr)_minmax(360px,1fr)] xl:grid-cols-[minmax(0,1.55fr)_420px]">
+        <section className="grid min-w-0 gap-5 overflow-x-clip lg:grid-cols-[minmax(0,1.45fr)_minmax(360px,1fr)] xl:grid-cols-[minmax(0,1.55fr)_420px]">
         <div
           className={cn(
             "min-w-0",
@@ -1426,27 +1933,41 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 <div className="pointer-events-none absolute inset-x-2 top-[max(0.5rem,env(safe-area-inset-top))] z-20 sm:inset-x-4 sm:top-4">
                   <div className="pointer-events-auto mx-auto flex w-full max-w-[1400px] min-w-0 flex-col gap-2 rounded-2xl border border-white/70 bg-white/95 px-3 py-2.5 shadow-xl backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-4">
                     <div className="min-w-0">
-                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Full map mode</p>
-                      <p className="mt-1 hidden text-xs text-slate-700 sm:block">
-                        Bay Area restroom map with live markers and nearby results.
-                      </p>
+                      <p className="text-sm font-semibold text-slate-900">Restroom map</p>
+                      <p className="mt-0.5 hidden text-xs text-slate-600 sm:block">Move the map to browse nearby options.</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                      <button
-                        type="button"
-                        onClick={handleUseMyLocation}
-                        disabled={isLocating}
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {isLocating ? "Locating..." : isLocationTrackingEnabled ? "Recenter" : "Locate"}
-                      </button>
+                      {!isLocationTrackingEnabled ? (
+                        <button
+                          type="button"
+                          onClick={handleUseMyLocation}
+                          disabled={isLocating}
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isLocating ? "Locating..." : "Use my location"}
+                        </button>
+                      ) : null}
+                      {isLocationFollowing ? (
+                        <span className="inline-flex min-h-[36px] items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 shadow-sm">
+                          📍 Following you
+                        </span>
+                      ) : null}
+                      {isLocationTrackingPaused ? (
+                        <button
+                          type="button"
+                          onClick={handleUseMyLocation}
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                        >
+                          Return to me
+                        </button>
+                      ) : null}
                       {isLocationTrackingEnabled ? (
                         <button
                           type="button"
                           onClick={handleStopLocationTracking}
                           className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
                         >
-                          Stop location
+                          Stop
                         </button>
                       ) : null}
                       <button
@@ -1461,7 +1982,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                         onClick={() => setIsMapExpanded(false)}
                         className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800"
                       >
-                        Close map
+                        Done
                       </button>
                     </div>
 
@@ -1527,7 +2048,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                         onTouchEnd={finishMobileSheetContentTouchGesture}
                         onTouchCancel={finishMobileSheetContentTouchGesture}
                       >
-                        {renderListPanel("expanded")}
+                        {renderExpandedListPanel()}
                       </div>
                     ) : null}
                   </div>
@@ -1536,7 +2057,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 {isExpandedListOpen ? (
                   <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 hidden max-h-[62vh] sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-[92px] sm:block sm:max-h-none sm:w-[400px]">
                     <div className="pointer-events-auto h-full overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl sm:p-3">
-                      {renderListPanel("expanded")}
+                      {renderExpandedListPanel()}
                     </div>
                   </div>
                 ) : null}
@@ -1545,8 +2066,23 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           </div>
         </div>
 
-        {!isMapExpanded ? <div className="min-w-0">{renderListPanel("default")}</div> : null}
+        {!isMapExpanded ? renderDefaultListColumn() : null}
       </section>
+
+        {shouldShowStickyMobilePrimaryAction ? (
+          <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[70] px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:hidden">
+            <div className="pointer-events-auto rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-2xl backdrop-blur">
+              <button
+                type="button"
+                onClick={handleUseMyLocation}
+                className="inline-flex min-h-[52px] w-full items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
+              >
+                Find bathroom now
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
     </>
   );
 }
