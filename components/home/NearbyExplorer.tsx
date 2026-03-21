@@ -148,8 +148,8 @@ const RECOMMENDATION_TITLE = "Closest in this area";
 const RECOMMENDATION_HELPER_TEXT = "A quick option to start with before browsing the full list.";
 const RECOMMENDATION_MAP_AREA_HELPER_TEXT = "Based on the visible map area until you use your location.";
 const RECOMMENDATION_WRAPPER_CLASSNAME =
-  "rounded-2xl border border-brand-300/90 bg-brand-50/80 p-2.5 shadow-md ring-2 ring-brand-100/90";
-const RECOMMENDATION_CARD_CLASSNAME = "border-brand-300/90 bg-white shadow-lg ring-1 ring-brand-100/90";
+  "rounded-2xl border border-brand-300 bg-brand-50/90 p-3 shadow-lg ring-2 ring-brand-100";
+const RECOMMENDATION_CARD_CLASSNAME = "border-brand-300 bg-white shadow-lg ring-1 ring-brand-100";
 
 interface RecommendationResult {
   restroom: NearbyBathroom;
@@ -590,23 +590,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     mobileSheetInteractionTimeoutRef.current = null;
   }, []);
 
-  const applyMobileExpandedRestroomSelection = useCallback(
-    (restroomId: string) => {
-      if (!mapVisibleRestroomIds.has(restroomId)) {
-        return false;
-      }
-
-      setHasStartedBrowsing(true);
-      setMapFocusedRestroomId(restroomId);
-      setListHoveredRestroomId(null);
-      clearMobileSheetInteractionTimeout();
-      setIsMobileSheetInteractionLocked(false);
-      setMobileSheetState("collapsed");
-      return true;
-    },
-    [clearMobileSheetInteractionTimeout, mapVisibleRestroomIds]
-  );
-
   const lockMobileSheetInteraction = useCallback(() => {
     if (!isMobilePreviewLayout) {
       return;
@@ -631,30 +614,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       }, delayMs);
     },
     [clearMobileSheetInteractionTimeout, isMobilePreviewLayout]
-  );
-
-  const handleRailRestroomTouchSelect = useCallback(
-    (restroomId: string) => {
-      if (!mapVisibleRestroomIds.has(restroomId)) {
-        return;
-      }
-
-      if (isMapExpanded && isMobilePreviewLayout && applyMobileExpandedRestroomSelection(restroomId)) {
-        return;
-      }
-
-      setHasStartedBrowsing(true);
-      setMapFocusedRestroomId(restroomId);
-      setListHoveredRestroomId(null);
-      settleMobileSheetInteraction();
-    },
-    [
-      applyMobileExpandedRestroomSelection,
-      isMapExpanded,
-      isMobilePreviewLayout,
-      mapVisibleRestroomIds,
-      settleMobileSheetInteraction
-    ]
   );
 
   const handleExpandMap = () => {
@@ -752,6 +711,66 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       scheduleMobileSheetOffset(metrics.offsets[state], animated);
     },
     [scheduleMobileSheetOffset]
+  );
+
+  const collapseMobileSheetToSelectedPreview = useCallback(() => {
+    clearMobileSheetInteractionTimeout();
+    setIsMobileSheetInteractionLocked(false);
+    mobileSheetTouchStartYRef.current = null;
+    mobileSheetTouchStartOffsetRef.current = null;
+    mobileSheetTouchStartTimeRef.current = null;
+    mobileSheetListTouchStartYRef.current = null;
+    mobileSheetListTouchStartOffsetRef.current = null;
+    mobileSheetListTouchStartTimeRef.current = null;
+    mobileSheetListDidPullRef.current = false;
+    mobileSheetDidDragRef.current = false;
+
+    if (typeof window !== "undefined" && mobileSheetDragResetTimeoutRef.current !== null) {
+      window.clearTimeout(mobileSheetDragResetTimeoutRef.current);
+      mobileSheetDragResetTimeoutRef.current = null;
+    }
+
+    setMobileSheetState("collapsed");
+    applyMobileSheetState("collapsed", true);
+  }, [applyMobileSheetState, clearMobileSheetInteractionTimeout]);
+
+  const applyMobileExpandedRestroomSelection = useCallback(
+    (restroomId: string) => {
+      if (!mapVisibleRestroomIds.has(restroomId)) {
+        return false;
+      }
+
+      setHasStartedBrowsing(true);
+      setMapFocusedRestroomId(restroomId);
+      setListHoveredRestroomId(null);
+      collapseMobileSheetToSelectedPreview();
+      return true;
+    },
+    [collapseMobileSheetToSelectedPreview, mapVisibleRestroomIds]
+  );
+
+  const handleRailRestroomTouchSelect = useCallback(
+    (restroomId: string) => {
+      if (!mapVisibleRestroomIds.has(restroomId)) {
+        return;
+      }
+
+      if (isMapExpanded && isMobilePreviewLayout && applyMobileExpandedRestroomSelection(restroomId)) {
+        return;
+      }
+
+      setHasStartedBrowsing(true);
+      setMapFocusedRestroomId(restroomId);
+      setListHoveredRestroomId(null);
+      settleMobileSheetInteraction();
+    },
+    [
+      applyMobileExpandedRestroomSelection,
+      isMapExpanded,
+      isMobilePreviewLayout,
+      mapVisibleRestroomIds,
+      settleMobileSheetInteraction
+    ]
   );
 
   const getNearestMobileSheetState = useCallback((offset: number, metrics: MobileSheetMetrics): MobileSheetState => {
@@ -1591,6 +1610,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         <RestroomCard
           restroom={restroom}
           showDistance={hasActiveUserLocation}
+          isFeaturedRecommendation
           viewportMode={viewportMode}
           hasUserLocation={hasActiveUserLocation}
           isHighlighted={isHighlighted}
@@ -1644,9 +1664,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       ? RECOMMENDATION_HELPER_TEXT
       : RECOMMENDATION_MAP_AREA_HELPER_TEXT;
     const distanceLabel = hasActiveUserLocation ? toApproximateDistanceLabel(expandedTopPickRestroom.distanceMiles) : "";
-    const topSignalDescriptor = expandedTopPickRestroom.ratings.qualitySignals[0]
-      ? getReviewQuickTagDescriptor(expandedTopPickRestroom.ratings.qualitySignals[0])
-      : null;
+    const recommendationSignalDescriptors = expandedTopPickRestroom.ratings.qualitySignals
+      .map((signal) => getReviewQuickTagDescriptor(signal))
+      .filter((descriptor): descriptor is NonNullable<ReturnType<typeof getReviewQuickTagDescriptor>> => descriptor?.tone === "positive")
+      .slice(0, 2);
     const activateRecommendation = () => {
       focusExpandedRecommendation(expandedTopPickRestroom.id);
     };
@@ -1691,19 +1712,29 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               </div>
 
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {topSignalDescriptor ? (
+                {recommendationSignalDescriptors.map((descriptor) => (
                   <span
+                    key={descriptor.value}
                     className={cn(
                       "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-                      reviewQuickTagToneClassName[topSignalDescriptor.tone]
+                      reviewQuickTagToneClassName[descriptor.tone]
                     )}
                   >
-                    {topSignalDescriptor.icon} {topSignalDescriptor.label}
+                    {descriptor.icon} {descriptor.label}
+                  </span>
+                ))}
+                {expandedTopPickRestroom.is_accessible ? (
+                  <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
+                    ♿ Accessible
                   </span>
                 ) : null}
                 {expandedTopPickRestroom.ratings.overall > 0 ? (
                   <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
                     ⭐ {expandedTopPickRestroom.ratings.overall.toFixed(1)} · {expandedTopPickRestroom.ratings.reviewCount} reviews
+                  </span>
+                ) : expandedTopPickRestroom.ratings.reviewCount > 0 ? (
+                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                    {expandedTopPickRestroom.ratings.reviewCount} reviews
                   </span>
                 ) : null}
               </div>

@@ -3,6 +3,7 @@
 import posthog from "posthog-js";
 
 export type NavigateClickSource = "restroom_card" | "restroom_detail" | "map_popup" | "mobile_preview";
+export type MapProvider = "apple_maps" | "google_maps";
 export type AnalyticsViewportMode = "homepage" | "expanded_map";
 export type AnalyticsSurface =
   | "homepage"
@@ -67,6 +68,7 @@ interface PoopinAnalyticsEventProperties {
   navigate_clicked: {
     bathroom_id: string;
     source: NavigateClickSource;
+    map_provider: MapProvider;
   } & AnalyticsContextProperties;
   add_restroom_started: {
     source_surface: "add_restroom_form";

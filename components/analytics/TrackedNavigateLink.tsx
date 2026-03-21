@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
-import type { AnalyticsViewportMode, NavigateClickSource } from "@/lib/analytics/posthog";
+import type { AnalyticsViewportMode, MapProvider, NavigateClickSource } from "@/lib/analytics/posthog";
 import { cn } from "@/lib/utils/cn";
 import {
   detectMapsPlatform,
@@ -10,6 +10,8 @@ import {
   getPreferredDirectionsUrl,
   type MapsPlatform
 } from "@/lib/utils/maps";
+
+const SAME_TAB_NAVIGATION_DELAY_MS = 90;
 
 interface TrackedNavigateLinkProps {
   latitude: number;
@@ -52,10 +54,14 @@ export function TrackedNavigateLink({
     setPlatform(detectMapsPlatform());
   }, []);
 
-  const captureNavigateClick = () => {
+  const getMapProviderForPlatform = (destinationPlatform: MapsPlatform): MapProvider =>
+    destinationPlatform === "ios" ? "apple_maps" : "google_maps";
+
+  const captureNavigateClick = (mapProvider: MapProvider) => {
     captureAnalyticsEvent("navigate_clicked", {
       bathroom_id: bathroomId,
       source,
+      map_provider: mapProvider,
       source_surface: sourceSurface,
       viewport_mode: viewportMode,
       has_user_location: hasUserLocation
@@ -72,7 +78,9 @@ export function TrackedNavigateLink({
       return;
     }
 
-    window.location.assign(url);
+    window.setTimeout(() => {
+      window.location.assign(url);
+    }, SAME_TAB_NAVIGATION_DELAY_MS);
   };
 
   const handlePrimaryClick = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -81,10 +89,9 @@ export function TrackedNavigateLink({
       return;
     }
 
-    event.preventDefault();
-    captureNavigateClick();
-
     const destinationPlatform = detectMapsPlatform();
+    event.preventDefault();
+    captureNavigateClick(getMapProviderForPlatform(destinationPlatform));
     navigateToUrl(getPreferredDirectionsUrl(latitude, longitude, destinationPlatform), destinationPlatform);
   };
 
@@ -96,7 +103,7 @@ export function TrackedNavigateLink({
     }
 
     event.preventDefault();
-    captureNavigateClick();
+    captureNavigateClick("google_maps");
     navigateToUrl(getGoogleMapsDirectionsUrl(latitude, longitude), "ios");
   };
 

@@ -13,6 +13,7 @@ interface RestroomCardProps {
   restroom: NearbyBathroom;
   showDistance?: boolean;
   isHighlighted?: boolean;
+  isFeaturedRecommendation?: boolean;
   viewportMode?: AnalyticsViewportMode;
   hasUserLocation?: boolean;
   onHoverChange?: (isHovering: boolean) => void;
@@ -23,6 +24,20 @@ interface RestroomCardProps {
 
 const toPlaceLabel = (value: string) => value.replaceAll("_", " ");
 const toDisplayRating = (value: number) => (value > 0 ? value.toFixed(1) : "N/A");
+const toAccessLabel = (value: NearbyBathroom["access_type"]) => {
+  switch (value) {
+    case "public":
+      return "Public access";
+    case "customer_only":
+      return "Customer only";
+    case "code_required":
+      return "Code required";
+    case "staff_assisted":
+      return "Staff assisted";
+    default:
+      return "Restroom";
+  }
+};
 const toDistanceLabel = (value: number) => {
   if (!Number.isFinite(value) || value < 0) {
     return "";
@@ -62,6 +77,7 @@ export function RestroomCard({
   restroom,
   showDistance = false,
   isHighlighted = false,
+  isFeaturedRecommendation = false,
   viewportMode = "homepage",
   hasUserLocation = false,
   onHoverChange,
@@ -74,6 +90,9 @@ export function RestroomCard({
   const subtitle = getRestroomCardSubtitle(restroom);
   const sourceLabel = getRestroomSourceLabel(restroom.source);
   const qualitySignals = restroom.ratings.qualitySignals.slice(0, 2);
+  const positiveRecommendationSignals = qualitySignals
+    .map((signal) => getReviewQuickTagDescriptor(signal))
+    .filter((descriptor): descriptor is NonNullable<ReturnType<typeof getReviewQuickTagDescriptor>> => Boolean(descriptor?.tone === "positive"));
   const touchStartPointRef = useRef<{ x: number; y: number } | null>(null);
   const didTouchMoveRef = useRef(false);
 
@@ -159,50 +178,107 @@ export function RestroomCard({
             <h3 className="truncate text-base font-semibold text-slate-900 transition group-hover:text-brand-600">{displayName}</h3>
             <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
           </div>
-          <div className="shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
-            {toPlaceLabel(restroom.place_type)}
+          <div
+            className={cn(
+              "shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold uppercase tracking-wide",
+              isFeaturedRecommendation
+                ? "border border-brand-200 bg-brand-50 text-brand-800"
+                : "border border-slate-200 bg-slate-50 text-slate-600"
+            )}
+          >
+            {isFeaturedRecommendation ? toAccessLabel(restroom.access_type) : toPlaceLabel(restroom.place_type)}
           </div>
         </div>
 
         <div className="mt-3 flex items-center justify-between gap-3">
-          <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">
-            Overall {toDisplayRating(restroom.ratings.overall)}
-          </span>
-          {showDistance ? <span className="text-xs font-medium text-slate-500">{toDistanceLabel(restroom.distanceMiles)}</span> : null}
+          {(!isFeaturedRecommendation || restroom.ratings.overall > 0) ? (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold",
+                isFeaturedRecommendation
+                  ? "border border-brand-200 bg-brand-50 text-brand-900"
+                  : "border border-slate-200 bg-slate-50 text-slate-700"
+              )}
+            >
+              {isFeaturedRecommendation && restroom.ratings.overall > 0
+                ? `⭐ ${restroom.ratings.overall.toFixed(1)} from ${restroom.ratings.reviewCount} review${restroom.ratings.reviewCount === 1 ? "" : "s"}`
+                : `Overall ${toDisplayRating(restroom.ratings.overall)}`}
+            </span>
+          ) : (
+            <span />
+          )}
+          {showDistance ? (
+            <span className={cn("text-xs font-medium", isFeaturedRecommendation ? "text-slate-700" : "text-slate-500")}>
+              {toDistanceLabel(restroom.distanceMiles)}
+            </span>
+          ) : null}
         </div>
 
-        {qualitySignals.length > 0 ? (
+        {isFeaturedRecommendation ? (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {qualitySignals.map((signal) => {
-              const descriptor = getReviewQuickTagDescriptor(signal);
-              if (!descriptor) {
-                return null;
-              }
-
-              return (
-                <span
-                  key={signal}
-                  className={cn(
-                    "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-                    reviewQuickTagToneClassName[descriptor.tone]
-                  )}
-                >
-                  {descriptor.icon} {descriptor.label}
-                </span>
-              );
-            })}
+            {positiveRecommendationSignals.slice(0, 2).map((descriptor) => (
+              <span
+                key={descriptor.value}
+                className={cn(
+                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                  reviewQuickTagToneClassName[descriptor.tone]
+                )}
+              >
+                {descriptor.icon} {descriptor.label}
+              </span>
+            ))}
+            {restroom.is_accessible ? (
+              <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
+                ♿ Accessible
+              </span>
+            ) : null}
+            {restroom.has_baby_station ? (
+              <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">
+                👶 Baby station
+              </span>
+            ) : null}
+            {restroom.ratings.reviewCount > 0 && restroom.ratings.overall <= 0 ? (
+              <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                {restroom.ratings.reviewCount} review{restroom.ratings.reviewCount === 1 ? "" : "s"}
+              </span>
+            ) : null}
           </div>
-        ) : null}
+        ) : (
+          <>
+            {qualitySignals.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {qualitySignals.map((signal) => {
+                  const descriptor = getReviewQuickTagDescriptor(signal);
+                  if (!descriptor) {
+                    return null;
+                  }
 
-        <div className="mt-3.5 flex flex-col gap-2.5">
-          <RatingPills ratings={restroom.ratings} />
-          <RestroomTags restroom={restroom} />
-        </div>
+                  return (
+                    <span
+                      key={signal}
+                      className={cn(
+                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                        reviewQuickTagToneClassName[descriptor.tone]
+                      )}
+                    >
+                      {descriptor.icon} {descriptor.label}
+                    </span>
+                  );
+                })}
+              </div>
+            ) : null}
 
-        <div className="mt-3.5 text-xs font-medium text-slate-500">
-          {restroom.ratings.reviewCount} review
-          {restroom.ratings.reviewCount === 1 ? "" : "s"} • {sourceLabel}
-        </div>
+            <div className="mt-3.5 flex flex-col gap-2.5">
+              <RatingPills ratings={restroom.ratings} />
+              <RestroomTags restroom={restroom} />
+            </div>
+
+            <div className="mt-3.5 text-xs font-medium text-slate-500">
+              {restroom.ratings.reviewCount} review
+              {restroom.ratings.reviewCount === 1 ? "" : "s"} • {sourceLabel}
+            </div>
+          </>
+        )}
       </Link>
 
       <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
