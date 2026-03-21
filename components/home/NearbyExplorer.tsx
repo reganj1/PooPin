@@ -1751,7 +1751,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           hasUserLocation={hasActiveUserLocation}
           isHighlighted={isHighlighted}
           onHoverChange={(isHovering) => handleRailRestroomHoverChange(restroom.id, isHovering)}
-          onTouchSelect={handleRailRestroomTouchSelect}
           onNavigateToDetail={handleNavigateToDetail}
           className={RECOMMENDATION_CARD_CLASSNAME}
         />
