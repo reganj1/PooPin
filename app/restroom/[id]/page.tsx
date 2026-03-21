@@ -14,7 +14,6 @@ import { ReviewSummary } from "@/components/review/ReviewSummary";
 import { getBathroomConfirmationCountData } from "@/lib/data/confirmations";
 import { getApprovedBathroomPhotosData } from "@/lib/data/photos";
 import { getBathroomByIdData, getBathroomReviewsData } from "@/lib/data/restrooms";
-import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
 import { getRestroomDetailLocationLine, getRestroomDisplayName, getRestroomSourceLabel } from "@/lib/utils/restroomPresentation";
 import { getReviewQuickTagDescriptor, reviewQuickTagToneClassName } from "@/lib/utils/reviewSignals";
 
@@ -80,7 +79,6 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
   }
 
   const reviews = await getBathroomReviewsData(restroom.id);
-  const navigateHref = getGoogleMapsDirectionsUrl(restroom.lat, restroom.lng);
   const displayName = getRestroomDisplayName(restroom);
   const locationLine = getRestroomDetailLocationLine(restroom);
   const sourceLabel = getRestroomSourceLabel(restroom.source);
@@ -116,11 +114,15 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
 
           <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
             <TrackedNavigateLink
-              href={navigateHref}
+              latitude={restroom.lat}
+              longitude={restroom.lng}
               bathroomId={restroom.id}
               source="restroom_detail"
               sourceSurface="restroom_detail"
-              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 sm:flex-none"
+              showIOSGoogleMapsOption
+              containerClassName="w-full flex-1 sm:w-auto sm:flex-none"
+              alternateClassName="pl-1 sm:pl-0"
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 sm:w-auto sm:flex-none"
             >
               <NavigateIcon className="h-4 w-4" />
               Navigate

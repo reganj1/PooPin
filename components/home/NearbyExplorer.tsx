@@ -18,7 +18,6 @@ import { useLocationTracking } from "@/components/providers/LocationTrackingProv
 import { RestroomCard } from "@/components/restroom/RestroomCard";
 import { RestroomList } from "@/components/restroom/RestroomList";
 import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
-import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
 import { getRecentRestrooms, type RecentRestroomSnapshot, storeRecentRestroom } from "@/lib/utils/recentRestrooms";
 import { getRestroomCardSubtitle, getRestroomDisplayName, getRestroomSourceLabel } from "@/lib/utils/restroomPresentation";
 import { getReviewQuickTagDescriptor, reviewQuickTagToneClassName } from "@/lib/utils/reviewSignals";
@@ -1715,7 +1714,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
               <div className="mt-3 flex items-center gap-2" onClick={stopCardActionPropagation}>
                 <TrackedNavigateLink
-                  href={getGoogleMapsDirectionsUrl(expandedTopPickRestroom.lat, expandedTopPickRestroom.lng)}
+                  latitude={expandedTopPickRestroom.lat}
+                  longitude={expandedTopPickRestroom.lng}
                   bathroomId={expandedTopPickRestroom.id}
                   source="restroom_card"
                   sourceSurface="restroom_card"

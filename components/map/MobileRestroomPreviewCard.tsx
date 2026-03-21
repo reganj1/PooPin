@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { NearbyBathroom } from "@/types";
 import { TrackedNavigateLink } from "@/components/analytics/TrackedNavigateLink";
 import type { AnalyticsViewportMode } from "@/lib/analytics/posthog";
-import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
 import { getRestroomCardSubtitle, getRestroomDisplayName } from "@/lib/utils/restroomPresentation";
 interface MobileRestroomPreviewCardProps { restroom: NearbyBathroom; showDistance?: boolean; photoUrl?: string | null; viewportMode?: AnalyticsViewportMode; onNavigateToDetail?: (restroomId: string) => void; }
 
@@ -53,7 +52,6 @@ export function MobileRestroomPreviewCard({
 }: MobileRestroomPreviewCardProps) {
   const router = useRouter();
   const detailHref = `/restroom/${restroom.id}`;
-  const navigateHref = getGoogleMapsDirectionsUrl(restroom.lat, restroom.lng);
   const displayName = getRestroomDisplayName(restroom);
   const subtitle = getRestroomCardSubtitle(restroom);
   const distanceLabel = showDistance ? toDistanceLabel(restroom.distanceMiles) : "";
@@ -113,13 +111,17 @@ export function MobileRestroomPreviewCard({
 
       <div className="mt-3 flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
         <TrackedNavigateLink
-          href={navigateHref}
+          latitude={restroom.lat}
+          longitude={restroom.lng}
           bathroomId={restroom.id}
           source="mobile_preview"
           sourceSurface="mobile_preview"
           viewportMode={viewportMode}
           hasUserLocation={showDistance}
-          className="inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
+          showIOSGoogleMapsOption
+          containerClassName="w-full flex-1"
+          alternateClassName="pl-1"
+          className="inline-flex min-h-[40px] w-full items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
         >
           <NavigateIcon className="h-3.5 w-3.5" />
           Navigate

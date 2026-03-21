@@ -6,7 +6,6 @@ import type { AnalyticsViewportMode } from "@/lib/analytics/posthog";
 import { RatingPills } from "@/components/restroom/RatingPills";
 import { RestroomTags } from "@/components/restroom/RestroomTags";
 import { cn } from "@/lib/utils/cn";
-import { getGoogleMapsDirectionsUrl } from "@/lib/utils/maps";
 import { getRestroomCardSubtitle, getRestroomDisplayName, getRestroomSourceLabel } from "@/lib/utils/restroomPresentation";
 import { getReviewQuickTagDescriptor, reviewQuickTagToneClassName } from "@/lib/utils/reviewSignals";
 
@@ -71,7 +70,6 @@ export function RestroomCard({
   className
 }: RestroomCardProps) {
   const detailHref = `/restroom/${restroom.id}`;
-  const navigateHref = getGoogleMapsDirectionsUrl(restroom.lat, restroom.lng);
   const displayName = getRestroomDisplayName(restroom);
   const subtitle = getRestroomCardSubtitle(restroom);
   const sourceLabel = getRestroomSourceLabel(restroom.source);
@@ -217,7 +215,8 @@ export function RestroomCard({
           Details
         </Link>
         <TrackedNavigateLink
-          href={navigateHref}
+          latitude={restroom.lat}
+          longitude={restroom.lng}
           bathroomId={restroom.id}
           source="restroom_card"
           sourceSurface="restroom_card"
