@@ -3,10 +3,8 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
 import type { AnalyticsViewportMode, MapProvider, NavigateClickSource } from "@/lib/analytics/posthog";
-import { cn } from "@/lib/utils/cn";
 import {
   detectMapsPlatform,
-  getGoogleMapsDirectionsUrl,
   getPreferredDirectionsUrl,
   type MapsPlatform
 } from "@/lib/utils/maps";
@@ -25,10 +23,6 @@ interface TrackedNavigateLinkProps {
   hasUserLocation?: boolean;
   onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
   dataRestroomCardAction?: boolean;
-  showIOSGoogleMapsOption?: boolean;
-  alternateClassName?: string;
-  alternateLabel?: string;
-  containerClassName?: string;
 }
 
 export function TrackedNavigateLink({
@@ -42,11 +36,7 @@ export function TrackedNavigateLink({
   viewportMode,
   hasUserLocation,
   onClick,
-  dataRestroomCardAction = false,
-  showIOSGoogleMapsOption = false,
-  alternateClassName,
-  alternateLabel = "Open in Google Maps",
-  containerClassName
+  dataRestroomCardAction = false
 }: TrackedNavigateLinkProps) {
   const [platform, setPlatform] = useState<MapsPlatform>("desktop");
 
@@ -95,19 +85,7 @@ export function TrackedNavigateLink({
     navigateToUrl(getPreferredDirectionsUrl(latitude, longitude, destinationPlatform), destinationPlatform);
   };
 
-  const handleAlternateClick = (event: MouseEvent<HTMLAnchorElement>) => {
-    event.stopPropagation();
-    onClick?.(event);
-    if (event.defaultPrevented) {
-      return;
-    }
-
-    event.preventDefault();
-    captureNavigateClick("google_maps");
-    navigateToUrl(getGoogleMapsDirectionsUrl(latitude, longitude), "ios");
-  };
-
-  const primaryLink = (
+  return (
     <a
       href={getPreferredDirectionsUrl(latitude, longitude, platform)}
       target={platform === "desktop" ? "_blank" : undefined}
@@ -118,26 +96,5 @@ export function TrackedNavigateLink({
     >
       {children}
     </a>
-  );
-
-  if (!(showIOSGoogleMapsOption && platform === "ios")) {
-    return primaryLink;
-  }
-
-  return (
-    <div className={cn("flex flex-col items-start gap-1.5", containerClassName)}>
-      {primaryLink}
-      <a
-        href={getGoogleMapsDirectionsUrl(latitude, longitude)}
-        className={cn(
-          "text-[11px] font-medium text-slate-500 underline decoration-slate-300 underline-offset-4 transition hover:text-slate-700",
-          alternateClassName
-        )}
-        onClick={handleAlternateClick}
-        data-restroom-card-action={dataRestroomCardAction ? "true" : undefined}
-      >
-        {alternateLabel}
-      </a>
-    </div>
   );
 }

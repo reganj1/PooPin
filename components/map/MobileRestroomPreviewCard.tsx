@@ -118,9 +118,6 @@ export function MobileRestroomPreviewCard({
           sourceSurface="mobile_preview"
           viewportMode={viewportMode}
           hasUserLocation={showDistance}
-          showIOSGoogleMapsOption
-          containerClassName="w-full flex-1"
-          alternateClassName="pl-1"
           className="inline-flex min-h-[40px] w-full items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
         >
           <NavigateIcon className="h-3.5 w-3.5" />

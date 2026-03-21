@@ -119,9 +119,6 @@ export default async function RestroomDetailPage({ params }: RestroomDetailPageP
               bathroomId={restroom.id}
               source="restroom_detail"
               sourceSurface="restroom_detail"
-              showIOSGoogleMapsOption
-              containerClassName="w-full flex-1 sm:w-auto sm:flex-none"
-              alternateClassName="pl-1 sm:pl-0"
               className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 sm:w-auto sm:flex-none"
             >
               <NavigateIcon className="h-4 w-4" />
