@@ -177,6 +177,7 @@ const RECOMMENDATION_HELPER_TEXT = "A quick option to start with before browsing
 
 interface RecommendationResult {
   restroom: NearbyBathroom;
+  originDistanceMiles: number;
 }
 
 interface MobileSheetMetrics {
@@ -236,29 +237,103 @@ const toApproximateDistanceLabel = (value: number) => {
   return `~${value.toFixed(1)} mi away`;
 };
 
-const getTopPickScore = (restroom: NearbyBathroom) => {
+const getRecommendationScore = (restroom: NearbyBathroom, originDistanceMiles: number) => {
   const signalScore = restroom.ratings.qualitySignals.slice(0, 2).reduce((total, signal) => total + (topPickSignalScore[signal] ?? 0), 0);
-  const reviewCountBonus = Math.min(restroom.ratings.reviewCount, 5) * 0.35;
+  const reviewCountBonus = Math.min(restroom.ratings.reviewCount, 6) * 0.35;
+  const ratingBonus = restroom.ratings.reviewCount > 0 ? restroom.ratings.overall * 1.5 : 0;
 
   return (
     100 -
-    restroom.distanceMiles * 28 +
+    originDistanceMiles * 28 +
     topPickAccessScore[restroom.access_type] +
     signalScore +
     reviewCountBonus +
     (restroom.is_accessible ? 2 : 0) +
     (restroom.has_baby_station ? 0.75 : 0) +
     (!restroom.requires_purchase ? 1.5 : -2.5) +
-    (restroom.ratings.reviewCount > 0 ? restroom.ratings.overall * 1.8 : 0)
+    ratingBonus
   );
 };
 
-const getExpandedMapTopPickScore = (restroom: NearbyBathroom, prioritizeDistance: boolean) => {
-  const distanceScore = prioritizeDistance ? Math.max(0, 120 - restroom.distanceMiles * 34) : 0;
-  const ratingScore = restroom.ratings.overall > 0 ? restroom.ratings.overall * 9 : 0;
-  const reviewScore = Math.min(restroom.ratings.reviewCount, 20) * 0.45;
+const resolveClosestInAreaRecommendation = (candidates: NearbyBathroom[], origin: Coordinate | null): RecommendationResult | null => {
+  if (!origin || candidates.length === 0) {
+    return null;
+  }
 
-  return distanceScore + ratingScore + reviewScore;
+  const candidatesWithDistance = candidates
+    .map((restroom) => ({
+      restroom,
+      originDistanceMiles: roundToOne(haversineDistanceMiles(origin, { lat: restroom.lat, lng: restroom.lng }))
+    }))
+    .filter(({ originDistanceMiles }) => Number.isFinite(originDistanceMiles) && originDistanceMiles >= 0);
+
+  if (candidatesWithDistance.length === 0) {
+    return null;
+  }
+
+  const distanceSortedCandidates = [...candidatesWithDistance].sort((a, b) => {
+    if (a.originDistanceMiles !== b.originDistanceMiles) {
+      return a.originDistanceMiles - b.originDistanceMiles;
+    }
+
+    if (b.restroom.ratings.overall !== a.restroom.ratings.overall) {
+      return b.restroom.ratings.overall - a.restroom.ratings.overall;
+    }
+
+    if (b.restroom.ratings.reviewCount !== a.restroom.ratings.reviewCount) {
+      return b.restroom.ratings.reviewCount - a.restroom.ratings.reviewCount;
+    }
+
+    return a.restroom.name.localeCompare(b.restroom.name);
+  });
+
+  const nearbyCandidates = distanceSortedCandidates.filter(
+    ({ originDistanceMiles }) => originDistanceMiles <= RECOMMENDATION_NEARBY_RADIUS_MILES
+  );
+  const extendedCandidates = distanceSortedCandidates.filter(
+    ({ originDistanceMiles }) => originDistanceMiles <= RECOMMENDATION_EXTENDED_RADIUS_MILES
+  );
+  const fallbackCandidates = distanceSortedCandidates.filter(
+    ({ originDistanceMiles }) => originDistanceMiles <= RECOMMENDATION_FALLBACK_RADIUS_MILES
+  );
+  const farAwayCandidates = distanceSortedCandidates.slice(0, 8);
+
+  const scopedCandidates =
+    nearbyCandidates.length > 0
+      ? nearbyCandidates.slice(0, 8)
+      : extendedCandidates.length > 0
+        ? extendedCandidates.slice(0, 10)
+        : fallbackCandidates.length > 0
+          ? fallbackCandidates.slice(0, 10)
+          : farAwayCandidates;
+
+  if (scopedCandidates.length === 0) {
+    return null;
+  }
+
+  return (
+    [...scopedCandidates].sort((a, b) => {
+      const scoreDifference =
+        getRecommendationScore(b.restroom, b.originDistanceMiles) - getRecommendationScore(a.restroom, a.originDistanceMiles);
+      if (scoreDifference !== 0) {
+        return scoreDifference;
+      }
+
+      if (a.originDistanceMiles !== b.originDistanceMiles) {
+        return a.originDistanceMiles - b.originDistanceMiles;
+      }
+
+      if (b.restroom.ratings.overall !== a.restroom.ratings.overall) {
+        return b.restroom.ratings.overall - a.restroom.ratings.overall;
+      }
+
+      if (b.restroom.ratings.reviewCount !== a.restroom.ratings.reviewCount) {
+        return b.restroom.ratings.reviewCount - a.restroom.ratings.reviewCount;
+      }
+
+      return a.restroom.name.localeCompare(b.restroom.name);
+    })[0] ?? null
+  );
 };
 
 export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
@@ -407,84 +482,27 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     return filtered.slice(0, LIST_LIMIT);
   }, [filteredRestrooms, hasRealUserLocation, sortMode]);
 
+  const recommendationOrigin = useMemo<Coordinate | null>(() => {
+    if (userLocation) {
+      return userLocation;
+    }
+
+    if (mapCamera && isValidMapCoordinate(mapCamera.lat, mapCamera.lng)) {
+      return {
+        lat: mapCamera.lat,
+        lng: mapCamera.lng
+      };
+    }
+
+    return null;
+  }, [mapCamera, userLocation]);
+
   const recommendation = useMemo<RecommendationResult | null>(() => {
-    if (!hasRealUserLocation || filteredRestrooms.length === 0) {
-      return null;
-    }
-
-    const distanceSortedRestrooms = [...filteredRestrooms].sort((a, b) => a.distanceMiles - b.distanceMiles);
-    const nearbyCandidates = distanceSortedRestrooms.filter((restroom) => restroom.distanceMiles <= RECOMMENDATION_NEARBY_RADIUS_MILES);
-    const extendedCandidates = distanceSortedRestrooms.filter((restroom) => restroom.distanceMiles <= RECOMMENDATION_EXTENDED_RADIUS_MILES);
-    const fallbackCandidates = distanceSortedRestrooms.filter((restroom) => restroom.distanceMiles <= RECOMMENDATION_FALLBACK_RADIUS_MILES);
-    const farAwayCandidates = distanceSortedRestrooms.slice(0, 8);
-
-    const scopedCandidates =
-      nearbyCandidates.length > 0
-        ? nearbyCandidates.slice(0, 8)
-        : extendedCandidates.length > 0
-          ? extendedCandidates.slice(0, 10)
-          : fallbackCandidates.length > 0
-            ? fallbackCandidates.slice(0, 10)
-            : farAwayCandidates;
-
-    if (scopedCandidates.length === 0) {
-      return null;
-    }
-
-    const restroom = [...scopedCandidates].sort((a, b) => getTopPickScore(b) - getTopPickScore(a))[0] ?? null;
-    if (!restroom) {
-      return null;
-    }
-
-    if (nearbyCandidates.length > 0) {
-      return {
-        restroom
-      };
-    }
-
-    if (extendedCandidates.length > 0) {
-      return {
-        restroom
-      };
-    }
-
-    return {
-      restroom
-    };
-  }, [filteredRestrooms, hasRealUserLocation]);
-
-  const expandedMapRecommendation = useMemo<NearbyBathroom | null>(() => {
-    if (filteredRestrooms.length === 0) {
-      return null;
-    }
-
-    const prioritizeDistance = hasRealUserLocation;
-
-    return (
-      [...filteredRestrooms].sort((a, b) => {
-        const scoreDifference = getExpandedMapTopPickScore(b, prioritizeDistance) - getExpandedMapTopPickScore(a, prioritizeDistance);
-        if (scoreDifference !== 0) {
-          return scoreDifference;
-        }
-
-        if (prioritizeDistance && a.distanceMiles !== b.distanceMiles) {
-          return a.distanceMiles - b.distanceMiles;
-        }
-
-        if (b.ratings.overall !== a.ratings.overall) {
-          return b.ratings.overall - a.ratings.overall;
-        }
-
-        if (b.ratings.reviewCount !== a.ratings.reviewCount) {
-          return b.ratings.reviewCount - a.ratings.reviewCount;
-        }
-
-        return a.name.localeCompare(b.name);
-      })[0] ?? null
-    );
-  }, [filteredRestrooms, hasRealUserLocation]);
+    return resolveClosestInAreaRecommendation(filteredRestrooms, recommendationOrigin);
+  }, [filteredRestrooms, recommendationOrigin]);
 
   const topPickRestroom = recommendation?.restroom ?? null;
+  const expandedMapRecommendation = topPickRestroom;
   const mapVisibleRestroomIds = useMemo(() => new Set(mapDisplayRestrooms.map((restroom) => restroom.id)), [mapDisplayRestrooms]);
 
   const restroomLookup = useMemo(() => {
