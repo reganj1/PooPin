@@ -1,10 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   type FocusEvent as ReactFocusEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type TouchEvent,
   useCallback,
@@ -157,12 +155,6 @@ const MOBILE_SHEET_EXPANDED_VISIBLE_RATIO = 0.84;
 const MOBILE_SHEET_MAX_HEIGHT_RATIO = 0.86;
 const MOBILE_SHEET_SWIPE_VELOCITY_THRESHOLD = 0.55;
 const MOBILE_SHEET_INTERACTION_COOLDOWN_MS = 320;
-const accessTypeDisplayLabel: Record<NearbyBathroom["access_type"], string> = {
-  public: "Public",
-  customer_only: "Customer only",
-  code_required: "Code required",
-  staff_assisted: "Staff assisted"
-};
 const topPickAccessScore: Record<NearbyBathroom["access_type"], number> = {
   public: 12,
   customer_only: 6,
@@ -180,12 +172,11 @@ const topPickSignalScore: Record<string, number> = {
 const RECOMMENDATION_NEARBY_RADIUS_MILES = 2.5;
 const RECOMMENDATION_EXTENDED_RADIUS_MILES = 6;
 const RECOMMENDATION_FALLBACK_RADIUS_MILES = 12;
+const RECOMMENDATION_TITLE = "Closest in this area";
+const RECOMMENDATION_HELPER_TEXT = "A quick option to start with before browsing the full list.";
 
 interface RecommendationResult {
   restroom: NearbyBathroom;
-  label: string;
-  description: string;
-  isFallback: boolean;
 }
 
 interface MobileSheetMetrics {
@@ -271,7 +262,6 @@ const getExpandedMapTopPickScore = (restroom: NearbyBathroom, prioritizeDistance
 };
 
 export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
-  const router = useRouter();
   const [userLocation, setUserLocation] = useState<Coordinate | null>(null);
   const [geoError, setGeoError] = useState<string | null>(null);
   const [isLocating, setIsLocating] = useState(false);
@@ -447,34 +437,19 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     if (nearbyCandidates.length > 0) {
-      const hasSupportiveQualitySignal = restroom.ratings.reviewCount >= 3 && restroom.ratings.overall >= 4;
       return {
-        restroom,
-        label: hasSupportiveQualitySignal ? "Good nearby option" : "Closest nearby option",
-        description: hasSupportiveQualitySignal
-          ? "Close to you with solid early quality signals."
-          : "A close option with straightforward access details.",
-        isFallback: false
+        restroom
       };
     }
 
     if (extendedCandidates.length > 0) {
       return {
-        restroom,
-        label: "Closest nearby option",
-        description: "A practical nearby option a bit farther out.",
-        isFallback: false
+        restroom
       };
     }
 
     return {
-      restroom,
-      label: fallbackCandidates.length > 0 ? "Closest option in this map area" : "Option in this map area",
-      description:
-        fallbackCandidates.length > 0
-          ? "The closest reasonable option in the area you are browsing."
-          : "You are browsing farther from your current location, so this is the closest visible option.",
-      isFallback: true
+      restroom
     };
   }, [filteredRestrooms, hasRealUserLocation]);
 
@@ -1649,111 +1624,32 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       return null;
     }
 
-    const subtitle = getRestroomCardSubtitle(topPickRestroom);
-    const topSignalDescriptor = topPickRestroom.ratings.qualitySignals[0]
-      ? getReviewQuickTagDescriptor(topPickRestroom.ratings.qualitySignals[0])
-      : null;
-    const distanceLabel = toApproximateDistanceLabel(topPickRestroom.distanceMiles);
     const isHighlighted = isRailRestroomHighlighted(topPickRestroom.id);
-    const openRecommendationDetails = () => {
-      handleNavigateToDetail(topPickRestroom.id);
-      router.push(`/restroom/${topPickRestroom.id}`);
-    };
-    const handleRecommendationCardKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
-      if (event.key !== "Enter" && event.key !== " ") {
-        return;
-      }
-
-      event.preventDefault();
-      openRecommendationDetails();
-    };
-    const stopRecommendationCardClick = (event: ReactMouseEvent<HTMLElement>) => {
-      event.stopPropagation();
-    };
 
     return (
-      <article
-        role="link"
-        tabIndex={0}
-        onClick={openRecommendationDetails}
-        onKeyDown={handleRecommendationCardKeyDown}
-        onMouseEnter={() => handleRailRestroomHoverChange(topPickRestroom.id, true)}
-        onMouseLeave={() => handleRailRestroomHoverChange(topPickRestroom.id, false)}
-        onFocusCapture={() => handleRailRestroomHoverChange(topPickRestroom.id, true)}
-        onBlurCapture={(event) => handleRailRestroomBlur(topPickRestroom.id, event)}
-        onTouchStart={() => handleRailRestroomTouchSelect(topPickRestroom.id)}
+      <section
         className={cn(
-          "cursor-pointer rounded-2xl border border-brand-200 bg-white p-4 shadow-md ring-1 ring-brand-100/80 transition hover:border-brand-300 hover:shadow-lg",
-          isHighlighted && "border-brand-300 shadow-lg ring-2 ring-brand-100",
+          "rounded-2xl border border-brand-200/80 bg-brand-50/50 p-2 shadow-sm ring-1 ring-brand-100/80",
           isDesktopVariant ? "hidden lg:block" : "lg:hidden"
         )}
       >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-600">{recommendation.label}</p>
-            <h2 className="mt-1 truncate text-lg font-semibold text-slate-900">{getRestroomDisplayName(topPickRestroom)}</h2>
-            <p className="mt-1 text-sm leading-5 text-slate-600">{subtitle}</p>
-            <p className="mt-1 text-xs font-medium text-slate-500">{recommendation.description}</p>
-          </div>
-          {distanceLabel ? (
-            <div className="shrink-0 text-right">
-              <p className="text-lg font-semibold tracking-tight text-slate-900">{distanceLabel.replace(" away", "")}</p>
-              <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                {recommendation.isFallback ? "from you" : "away"}
-              </p>
-            </div>
-          ) : null}
+        <div className="mb-2 px-1">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-700">{RECOMMENDATION_TITLE}</p>
+          <p className="mt-0.5 text-xs text-slate-500">{RECOMMENDATION_HELPER_TEXT}</p>
         </div>
 
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
-            {getRestroomSourceLabel(topPickRestroom.source)}
-          </span>
-          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-            {accessTypeDisplayLabel[topPickRestroom.access_type]}
-          </span>
-          {topPickRestroom.is_accessible ? (
-            <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-              Accessible
-            </span>
-          ) : null}
-          {topSignalDescriptor ? (
-            <span
-              className={cn(
-                "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold",
-                reviewQuickTagToneClassName[topSignalDescriptor.tone]
-              )}
-            >
-              {topSignalDescriptor.icon} {topSignalDescriptor.label}
-            </span>
-          ) : null}
-        </div>
-
-        <div className="mt-3 flex items-center gap-2">
-          <TrackedNavigateLink
-            href={getGoogleMapsDirectionsUrl(topPickRestroom.lat, topPickRestroom.lng)}
-            bathroomId={topPickRestroom.id}
-            source="restroom_card"
-            sourceSurface="restroom_card"
-            viewportMode="homepage"
-            hasUserLocation={hasRealUserLocation}
-            onClick={stopRecommendationCardClick}
-            className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
-          >
-            Navigate
-          </TrackedNavigateLink>
-          <Link
-            href={`/restroom/${topPickRestroom.id}`}
-            onClick={(event) => {
-              stopRecommendationCardClick(event);
-              handleNavigateToDetail(topPickRestroom.id);
-            }}
-            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-          >
-            View
-          </Link>
-        </div>
-      </article>
+        <RestroomCard
+          restroom={topPickRestroom}
+          showDistance={hasRealUserLocation}
+          viewportMode="homepage"
+          hasUserLocation={hasRealUserLocation}
+          isHighlighted={isHighlighted}
+          onHoverChange={(isHovering) => handleRailRestroomHoverChange(topPickRestroom.id, isHovering)}
+          onTouchSelect={handleRailRestroomTouchSelect}
+          onNavigateToDetail={handleNavigateToDetail}
+          className="border-brand-200 bg-white shadow-md ring-1 ring-brand-100/80"
+        />
+      </section>
     );
   };
 
@@ -1768,7 +1664,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     const distanceLabel = hasRealUserLocation ? toApproximateDistanceLabel(expandedTopPickRestroom.distanceMiles) : "";
-    const isFarFromUser = hasRealUserLocation && expandedTopPickRestroom.distanceMiles > RECOMMENDATION_EXTENDED_RADIUS_MILES;
     const topSignalDescriptor = expandedTopPickRestroom.ratings.qualitySignals[0]
       ? getReviewQuickTagDescriptor(expandedTopPickRestroom.ratings.qualitySignals[0])
       : null;
@@ -1803,7 +1698,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Top pick in this area</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{RECOMMENDATION_TITLE}</p>
                   <h2 className="mt-1 truncate text-base font-semibold text-slate-900">{getRestroomDisplayName(expandedTopPickRestroom)}</h2>
                   <p className="mt-0.5 truncate text-sm text-slate-500">{getRestroomCardSubtitle(expandedTopPickRestroom)}</p>
                 </div>
@@ -1834,7 +1729,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               </div>
 
               <p className="mt-2 text-xs font-medium text-slate-500">
-                {isFarFromUser ? "Browsing outside your current location." : "Based on distance, rating, and review count."}
+                {RECOMMENDATION_HELPER_TEXT}
               </p>
 
               <div className="mt-3 flex items-center gap-2" onClick={stopCardActionPropagation}>
@@ -2078,7 +1973,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     const isHighlighted = highlightedListRestroomId === expandedMapRecommendation.id;
-    const recommendationLabel = hasRealUserLocation ? "Closest in this area" : "Best nearby option";
 
     return (
       <section
@@ -2087,14 +1981,9 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           isMobileSheetInteractionLocked && "pointer-events-none"
         )}
       >
-        <div className="mb-2 flex items-center justify-between gap-2 px-1">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-700">{recommendationLabel}</p>
-            <p className="mt-0.5 text-xs text-slate-500">A quick option to start with before browsing the full list.</p>
-          </div>
-          <span className="rounded-full border border-brand-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-brand-700 shadow-sm">
-            Featured
-          </span>
+        <div className="mb-2 px-1">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-700">{RECOMMENDATION_TITLE}</p>
+          <p className="mt-0.5 text-xs text-slate-500">{RECOMMENDATION_HELPER_TEXT}</p>
         </div>
 
         <RestroomCard
@@ -2134,7 +2023,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           !isExpandedVariant && topPickRestroom
             ? "Start with the recommended option above, then compare a few more close choices here."
             : isExpandedVariant && isMobilePreviewLayout && expandedMapRecommendation
-              ? "Featured first, then the rest of the visible options."
+              ? "Start with the recommended option above, then compare the rest of the visible options."
             : listHelperText
         }
         showDistance={hasRealUserLocation}
