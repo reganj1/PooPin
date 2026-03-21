@@ -14,6 +14,7 @@ interface TrackedNavigateLinkProps {
   viewportMode?: AnalyticsViewportMode;
   hasUserLocation?: boolean;
   onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
+  dataRestroomCardAction?: boolean;
 }
 
 export function TrackedNavigateLink({
@@ -25,7 +26,8 @@ export function TrackedNavigateLink({
   sourceSurface,
   viewportMode,
   hasUserLocation,
-  onClick
+  onClick,
+  dataRestroomCardAction = false
 }: TrackedNavigateLinkProps) {
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
     captureAnalyticsEvent("navigate_clicked", {
@@ -39,7 +41,14 @@ export function TrackedNavigateLink({
   };
 
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={className} onClick={handleClick}>
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={className}
+      onClick={handleClick}
+      data-restroom-card-action={dataRestroomCardAction ? "true" : undefined}
+    >
       {children}
     </a>
   );

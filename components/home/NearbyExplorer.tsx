@@ -2078,20 +2078,21 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     const isHighlighted = highlightedListRestroomId === expandedMapRecommendation.id;
-    const recommendationLabel = hasRealUserLocation
-      ? expandedMapRecommendation.distanceMiles <= RECOMMENDATION_NEARBY_RADIUS_MILES
-        ? "Top pick in this area"
-        : "Closest in this area"
-      : "Best nearby option";
+    const recommendationLabel = hasRealUserLocation ? "Closest in this area" : "Best nearby option";
 
     return (
-      <section className="rounded-2xl border border-brand-200/80 bg-brand-50/40 p-2 shadow-sm sm:hidden">
+      <section
+        className={cn(
+          "rounded-2xl border border-brand-200/80 bg-brand-50/50 p-2 shadow-sm ring-1 ring-brand-100/80 sm:hidden",
+          isMobileSheetInteractionLocked && "pointer-events-none"
+        )}
+      >
         <div className="mb-2 flex items-center justify-between gap-2 px-1">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-700">{recommendationLabel}</p>
             <p className="mt-0.5 text-xs text-slate-500">A quick option to start with before browsing the full list.</p>
           </div>
-          <span className="rounded-full border border-brand-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-brand-700">
+          <span className="rounded-full border border-brand-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-brand-700 shadow-sm">
             Featured
           </span>
         </div>
@@ -2105,6 +2106,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           onHoverChange={(isHovering) => handleRailRestroomHoverChange(expandedMapRecommendation.id, isHovering)}
           onTouchSelect={handleRailRestroomTouchSelect}
           onNavigateToDetail={handleNavigateToDetail}
+          className="border-brand-200 bg-white shadow-md ring-1 ring-brand-100/80"
         />
       </section>
     );
