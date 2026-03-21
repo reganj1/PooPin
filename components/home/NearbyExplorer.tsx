@@ -2180,13 +2180,19 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         <section className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-medium text-slate-600 lg:hidden">
           {areaDensityLabel}
         </section>
-        <div className="mt-4 flex min-w-0 flex-col gap-4">
-          <div className="order-1">{renderTopPickCard("mobile")}</div>
-          <div className="order-1">{renderTopPickCard("desktop")}</div>
-          <div className="order-2">{renderRestroomListSection("default")}</div>
-          <div className="order-3">{renderRecentlyViewedSection("mobile")}</div>
-          <div className="order-3">{renderRecentlyViewedSection("desktop")}</div>
-          <div className="order-4">{renderBrowseControls("default")}</div>
+
+        <div className="mt-4 flex min-w-0 flex-col gap-4 lg:hidden">
+          {renderTopPickCard("mobile")}
+          {renderRestroomListSection("default")}
+          {renderRecentlyViewedSection("mobile")}
+          {renderBrowseControls("default")}
+        </div>
+
+        <div className="mt-4 hidden min-w-0 flex-col gap-4 lg:flex">
+          {renderTopPickCard("desktop")}
+          {renderBrowseControls("default")}
+          {renderRestroomListSection("default")}
+          {renderRecentlyViewedSection("desktop")}
         </div>
       </div>
     );
