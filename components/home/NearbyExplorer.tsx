@@ -155,6 +155,7 @@ const MOBILE_SHEET_EXPANDED_VISIBLE_RATIO = 0.84;
 const MOBILE_SHEET_MAX_HEIGHT_RATIO = 0.86;
 const MOBILE_SHEET_SWIPE_VELOCITY_THRESHOLD = 0.55;
 const MOBILE_EXPANDED_TOP_PICK_RECOVERY_DELAY_MS = 260;
+const MOBILE_SHEET_INTERACTION_COOLDOWN_MS = 320;
 const accessTypeDisplayLabel: Record<NearbyBathroom["access_type"], string> = {
   public: "Public",
   customer_only: "Customer only",
@@ -317,6 +318,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const mobileSheetListDidPullRef = useRef(false);
   const mobileSheetDidDragRef = useRef(false);
   const mobileSheetDragResetTimeoutRef = useRef<number | null>(null);
+  const mobileSheetInteractionTimeoutRef = useRef<number | null>(null);
   const mobileExpandedTopPickTimeoutRef = useRef<number | null>(null);
   const hasRealUserLocation = userLocation !== null;
   const distanceOrigin = userLocation;
@@ -324,6 +326,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [isMobilePreviewLayout, setIsMobilePreviewLayout] = useState(false);
   const [isPrimaryLocationActionVisible, setIsPrimaryLocationActionVisible] = useState(true);
   const [isMobileExpandedTopPickIdle, setIsMobileExpandedTopPickIdle] = useState(false);
+  const [isMobileSheetInteractionLocked, setIsMobileSheetInteractionLocked] = useState(false);
   const mapRenderableRestrooms = useMemo(
     () => mapRestrooms.filter((restroom) => isValidMapCoordinate(restroom.lat, restroom.lng)),
     [mapRestrooms]
@@ -582,7 +585,9 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     isMapExpanded &&
     expandedMapRecommendation &&
     !mapFocusedRestroomId &&
-    (isMobilePreviewLayout ? mobileSheetState === "collapsed" && isMobileExpandedTopPickIdle : true);
+    (isMobilePreviewLayout
+      ? mobileSheetState === "collapsed" && !isMobileSheetInteractionLocked && isMobileExpandedTopPickIdle
+      : true);
 
   const clearMobileExpandedTopPickTimeout = useCallback(() => {
     if (typeof window === "undefined" || mobileExpandedTopPickTimeoutRef.current === null) {
@@ -591,6 +596,15 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
     window.clearTimeout(mobileExpandedTopPickTimeoutRef.current);
     mobileExpandedTopPickTimeoutRef.current = null;
+  }, []);
+
+  const clearMobileSheetInteractionTimeout = useCallback(() => {
+    if (typeof window === "undefined" || mobileSheetInteractionTimeoutRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(mobileSheetInteractionTimeoutRef.current);
+    mobileSheetInteractionTimeoutRef.current = null;
   }, []);
 
   const suppressMobileExpandedTopPick = useCallback(() => {
@@ -618,17 +632,43 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     [clearMobileExpandedTopPickTimeout, isMobilePreviewLayout]
   );
 
+  const lockMobileSheetInteraction = useCallback(() => {
+    if (!isMobilePreviewLayout) {
+      return;
+    }
+
+    clearMobileSheetInteractionTimeout();
+    setIsMobileSheetInteractionLocked(true);
+    suppressMobileExpandedTopPick();
+  }, [clearMobileSheetInteractionTimeout, isMobilePreviewLayout, suppressMobileExpandedTopPick]);
+
+  const settleMobileSheetInteraction = useCallback(
+    (delayMs = MOBILE_SHEET_INTERACTION_COOLDOWN_MS) => {
+      if (!isMobilePreviewLayout || typeof window === "undefined") {
+        return;
+      }
+
+      clearMobileSheetInteractionTimeout();
+      setIsMobileSheetInteractionLocked(true);
+      mobileSheetInteractionTimeoutRef.current = window.setTimeout(() => {
+        mobileSheetInteractionTimeoutRef.current = null;
+        setIsMobileSheetInteractionLocked(false);
+      }, delayMs);
+    },
+    [clearMobileSheetInteractionTimeout, isMobilePreviewLayout]
+  );
+
   const handleRailRestroomTouchSelect = useCallback(
     (restroomId: string) => {
       if (!mapVisibleRestroomIds.has(restroomId)) {
         return;
       }
 
-      suppressMobileExpandedTopPick();
+      settleMobileSheetInteraction();
       setMapFocusedRestroomId(restroomId);
       setListHoveredRestroomId(null);
     },
-    [mapVisibleRestroomIds, suppressMobileExpandedTopPick]
+    [mapVisibleRestroomIds, settleMobileSheetInteraction]
   );
 
   const handleExpandMap = () => {
@@ -655,7 +695,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       }
 
       if (isMobilePreviewLayout) {
-        suppressMobileExpandedTopPick();
+        settleMobileSheetInteraction();
         setMapFocusedRestroomId(restroomId);
         setListHoveredRestroomId(null);
         setMobileSheetState("collapsed");
@@ -665,7 +705,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       setMapFocusedRestroomId(restroomId);
       setListHoveredRestroomId(restroomId);
     },
-    [isMobilePreviewLayout, mapVisibleRestroomIds, suppressMobileExpandedTopPick]
+    [isMobilePreviewLayout, mapVisibleRestroomIds, settleMobileSheetInteraction]
   );
 
   const scheduleMobileSheetOffset = useCallback((offset: number, animated: boolean) => {
@@ -749,8 +789,9 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     [getNearestMobileSheetState]
   );
 
-  const handleMobileSheetHandleTap = useCallback(() => {
-    suppressMobileExpandedTopPick();
+  const handleMobileSheetHandleTap = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    lockMobileSheetInteraction();
 
     if (mobileSheetDidDragRef.current) {
       if (typeof window !== "undefined" && mobileSheetDragResetTimeoutRef.current !== null) {
@@ -758,6 +799,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         mobileSheetDragResetTimeoutRef.current = null;
       }
       mobileSheetDidDragRef.current = false;
+      settleMobileSheetInteraction();
       return;
     }
 
@@ -770,11 +812,13 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       }
       return "collapsed";
     });
-  }, [suppressMobileExpandedTopPick]);
+    settleMobileSheetInteraction();
+  }, [lockMobileSheetInteraction, settleMobileSheetInteraction]);
 
   const handleMobileSheetHandleTouchStart = useCallback(
     (event: TouchEvent<HTMLButtonElement>) => {
-      suppressMobileExpandedTopPick();
+      event.stopPropagation();
+      lockMobileSheetInteraction();
 
       if (typeof window === "undefined") {
         return;
@@ -808,12 +852,13 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       mobileSheetTouchStartOffsetRef.current = currentOffset;
       scheduleMobileSheetOffset(currentOffset, false);
     },
-    [mobileSheetState, scheduleMobileSheetOffset, suppressMobileExpandedTopPick]
+    [lockMobileSheetInteraction, mobileSheetState, scheduleMobileSheetOffset]
   );
 
   const handleMobileSheetHandleTouchMove = useCallback(
     (event: TouchEvent<HTMLButtonElement>) => {
-      suppressMobileExpandedTopPick();
+      event.stopPropagation();
+      lockMobileSheetInteraction();
 
       const startY = mobileSheetTouchStartYRef.current;
       const startOffset = mobileSheetTouchStartOffsetRef.current;
@@ -838,11 +883,11 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       const nextOffset = clampNumber(startOffset + (touchY - startY), metrics.minOffset, metrics.maxOffset);
       scheduleMobileSheetOffset(nextOffset, false);
     },
-    [scheduleMobileSheetOffset, suppressMobileExpandedTopPick]
+    [lockMobileSheetInteraction, scheduleMobileSheetOffset]
   );
 
   const handleMobileSheetHandleTouchCancel = useCallback(() => {
-    suppressMobileExpandedTopPick();
+    settleMobileSheetInteraction();
     const metrics = mobileSheetMetricsRef.current;
     mobileSheetTouchStartYRef.current = null;
     mobileSheetTouchStartOffsetRef.current = null;
@@ -854,11 +899,12 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
     const targetState = getNearestMobileSheetState(mobileSheetCurrentOffsetRef.current, metrics);
     setMobileSheetState(targetState);
-  }, [getNearestMobileSheetState, suppressMobileExpandedTopPick]);
+  }, [getNearestMobileSheetState, settleMobileSheetInteraction]);
 
   const handleMobileSheetHandleTouchEnd = useCallback(
     (event: TouchEvent<HTMLButtonElement>) => {
-      suppressMobileExpandedTopPick();
+      event.stopPropagation();
+      settleMobileSheetInteraction();
 
       const startY = mobileSheetTouchStartYRef.current;
       const startOffset = mobileSheetTouchStartOffsetRef.current;
@@ -887,12 +933,13 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         }, 260);
       }
     },
-    [resolveMobileSheetSnapState, suppressMobileExpandedTopPick]
+    [resolveMobileSheetSnapState, settleMobileSheetInteraction]
   );
 
   const handleMobileSheetContentTouchStart = useCallback(
     (event: TouchEvent<HTMLDivElement>) => {
-      suppressMobileExpandedTopPick();
+      event.stopPropagation();
+      lockMobileSheetInteraction();
 
       if (typeof window === "undefined") {
         return;
@@ -917,12 +964,13 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       mobileSheetListTouchStartTimeRef.current = performance.now();
       mobileSheetListDidPullRef.current = false;
     },
-    [mobileSheetState, suppressMobileExpandedTopPick]
+    [lockMobileSheetInteraction, mobileSheetState]
   );
 
   const handleMobileSheetContentTouchMove = useCallback(
     (event: TouchEvent<HTMLDivElement>) => {
-      suppressMobileExpandedTopPick();
+      event.stopPropagation();
+      lockMobileSheetInteraction();
 
       const startY = mobileSheetListTouchStartYRef.current;
       const startOffset = mobileSheetListTouchStartOffsetRef.current;
@@ -951,11 +999,12 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       const nextOffset = clampNumber(startOffset + deltaY, metrics.minOffset, metrics.maxOffset);
       scheduleMobileSheetOffset(nextOffset, false);
     },
-    [scheduleMobileSheetOffset, suppressMobileExpandedTopPick]
+    [lockMobileSheetInteraction, scheduleMobileSheetOffset]
   );
 
   const finishMobileSheetContentTouchGesture = useCallback((event?: TouchEvent<HTMLDivElement>) => {
-    suppressMobileExpandedTopPick();
+    event?.stopPropagation();
+    settleMobileSheetInteraction();
     const metrics = mobileSheetMetricsRef.current;
     const didPullSheet = mobileSheetListDidPullRef.current;
     const startY = mobileSheetListTouchStartYRef.current;
@@ -974,7 +1023,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     const duration = typeof startTime === "number" ? performance.now() - startTime : 0;
     const targetState = resolveMobileSheetSnapState(mobileSheetCurrentOffsetRef.current, deltaY, duration, metrics);
     setMobileSheetState(targetState);
-  }, [resolveMobileSheetSnapState, suppressMobileExpandedTopPick]);
+  }, [resolveMobileSheetSnapState, settleMobileSheetInteraction]);
 
   const toggleFilter = (filterKey: keyof FilterState) => {
     setFilters((current) => ({
@@ -1238,12 +1287,20 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
   useEffect(() => {
     if (!isMapExpanded || !isMobilePreviewLayout) {
+      clearMobileSheetInteractionTimeout();
+      setIsMobileSheetInteractionLocked(false);
+      return;
+    }
+  }, [clearMobileSheetInteractionTimeout, isMapExpanded, isMobilePreviewLayout]);
+
+  useEffect(() => {
+    if (!isMapExpanded || !isMobilePreviewLayout) {
       clearMobileExpandedTopPickTimeout();
       setIsMobileExpandedTopPickIdle(false);
       return;
     }
 
-    if (mapFocusedRestroomId || mobileSheetState !== "collapsed") {
+    if (mapFocusedRestroomId || mobileSheetState !== "collapsed" || isMobileSheetInteractionLocked) {
       suppressMobileExpandedTopPick();
       return;
     }
@@ -1253,6 +1310,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     clearMobileExpandedTopPickTimeout,
     isMapExpanded,
     isMobilePreviewLayout,
+    isMobileSheetInteractionLocked,
     mapFocusedRestroomId,
     mobileSheetState,
     scheduleMobileExpandedTopPickIdle,
@@ -1274,6 +1332,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         window.clearTimeout(mobileExpandedTopPickTimeoutRef.current);
       }
       mobileExpandedTopPickTimeoutRef.current = null;
+      if (typeof window !== "undefined" && mobileSheetInteractionTimeoutRef.current !== null) {
+        window.clearTimeout(mobileSheetInteractionTimeoutRef.current);
+      }
+      mobileSheetInteractionTimeoutRef.current = null;
     };
   }, []);
 
@@ -1294,12 +1356,12 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, [listHoveredRestroomId, mapFocusedRestroomId, mapRenderableRestrooms]);
 
   useEffect(() => {
-    if (!isMapExpanded || !isMobilePreviewLayout || !mapFocusedRestroomId) {
+    if (!isMapExpanded || !isMobilePreviewLayout || !mapFocusedRestroomId || isMobileSheetInteractionLocked) {
       return;
     }
 
     setMobileSheetState((current) => (current === "collapsed" ? current : "collapsed"));
-  }, [isMapExpanded, isMobilePreviewLayout, mapFocusedRestroomId]);
+  }, [isMapExpanded, isMobilePreviewLayout, isMobileSheetInteractionLocked, mapFocusedRestroomId]);
 
   useEffect(() => {
     if (!isMapExpanded || typeof document === "undefined" || typeof window === "undefined") {
@@ -1569,6 +1631,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     const isExpandedVariant = variant === "expanded";
+    if (isExpandedVariant && isMobilePreviewLayout && isMobileSheetInteractionLocked) {
+      return null;
+    }
+
     const bottomStyle = isExpandedVariant ? { bottom: "calc(env(safe-area-inset-bottom) + 84px)" } : undefined;
 
     return (
