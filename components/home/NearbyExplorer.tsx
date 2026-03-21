@@ -14,6 +14,7 @@ import {
 import { TrackedNavigateLink } from "@/components/analytics/TrackedNavigateLink";
 import { MapPanel } from "@/components/map/MapPanel";
 import { MobileRestroomPreviewCard } from "@/components/map/MobileRestroomPreviewCard";
+import { useLocationTracking } from "@/components/providers/LocationTrackingProvider";
 import { RestroomCard } from "@/components/restroom/RestroomCard";
 import { RestroomList } from "@/components/restroom/RestroomList";
 import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
@@ -72,7 +73,6 @@ interface PersistedHomeMapState {
   mapCamera: MapCamera | null;
   sortMode: SortMode;
   filters: FilterState;
-  userLocation: Coordinate | null;
   pendingRestore: boolean;
   scrollY: number;
 }
@@ -105,18 +105,6 @@ const isValidFilterState = (value: unknown): value is FilterState =>
       typeof (value as FilterState).accessible === "boolean" &&
       typeof (value as FilterState).babyStation === "boolean"
   );
-const isValidCoordinate = (value: unknown): value is Coordinate =>
-  Boolean(
-    value &&
-      typeof value === "object" &&
-      Number.isFinite((value as Coordinate).lat) &&
-      Number.isFinite((value as Coordinate).lng) &&
-      (value as Coordinate).lat >= -90 &&
-      (value as Coordinate).lat <= 90 &&
-      (value as Coordinate).lng >= -180 &&
-      (value as Coordinate).lng <= 180
-  );
-
 const haversineDistanceMiles = (origin: Coordinate, point: Coordinate) => {
   const earthRadiusMiles = 3958.8;
   const dLat = toRadians(point.lat - origin.lat);
@@ -132,23 +120,8 @@ const haversineDistanceMiles = (origin: Coordinate, point: Coordinate) => {
   return earthRadiusMiles * c;
 };
 
-const toGeoErrorMessage = (error: GeolocationPositionError) => {
-  switch (error.code) {
-    case error.PERMISSION_DENIED:
-      return "Location permission denied. Showing default city-center results.";
-    case error.POSITION_UNAVAILABLE:
-      return "Location unavailable. Showing default city-center results.";
-    case error.TIMEOUT:
-      return "Location request timed out. Showing default city-center results.";
-    default:
-      return "Could not use your location. Showing default city-center results.";
-  }
-};
-
 const toBoundsKey = (bounds: MapBounds) =>
   `${bounds.minLat.toFixed(4)}:${bounds.maxLat.toFixed(4)}:${bounds.minLng.toFixed(4)}:${bounds.maxLng.toFixed(4)}`;
-
-const isLocalhostHost = (hostname: string) => hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 const MOBILE_SHEET_COLLAPSED_VISIBLE_PX = 54;
 const MOBILE_SHEET_DEFAULT_VISIBLE_RATIO = 0.5;
 const MOBILE_SHEET_EXPANDED_VISIBLE_RATIO = 0.84;
@@ -341,18 +314,24 @@ const resolveClosestInAreaRecommendation = (candidates: NearbyBathroom[], origin
 };
 
 export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
-  const [userLocation, setUserLocation] = useState<Coordinate | null>(null);
-  const [geoError, setGeoError] = useState<string | null>(null);
-  const [isLocating, setIsLocating] = useState(false);
-  const [isLocationTrackingEnabled, setIsLocationTrackingEnabled] = useState(false);
-  const [isFollowingUserLocation, setIsFollowingUserLocation] = useState(false);
+  const {
+    currentLocation: userLocation,
+    geoError,
+    isLocating,
+    isLocationTrackingEnabled,
+    isFollowingUserLocation,
+    locationCenterRequestKey,
+    hasActiveUserLocation,
+    requestLocationTracking,
+    stopLocationTracking,
+    setIsFollowingUserLocation
+  } = useLocationTracking();
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [isExpandedListOpen, setIsExpandedListOpen] = useState(true);
   const [mobileSheetState, setMobileSheetState] = useState<MobileSheetState>("default");
   const [listHoveredRestroomId, setListHoveredRestroomId] = useState<string | null>(null);
   const [mapFocusedRestroomId, setMapFocusedRestroomId] = useState<string | null>(null);
   const [mapCamera, setMapCamera] = useState<MapCamera | null>(null);
-  const [locationCenterRequestKey, setLocationCenterRequestKey] = useState(0);
   const [sortMode, setSortMode] = useState<SortMode>("recommended");
   const [recentlyViewedRestrooms, setRecentlyViewedRestrooms] = useState<RecentRestroomSnapshot[]>([]);
   const [filters, setFilters] = useState<FilterState>({
@@ -365,8 +344,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
   const latestBoundsKeyRef = useRef<string>("");
   const activeBoundsRequestIdRef = useRef(0);
-  const locationWatchIdRef = useRef<number | null>(null);
-  const pendingLocationCenterOnResolveRef = useRef(false);
   const invalidBoundsCoordinatesLogKeyRef = useRef<string>("");
   const mapCameraRef = useRef<MapCamera | null>(null);
   const hasHydratedMapStateRef = useRef(false);
@@ -396,9 +373,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [isPrimaryLocationActionVisible, setIsPrimaryLocationActionVisible] = useState(true);
   const [isMobileSheetInteractionLocked, setIsMobileSheetInteractionLocked] = useState(false);
   const [hasStartedBrowsing, setHasStartedBrowsing] = useState(false);
-  const [isAwaitingLocationFix, setIsAwaitingLocationFix] = useState(false);
-  const hasResolvedUserLocation = userLocation !== null;
-  const hasActiveUserLocation = isLocationTrackingEnabled && !isAwaitingLocationFix && hasResolvedUserLocation;
   const activeUserLocation = hasActiveUserLocation ? userLocation : null;
   const distanceOrigin = activeUserLocation;
   const mapRenderableRestrooms = useMemo(
@@ -1047,17 +1021,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }));
   };
 
-  const stopLocationWatch = useCallback(() => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      return;
-    }
-
-    if (locationWatchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(locationWatchIdRef.current);
-      locationWatchIdRef.current = null;
-    }
-  }, []);
-
   const persistHomeMapState = useCallback(
     (overrides?: Partial<PersistedHomeMapState>) => {
       if (typeof window === "undefined") {
@@ -1071,7 +1034,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         mapCamera: mapCameraRef.current,
         sortMode,
         filters,
-        userLocation,
         pendingRestore: false,
         scrollY: pendingExpandedMapScrollRestoreRef.current ?? window.scrollY,
         ...overrides
@@ -1079,7 +1041,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
       window.sessionStorage.setItem(HOME_MAP_STATE_STORAGE_KEY, JSON.stringify(payload));
     },
-    [filters, isExpandedListOpen, isMapExpanded, sortMode, userLocation]
+    [filters, isExpandedListOpen, isMapExpanded, sortMode]
   );
 
   useEffect(() => {
@@ -1121,11 +1083,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
       if (isValidFilterState(parsed.filters)) {
         setFilters(parsed.filters);
-      }
-
-      const restoredUserLocation = parsed.userLocation ?? null;
-      if (isValidCoordinate(restoredUserLocation)) {
-        setUserLocation(restoredUserLocation);
       }
 
       if (parsed.pendingRestore && typeof parsed.scrollY === "number" && Number.isFinite(parsed.scrollY)) {
@@ -1464,132 +1421,20 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
   }, [hasActiveUserLocation, sortMode]);
 
-  useEffect(() => {
-    return () => {
-      stopLocationWatch();
-    };
-  }, [stopLocationWatch]);
-
   const handleUseMyLocation = () => {
     const sourceSurface = isMapExpanded ? "expanded_map_controls" : "homepage_controls";
     const viewportMode = isMapExpanded ? "expanded_map" : "homepage";
-    const geolocationOptions: PositionOptions = {
-      enableHighAccuracy: false,
-      timeout: 12000,
-      maximumAge: 15000
-    };
     captureAnalyticsEvent("locate_clicked", {
       source_surface: sourceSurface,
       viewport_mode: viewportMode,
       has_user_location: hasActiveUserLocation,
       status: isLocationTrackingEnabled ? "recenter_requested" : "requested"
     });
-
-    setGeoError(null);
-
-    if (typeof window !== "undefined" && !window.isSecureContext && !isLocalhostHost(window.location.hostname)) {
-      setGeoError("Location needs HTTPS on mobile. Open Poopin over HTTPS (or localhost) to use Locate.");
-      setIsLocating(false);
-      setIsAwaitingLocationFix(false);
-      pendingLocationCenterOnResolveRef.current = false;
-      stopLocationWatch();
-      setIsLocationTrackingEnabled(false);
-      setIsFollowingUserLocation(false);
-      return;
-    }
-
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      setGeoError("Geolocation is not available in this browser. Showing default city-center results.");
-      setUserLocation(null);
-      setIsAwaitingLocationFix(false);
-      pendingLocationCenterOnResolveRef.current = false;
-      setIsLocationTrackingEnabled(false);
-      setIsFollowingUserLocation(false);
-      return;
-    }
-
-    setIsFollowingUserLocation(true);
-    setIsLocationTrackingEnabled(true);
-
-    if (locationWatchIdRef.current !== null && activeUserLocation) {
-      pendingLocationCenterOnResolveRef.current = false;
-      setIsAwaitingLocationFix(false);
-      setLocationCenterRequestKey((current) => current + 1);
-      return;
-    }
-
-    const handleResolvedPosition = (position: GeolocationPosition) => {
-      setUserLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
-      setGeoError(null);
-      setIsLocating(false);
-      setIsAwaitingLocationFix(false);
-      setIsLocationTrackingEnabled(true);
-      if (pendingLocationCenterOnResolveRef.current) {
-        pendingLocationCenterOnResolveRef.current = false;
-        setLocationCenterRequestKey((current) => current + 1);
-      }
-    };
-
-    const handleGeolocationError = (error: GeolocationPositionError) => {
-      setGeoError(toGeoErrorMessage(error));
-      setIsLocating(false);
-      setIsAwaitingLocationFix(false);
-      pendingLocationCenterOnResolveRef.current = false;
-
-      if (error.code === error.PERMISSION_DENIED) {
-        stopLocationWatch();
-        setUserLocation(null);
-        setIsLocationTrackingEnabled(false);
-        setIsFollowingUserLocation(false);
-      }
-    };
-
-    pendingLocationCenterOnResolveRef.current = true;
-    setIsAwaitingLocationFix(true);
-    setIsLocating(true);
-
-    try {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          handleResolvedPosition(position);
-
-          if (locationWatchIdRef.current !== null) {
-            return;
-          }
-
-          try {
-            const watchId = navigator.geolocation.watchPosition(handleResolvedPosition, handleGeolocationError, geolocationOptions);
-            locationWatchIdRef.current = watchId;
-          } catch {
-            setGeoError("Could not enable live location updates. Showing map results without user distance.");
-            setIsLocationTrackingEnabled(false);
-            setIsFollowingUserLocation(false);
-            setUserLocation(null);
-          }
-        },
-        handleGeolocationError,
-        geolocationOptions
-      );
-    } catch {
-      setGeoError("Could not enable live location updates. Showing map results without user distance.");
-      setIsLocating(false);
-      setIsAwaitingLocationFix(false);
-      pendingLocationCenterOnResolveRef.current = false;
-      stopLocationWatch();
-      setIsLocationTrackingEnabled(false);
-      setIsFollowingUserLocation(false);
-    }
+    requestLocationTracking();
   };
 
   const handleStopLocationTracking = () => {
-    stopLocationWatch();
-    setIsLocating(false);
-    setIsAwaitingLocationFix(false);
-    pendingLocationCenterOnResolveRef.current = false;
-    setIsLocationTrackingEnabled(false);
-    setIsFollowingUserLocation(false);
-    setUserLocation(null);
-    setGeoError(null);
+    stopLocationTracking();
   };
 
   const handleViewportBoundsChange = useCallback((bounds: MapBounds) => {
