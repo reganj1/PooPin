@@ -48,16 +48,10 @@ interface RestroomMapProps {
   locationCenterRequestKey?: number;
   locationFollowEnabled?: boolean;
   onLocationFollowChange?: (enabled: boolean) => void;
-  resizeKey?: string | number;
 }
 
 interface RestroomFeatureProperties {
   id: string;
-  name: string;
-  subtitle: string;
-  distance_miles: number;
-  overall_rating: number;
-  quality_signals: string;
 }
 
 const SOURCE_ID = "restrooms-source";
@@ -101,12 +95,7 @@ const toFeatureCollection = (restrooms: NearbyBathroom[]): FeatureCollection<Poi
           coordinates: [restroom.lng, restroom.lat]
         },
         properties: {
-          id: restroom.id,
-          name: getRestroomDisplayName(restroom),
-          subtitle: getRestroomPopupAddress(restroom),
-          distance_miles: restroom.distanceMiles,
-          overall_rating: restroom.ratings.overall,
-          quality_signals: restroom.ratings.qualitySignals.join("|")
+          id: restroom.id
         }
       }))
   };
@@ -244,8 +233,7 @@ export function RestroomMap({
   onNavigateToDetail,
   locationCenterRequestKey = 0,
   locationFollowEnabled = false,
-  onLocationFollowChange,
-  resizeKey
+  onLocationFollowChange
 }: RestroomMapProps) {
   const router = useRouter();
   const [isMapReady, setIsMapReady] = useState(false);
@@ -278,9 +266,20 @@ export function RestroomMap({
   const userInteractionHandlerRef = useRef<(() => void) | null>(null);
   const locationFollowEnabledRef = useRef(locationFollowEnabled);
   const onLocationFollowChangeRef = useRef(onLocationFollowChange);
+  const onFocusedRestroomIdChangeRef = useRef(onFocusedRestroomIdChange);
+  const onNavigateToDetailRef = useRef(onNavigateToDetail);
   const manualInteractionSignalRef = useRef(false);
   const manualInteractionResetTimeoutRef = useRef<number | null>(null);
+  const appliedMarkerGeometrySignatureRef = useRef("");
 
+  const markerGeometrySignature = useMemo(
+    () =>
+      restrooms
+        .filter((restroom) => isValidCoordinate(restroom.lat, restroom.lng))
+        .map((restroom) => `${restroom.id}:${restroom.lat.toFixed(5)}:${restroom.lng.toFixed(5)}`)
+        .join("|"),
+    [restrooms]
+  );
   const markerData = useMemo(() => toFeatureCollection(restrooms), [restrooms]);
   const restroomById = useMemo(() => new Map(restrooms.map((restroom) => [restroom.id, restroom])), [restrooms]);
   const userLocationData = useMemo(() => toUserLocationFeatureCollection(userLocation), [userLocation]);
@@ -297,6 +296,14 @@ export function RestroomMap({
   useEffect(() => {
     onLocationFollowChangeRef.current = onLocationFollowChange;
   }, [onLocationFollowChange]);
+
+  useEffect(() => {
+    onFocusedRestroomIdChangeRef.current = onFocusedRestroomIdChange;
+  }, [onFocusedRestroomIdChange]);
+
+  useEffect(() => {
+    onNavigateToDetailRef.current = onNavigateToDetail;
+  }, [onNavigateToDetail]);
 
   useEffect(() => {
     const prioritizedRestroomIds = [focusedRestroomId, hoveredRestroomId].filter((value): value is string => Boolean(value));
@@ -462,6 +469,7 @@ export function RestroomMap({
       }
       manualInteractionResetTimeoutRef.current = null;
       manualInteractionSignalRef.current = false;
+      appliedMarkerGeometrySignatureRef.current = "";
       missingHoveredMarkerLogSet.clear();
       invalidCoordinatesLogKeyRef.current = "";
       clickHandlerRef.current = null;
@@ -473,9 +481,9 @@ export function RestroomMap({
       userInteractionHandlerRef.current = null;
       mapRef.current = null;
       mapboxRef.current = null;
-      onFocusedRestroomIdChange?.(null);
+      onFocusedRestroomIdChangeRef.current?.(null);
     };
-  }, [accessToken, onFocusedRestroomIdChange]);
+  }, [accessToken]);
 
   useEffect(() => {
     if (!isMapReady) {
@@ -662,7 +670,9 @@ export function RestroomMap({
 
     const existingSource = map.getSource(SOURCE_ID);
     if (existingSource) {
-      (existingSource as mapboxgl.GeoJSONSource).setData(markerData);
+      if (appliedMarkerGeometrySignatureRef.current !== markerGeometrySignature) {
+        (existingSource as mapboxgl.GeoJSONSource).setData(markerData);
+      }
     } else {
       map.addSource(SOURCE_ID, {
         type: "geojson",
@@ -670,6 +680,7 @@ export function RestroomMap({
         promoteId: "id"
       });
     }
+    appliedMarkerGeometrySignatureRef.current = markerGeometrySignature;
 
     if (!map.getLayer(HOVER_HALO_LAYER_ID)) {
       map.addLayer({
@@ -805,7 +816,7 @@ export function RestroomMap({
         popupRef.current = null;
         activePopupRestroomIdRef.current = null;
         mapHoveredRestroomIdRef.current = null;
-        onFocusedRestroomIdChange?.(null);
+        onFocusedRestroomIdChangeRef.current?.(null);
         setHoveredFeatureState(null);
       };
 
@@ -832,7 +843,7 @@ export function RestroomMap({
           has_user_location: hasUserLocation
         });
 
-        onFocusedRestroomIdChange?.(id);
+        onFocusedRestroomIdChangeRef.current?.(id);
         mapHoveredRestroomIdRef.current = null;
         if (isCoarsePointerRef.current) {
           if (activePopupRestroomIdRef.current !== id) {
@@ -865,7 +876,7 @@ export function RestroomMap({
         }
 
         clearDesktopHoverPopup();
-        onNavigateToDetail?.(id);
+        onNavigateToDetailRef.current?.(id);
         router.push(`/restroom/${id}`);
       };
 
@@ -894,7 +905,7 @@ export function RestroomMap({
         if (typeof restroomId === "string" && mapHoveredRestroomIdRef.current !== restroomId) {
           mapHoveredRestroomIdRef.current = restroomId;
           setHoveredFeatureState(resolveHoveredRestroomId());
-          onFocusedRestroomIdChange?.(restroomId);
+          onFocusedRestroomIdChangeRef.current?.(restroomId);
           syncDesktopHoverPopup();
         }
         map.getCanvas().style.cursor = "pointer";
@@ -907,7 +918,7 @@ export function RestroomMap({
 
         mapHoveredRestroomIdRef.current = null;
         setHoveredFeatureState(resolveHoveredRestroomId());
-        onFocusedRestroomIdChange?.(hoveredRestroomId ?? null);
+        onFocusedRestroomIdChangeRef.current?.(hoveredRestroomId ?? null);
         syncDesktopHoverPopup();
         map.getCanvas().style.cursor = "";
       };
@@ -927,7 +938,7 @@ export function RestroomMap({
 
         mapHoveredRestroomIdRef.current = null;
         setHoveredFeatureState(resolveHoveredRestroomId());
-        onFocusedRestroomIdChange?.(hoveredRestroomId ?? null);
+        onFocusedRestroomIdChangeRef.current?.(hoveredRestroomId ?? null);
         syncDesktopHoverPopup();
       };
 
@@ -976,7 +987,7 @@ export function RestroomMap({
       desktopPopupRestroomIdRef.current = null;
       mapHoveredRestroomIdRef.current = null;
       setHoveredFeatureState(null);
-      onFocusedRestroomIdChange?.(null);
+      onFocusedRestroomIdChangeRef.current?.(null);
     }
     setHoveredFeatureState(resolveHoveredRestroomId());
     syncDesktopHoverPopup();
@@ -987,9 +998,8 @@ export function RestroomMap({
     hoveredRestroomId,
     isMapReady,
     markerData,
+    markerGeometrySignature,
     restroomById,
-    onFocusedRestroomIdChange,
-    onNavigateToDetail,
     restrooms.length,
     router,
     showDistance,
@@ -1204,7 +1214,7 @@ export function RestroomMap({
     return () => {
       window.cancelAnimationFrame(firstFrame);
     };
-  }, [isMapReady, resizeKey]);
+  }, [isMapReady]);
 
   useEffect(() => {
     if (!isMapReady || typeof ResizeObserver === "undefined") {

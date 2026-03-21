@@ -32,7 +32,6 @@ interface MapPanelProps {
   locationCenterRequestKey?: number;
   locationFollowEnabled?: boolean;
   onLocationFollowChange?: (enabled: boolean) => void;
-  resizeKey?: string | number;
   className?: string;
   mapClassName?: string;
   showHeader?: boolean;
@@ -55,7 +54,6 @@ export function MapPanel({
   locationCenterRequestKey = 0,
   locationFollowEnabled = false,
   onLocationFollowChange,
-  resizeKey,
   className,
   mapClassName,
   showHeader = true,
@@ -167,7 +165,6 @@ export function MapPanel({
           locationCenterRequestKey={locationCenterRequestKey}
           locationFollowEnabled={locationFollowEnabled}
           onLocationFollowChange={onLocationFollowChange}
-          resizeKey={resizeKey}
         />
       </div>
     </section>

@@ -2365,7 +2365,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 locationFollowEnabled={isFollowingUserLocation}
                 onLocationFollowChange={setIsFollowingUserLocation}
                 analyticsViewportMode={isMapExpanded ? "expanded_map" : "homepage"}
-                resizeKey={`${isMapExpanded ? "expanded" : "default"}:${isExpandedListOpen ? "list-open" : "list-closed"}`}
                 className={cn(isMapExpanded && "relative z-10 h-full rounded-none border-0 shadow-none")}
                 mapClassName={cn(isMapExpanded && "h-full min-h-0")}
                 showHeader={!isMapExpanded}
