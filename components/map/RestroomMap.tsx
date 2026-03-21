@@ -523,7 +523,7 @@ export function RestroomMap({
         return focusedRestroomId;
       }
 
-      return hoveredRestroomId ?? mapHoveredRestroomIdRef.current;
+      return hoveredRestroomId ?? mapHoveredRestroomIdRef.current ?? focusedRestroomId;
     };
 
     const clearDesktopHoverPopup = () => {
@@ -921,7 +921,7 @@ export function RestroomMap({
           return;
         }
 
-        if (!mapHoveredRestroomIdRef.current && !hoveredRestroomId) {
+        if (!mapHoveredRestroomIdRef.current && !hoveredRestroomId && !focusedRestroomId) {
           return;
         }
 

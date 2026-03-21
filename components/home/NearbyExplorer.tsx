@@ -259,6 +259,14 @@ const getTopPickScore = (restroom: NearbyBathroom) => {
   );
 };
 
+const getExpandedMapTopPickScore = (restroom: NearbyBathroom, prioritizeDistance: boolean) => {
+  const distanceScore = prioritizeDistance ? Math.max(0, 120 - restroom.distanceMiles * 34) : 0;
+  const ratingScore = restroom.ratings.overall > 0 ? restroom.ratings.overall * 9 : 0;
+  const reviewScore = Math.min(restroom.ratings.reviewCount, 20) * 0.45;
+
+  return distanceScore + ratingScore + reviewScore;
+};
+
 export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const router = useRouter();
   const [userLocation, setUserLocation] = useState<Coordinate | null>(null);
@@ -463,6 +471,37 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     };
   }, [filteredRestrooms, hasRealUserLocation]);
 
+  const expandedMapRecommendation = useMemo<NearbyBathroom | null>(() => {
+    if (filteredRestrooms.length === 0) {
+      return null;
+    }
+
+    const prioritizeDistance = hasRealUserLocation;
+
+    return (
+      [...filteredRestrooms].sort((a, b) => {
+        const scoreDifference = getExpandedMapTopPickScore(b, prioritizeDistance) - getExpandedMapTopPickScore(a, prioritizeDistance);
+        if (scoreDifference !== 0) {
+          return scoreDifference;
+        }
+
+        if (prioritizeDistance && a.distanceMiles !== b.distanceMiles) {
+          return a.distanceMiles - b.distanceMiles;
+        }
+
+        if (b.ratings.overall !== a.ratings.overall) {
+          return b.ratings.overall - a.ratings.overall;
+        }
+
+        if (b.ratings.reviewCount !== a.ratings.reviewCount) {
+          return b.ratings.reviewCount - a.ratings.reviewCount;
+        }
+
+        return a.name.localeCompare(b.name);
+      })[0] ?? null
+    );
+  }, [filteredRestrooms, hasRealUserLocation]);
+
   const topPickRestroom = recommendation?.restroom ?? null;
   const mapVisibleRestroomIds = useMemo(() => new Set(mapDisplayRestrooms.map((restroom) => restroom.id)), [mapDisplayRestrooms]);
 
@@ -547,6 +586,13 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   );
   const selectedMapRestroomId = selectedMapRestroom?.id ?? null;
   const selectedMapRestroomPreviewPhotoUrl = selectedMapRestroomId ? mobilePreviewPhotoByRestroomId[selectedMapRestroomId] ?? null : null;
+  const shouldShowExpandedMapTopPick =
+    isMapExpanded &&
+    expandedMapRecommendation &&
+    !selectedMapRestroomId &&
+    !listHoveredRestroomId &&
+    !mapFocusedRestroomId &&
+    (!isMobilePreviewLayout || mobileSheetState === "collapsed");
 
   const handleExpandMap = () => {
     if (typeof window !== "undefined") {
@@ -564,6 +610,25 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     setMobileSheetState("default");
     setIsMapExpanded(true);
   };
+
+  const focusExpandedRecommendation = useCallback(
+    (restroomId: string) => {
+      if (!mapVisibleRestroomIds.has(restroomId)) {
+        return;
+      }
+
+      if (isMobilePreviewLayout) {
+        setMapFocusedRestroomId(restroomId);
+        setListHoveredRestroomId(null);
+        setMobileSheetState("collapsed");
+        return;
+      }
+
+      setMapFocusedRestroomId(restroomId);
+      setListHoveredRestroomId(restroomId);
+    },
+    [isMobilePreviewLayout, mapVisibleRestroomIds]
+  );
 
   const scheduleMobileSheetOffset = useCallback((offset: number, animated: boolean) => {
     const sheetElement = mobileSheetRef.current;
@@ -1425,17 +1490,17 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     const isExpandedVariant = variant === "expanded";
-    const bottomStyle = isExpandedVariant ? { bottom: "calc(env(safe-area-inset-bottom) + 96px)" } : undefined;
+    const bottomStyle = isExpandedVariant ? { bottom: "calc(env(safe-area-inset-bottom) + 84px)" } : undefined;
 
     return (
       <div
         className={cn(
-          "pointer-events-none absolute inset-x-3 sm:hidden",
+          "pointer-events-none absolute inset-x-2.5 sm:hidden",
           isExpandedVariant ? "z-[12] transition-[bottom] duration-200 ease-out" : "bottom-3 z-[24]"
         )}
         style={bottomStyle}
       >
-        <div className="pointer-events-auto">
+        <div className="pointer-events-auto mx-auto max-w-[430px]">
           <MobileRestroomPreviewCard
             restroom={selectedMapRestroom}
             showDistance={hasRealUserLocation}
@@ -1454,6 +1519,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     const isDesktopVariant = variant === "desktop";
+    if (!isDesktopVariant && selectedMapRestroom && !isMapExpanded) {
+      return null;
+    }
+
     const subtitle = getRestroomCardSubtitle(topPickRestroom);
     const topSignalDescriptor = topPickRestroom.ratings.qualitySignals[0]
       ? getReviewQuickTagDescriptor(topPickRestroom.ratings.qualitySignals[0])
@@ -1559,6 +1628,190 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           </Link>
         </div>
       </article>
+    );
+  };
+
+  const renderExpandedMapTopPickOverlay = () => {
+    if (!shouldShowExpandedMapTopPick || !expandedMapRecommendation) {
+      return null;
+    }
+
+    const distanceLabel = hasRealUserLocation ? toApproximateDistanceLabel(expandedMapRecommendation.distanceMiles) : "";
+    const isFarFromUser = hasRealUserLocation && expandedMapRecommendation.distanceMiles > RECOMMENDATION_EXTENDED_RADIUS_MILES;
+    const topSignalDescriptor = expandedMapRecommendation.ratings.qualitySignals[0]
+      ? getReviewQuickTagDescriptor(expandedMapRecommendation.ratings.qualitySignals[0])
+      : null;
+    const activateRecommendation = () => {
+      focusExpandedRecommendation(expandedMapRecommendation.id);
+    };
+    const stopCardActionPropagation = (event: ReactMouseEvent<HTMLElement>) => {
+      event.stopPropagation();
+    };
+
+    return (
+      <>
+        <div className="pointer-events-none absolute inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+72px)] z-[18] sm:hidden">
+          <div className="pointer-events-auto mx-auto max-w-[420px]">
+            <article
+              role="button"
+              tabIndex={0}
+              onClick={activateRecommendation}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") {
+                  return;
+                }
+
+                event.preventDefault();
+                activateRecommendation();
+              }}
+              className="rounded-[1.35rem] border border-slate-200/90 bg-white/96 p-3 shadow-xl backdrop-blur"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Top pick in this area</p>
+                  <h2 className="mt-1 truncate text-sm font-semibold text-slate-900">{getRestroomDisplayName(expandedMapRecommendation)}</h2>
+                  <p className="mt-0.5 truncate text-xs text-slate-500">{getRestroomCardSubtitle(expandedMapRecommendation)}</p>
+                  <p className="mt-1 text-[11px] font-medium text-slate-500">
+                    {isFarFromUser ? "Browsing outside your current location." : "Based on distance and visible review signal."}
+                  </p>
+                </div>
+                {distanceLabel ? (
+                  <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                    {distanceLabel.replace(" away", "")}
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {topSignalDescriptor ? (
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                      reviewQuickTagToneClassName[topSignalDescriptor.tone]
+                    )}
+                  >
+                    {topSignalDescriptor.icon} {topSignalDescriptor.label}
+                  </span>
+                ) : null}
+                {expandedMapRecommendation.ratings.overall > 0 ? (
+                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                    ⭐ {expandedMapRecommendation.ratings.overall.toFixed(1)}
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="mt-3 flex items-center gap-2" onClick={stopCardActionPropagation}>
+                <TrackedNavigateLink
+                  href={getGoogleMapsDirectionsUrl(expandedMapRecommendation.lat, expandedMapRecommendation.lng)}
+                  bathroomId={expandedMapRecommendation.id}
+                  source="mobile_preview"
+                  sourceSurface="mobile_preview"
+                  viewportMode="expanded_map"
+                  hasUserLocation={hasRealUserLocation}
+                  onClick={stopCardActionPropagation}
+                  className="inline-flex min-h-[40px] flex-1 items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
+                >
+                  Navigate
+                </TrackedNavigateLink>
+                <Link
+                  href={`/restroom/${expandedMapRecommendation.id}`}
+                  onClick={(event) => {
+                    stopCardActionPropagation(event);
+                    handleNavigateToDetail(expandedMapRecommendation.id);
+                  }}
+                  className="inline-flex min-h-[40px] items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  View
+                </Link>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div className="pointer-events-none absolute bottom-4 left-4 z-20 hidden sm:block">
+          <div className="pointer-events-auto w-[320px] max-w-[calc(100vw-2rem)]">
+            <article
+              role="button"
+              tabIndex={0}
+              onClick={activateRecommendation}
+              onMouseEnter={() => handleRailRestroomHoverChange(expandedMapRecommendation.id, true)}
+              onMouseLeave={() => handleRailRestroomHoverChange(expandedMapRecommendation.id, false)}
+              onFocusCapture={() => handleRailRestroomHoverChange(expandedMapRecommendation.id, true)}
+              onBlurCapture={(event) => handleRailRestroomBlur(expandedMapRecommendation.id, event)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") {
+                  return;
+                }
+
+                event.preventDefault();
+                activateRecommendation();
+              }}
+              className="rounded-2xl border border-slate-200/90 bg-white/96 p-4 shadow-xl backdrop-blur"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Top pick in this area</p>
+                  <h2 className="mt-1 truncate text-base font-semibold text-slate-900">{getRestroomDisplayName(expandedMapRecommendation)}</h2>
+                  <p className="mt-0.5 truncate text-sm text-slate-500">{getRestroomCardSubtitle(expandedMapRecommendation)}</p>
+                </div>
+                {distanceLabel ? (
+                  <div className="shrink-0 text-right">
+                    <p className="text-base font-semibold tracking-tight text-slate-900">{distanceLabel.replace(" away", "")}</p>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">away</p>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {topSignalDescriptor ? (
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                      reviewQuickTagToneClassName[topSignalDescriptor.tone]
+                    )}
+                  >
+                    {topSignalDescriptor.icon} {topSignalDescriptor.label}
+                  </span>
+                ) : null}
+                {expandedMapRecommendation.ratings.overall > 0 ? (
+                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                    ⭐ {expandedMapRecommendation.ratings.overall.toFixed(1)} · {expandedMapRecommendation.ratings.reviewCount} reviews
+                  </span>
+                ) : null}
+              </div>
+
+              <p className="mt-2 text-xs font-medium text-slate-500">
+                {isFarFromUser ? "Browsing outside your current location." : "Based on distance, rating, and review count."}
+              </p>
+
+              <div className="mt-3 flex items-center gap-2" onClick={stopCardActionPropagation}>
+                <TrackedNavigateLink
+                  href={getGoogleMapsDirectionsUrl(expandedMapRecommendation.lat, expandedMapRecommendation.lng)}
+                  bathroomId={expandedMapRecommendation.id}
+                  source="restroom_card"
+                  sourceSurface="restroom_card"
+                  viewportMode="expanded_map"
+                  hasUserLocation={hasRealUserLocation}
+                  onClick={stopCardActionPropagation}
+                  className="inline-flex min-h-[40px] flex-1 items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
+                >
+                  Navigate
+                </TrackedNavigateLink>
+                <Link
+                  href={`/restroom/${expandedMapRecommendation.id}`}
+                  onClick={(event) => {
+                    stopCardActionPropagation(event);
+                    handleNavigateToDetail(expandedMapRecommendation.id);
+                  }}
+                  className="inline-flex min-h-[40px] items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  View
+                </Link>
+              </div>
+            </article>
+          </div>
+        </div>
+      </>
     );
   };
 
@@ -1805,10 +2058,12 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   };
 
   const renderDefaultListColumn = () => {
+    const areaDensityLabel = `${mapDisplayRestrooms.length} pins • ${listRestrooms.length} listed`;
+
     return (
       <div className="min-w-0">
-        <section className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600 lg:hidden">
-          {mapDisplayRestrooms.length} pins in view • {listRestrooms.length} listed • Reviewed submissions help keep results trustworthy
+        <section className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-medium text-slate-600 lg:hidden">
+          {areaDensityLabel}
         </section>
         <div className="mt-4 flex min-w-0 flex-col gap-4">
           <div className="order-1">{renderTopPickCard("mobile")}</div>
@@ -1927,6 +2182,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               />
             )}
             {renderMobileMapPreviewCard(activeMapPreviewVariant)}
+            {renderExpandedMapTopPickOverlay()}
 
             {isMapExpanded ? (
               <>
