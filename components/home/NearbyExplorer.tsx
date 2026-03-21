@@ -617,6 +617,23 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     mobileSheetInteractionTimeoutRef.current = null;
   }, []);
 
+  const applyMobileExpandedRestroomSelection = useCallback(
+    (restroomId: string) => {
+      if (!mapVisibleRestroomIds.has(restroomId)) {
+        return false;
+      }
+
+      setHasStartedBrowsing(true);
+      setMapFocusedRestroomId(restroomId);
+      setListHoveredRestroomId(null);
+      clearMobileSheetInteractionTimeout();
+      setIsMobileSheetInteractionLocked(false);
+      setMobileSheetState("collapsed");
+      return true;
+    },
+    [clearMobileSheetInteractionTimeout, mapVisibleRestroomIds]
+  );
+
   const lockMobileSheetInteraction = useCallback(() => {
     if (!isMobilePreviewLayout) {
       return;
@@ -649,21 +666,17 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         return;
       }
 
-      setHasStartedBrowsing(true);
-      setMapFocusedRestroomId(restroomId);
-      setListHoveredRestroomId(null);
-
-      if (isMapExpanded && isMobilePreviewLayout) {
-        clearMobileSheetInteractionTimeout();
-        setIsMobileSheetInteractionLocked(false);
-        setMobileSheetState("collapsed");
+      if (isMapExpanded && isMobilePreviewLayout && applyMobileExpandedRestroomSelection(restroomId)) {
         return;
       }
 
+      setHasStartedBrowsing(true);
+      setMapFocusedRestroomId(restroomId);
+      setListHoveredRestroomId(null);
       settleMobileSheetInteraction();
     },
     [
-      clearMobileSheetInteractionTimeout,
+      applyMobileExpandedRestroomSelection,
       isMapExpanded,
       isMobilePreviewLayout,
       mapVisibleRestroomIds,
@@ -1647,6 +1660,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   );
 
   const handleMapFocusedRestroomIdChange = useCallback((restroomId: string | null) => {
+    if (restroomId && isMapExpanded && isMobilePreviewLayout && applyMobileExpandedRestroomSelection(restroomId)) {
+      return;
+    }
+
     if (isMapExpanded && isMobilePreviewLayout && isMobileSheetInteractionLocked) {
       return;
     }
@@ -1658,7 +1675,12 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     if (restroomId) {
       setListHoveredRestroomId(null);
     }
-  }, [isMapExpanded, isMobilePreviewLayout, isMobileSheetInteractionLocked]);
+  }, [
+    applyMobileExpandedRestroomSelection,
+    isMapExpanded,
+    isMobilePreviewLayout,
+    isMobileSheetInteractionLocked
+  ]);
 
   const renderMobileMapPreviewCard = (variant: "default" | "expanded") => {
     if (!selectedMapRestroom) {
