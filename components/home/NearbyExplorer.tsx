@@ -54,6 +54,7 @@ interface MapCamera {
 
 type SortMode = "closest" | "recommended";
 type MobileSheetState = "collapsed" | "default" | "expanded";
+type MobileExpandedOverlayMode = "sheet" | "selected" | "topPick" | "none";
 
 interface FilterState {
   publicOnly: boolean;
@@ -298,6 +299,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const locationWatchIdRef = useRef<number | null>(null);
   const invalidBoundsCoordinatesLogKeyRef = useRef<string>("");
   const mapCameraRef = useRef<MapCamera | null>(null);
+  const previousMobileFocusedRestroomIdRef = useRef<string | null>(null);
   const hasHydratedMapStateRef = useRef(false);
   const lockedScrollYRef = useRef(0);
   const pendingScrollRestoreRef = useRef<number | null>(null);
@@ -325,7 +327,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [mobilePreviewPhotoByRestroomId, setMobilePreviewPhotoByRestroomId] = useState<Record<string, string | null>>({});
   const [isMobilePreviewLayout, setIsMobilePreviewLayout] = useState(false);
   const [isPrimaryLocationActionVisible, setIsPrimaryLocationActionVisible] = useState(true);
-  const [isMobileExpandedTopPickIdle, setIsMobileExpandedTopPickIdle] = useState(false);
+  const [isMobileExpandedTopPickIdle, setIsMobileExpandedTopPickIdle] = useState(true);
   const [isMobileSheetInteractionLocked, setIsMobileSheetInteractionLocked] = useState(false);
   const mapRenderableRestrooms = useMemo(
     () => mapRestrooms.filter((restroom) => isValidMapCoordinate(restroom.lat, restroom.lng)),
@@ -581,13 +583,35 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   );
   const selectedMapRestroomId = selectedMapRestroom?.id ?? null;
   const selectedMapRestroomPreviewPhotoUrl = selectedMapRestroomId ? mobilePreviewPhotoByRestroomId[selectedMapRestroomId] ?? null : null;
-  const shouldShowExpandedMapTopPick =
-    isMapExpanded &&
-    expandedMapRecommendation &&
-    !mapFocusedRestroomId &&
-    (isMobilePreviewLayout
-      ? mobileSheetState === "collapsed" && !isMobileSheetInteractionLocked && isMobileExpandedTopPickIdle
-      : true);
+  const isMobileExpandedSheetWinning =
+    isMapExpanded && isMobilePreviewLayout && (mobileSheetState !== "collapsed" || isMobileSheetInteractionLocked);
+  const resolvedMobileExpandedOverlayMode = useMemo<MobileExpandedOverlayMode>(() => {
+    if (!isMapExpanded || !isMobilePreviewLayout) {
+      return "none";
+    }
+
+    if (isMobileExpandedSheetWinning) {
+      return "sheet";
+    }
+
+    if (selectedMapRestroom) {
+      return "selected";
+    }
+
+    if (expandedMapRecommendation && isMobileExpandedTopPickIdle) {
+      return "topPick";
+    }
+
+    return "none";
+  }, [
+    expandedMapRecommendation,
+    isMapExpanded,
+    isMobileExpandedSheetWinning,
+    isMobileExpandedTopPickIdle,
+    isMobilePreviewLayout,
+    selectedMapRestroom
+  ]);
+  const shouldShowExpandedMapTopPick = isMapExpanded && expandedMapRecommendation && !mapFocusedRestroomId && !isMobilePreviewLayout;
 
   const clearMobileExpandedTopPickTimeout = useCallback(() => {
     if (typeof window === "undefined" || mobileExpandedTopPickTimeoutRef.current === null) {
@@ -653,6 +677,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       mobileSheetInteractionTimeoutRef.current = window.setTimeout(() => {
         mobileSheetInteractionTimeoutRef.current = null;
         setIsMobileSheetInteractionLocked(false);
+        setIsMobileExpandedTopPickIdle(true);
       }, delayMs);
     },
     [clearMobileSheetInteractionTimeout, isMobilePreviewLayout]
@@ -1289,6 +1314,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     if (!isMapExpanded || !isMobilePreviewLayout) {
       clearMobileSheetInteractionTimeout();
       setIsMobileSheetInteractionLocked(false);
+      setIsMobileExpandedTopPickIdle(true);
       return;
     }
   }, [clearMobileSheetInteractionTimeout, isMapExpanded, isMobilePreviewLayout]);
@@ -1296,21 +1322,36 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   useEffect(() => {
     if (!isMapExpanded || !isMobilePreviewLayout) {
       clearMobileExpandedTopPickTimeout();
-      setIsMobileExpandedTopPickIdle(false);
-      return;
+      setIsMobileExpandedTopPickIdle(true);
     }
-
-    if (mapFocusedRestroomId || mobileSheetState !== "collapsed" || isMobileSheetInteractionLocked) {
-      suppressMobileExpandedTopPick();
-      return;
-    }
-
-    scheduleMobileExpandedTopPickIdle();
   }, [
     clearMobileExpandedTopPickTimeout,
     isMapExpanded,
+    isMobilePreviewLayout
+  ]);
+
+  useEffect(() => {
+    if (!isMapExpanded || !isMobilePreviewLayout) {
+      previousMobileFocusedRestroomIdRef.current = mapFocusedRestroomId;
+      return;
+    }
+
+    const previousFocusedRestroomId = previousMobileFocusedRestroomIdRef.current;
+    previousMobileFocusedRestroomIdRef.current = mapFocusedRestroomId;
+
+    if (
+      previousFocusedRestroomId &&
+      !mapFocusedRestroomId &&
+      mobileSheetState === "collapsed" &&
+      !isMobileExpandedSheetWinning
+    ) {
+      suppressMobileExpandedTopPick();
+      scheduleMobileExpandedTopPickIdle();
+    }
+  }, [
+    isMapExpanded,
+    isMobileExpandedSheetWinning,
     isMobilePreviewLayout,
-    isMobileSheetInteractionLocked,
     mapFocusedRestroomId,
     mobileSheetState,
     scheduleMobileExpandedTopPickIdle,
@@ -1619,11 +1660,15 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   );
 
   const handleMapFocusedRestroomIdChange = useCallback((restroomId: string | null) => {
+    if (isMapExpanded && isMobilePreviewLayout && isMobileSheetInteractionLocked) {
+      return;
+    }
+
     setMapFocusedRestroomId(restroomId);
     if (restroomId) {
       setListHoveredRestroomId(null);
     }
-  }, []);
+  }, [isMapExpanded, isMobilePreviewLayout, isMobileSheetInteractionLocked]);
 
   const renderMobileMapPreviewCard = (variant: "default" | "expanded") => {
     if (!selectedMapRestroom) {
@@ -1631,7 +1676,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     const isExpandedVariant = variant === "expanded";
-    if (isExpandedVariant && isMobilePreviewLayout && isMobileSheetInteractionLocked) {
+    if (isExpandedVariant && isMobilePreviewLayout && resolvedMobileExpandedOverlayMode !== "selected") {
       return null;
     }
 
@@ -1777,17 +1822,25 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   };
 
   const renderExpandedMapTopPickOverlay = () => {
-    if (!shouldShowExpandedMapTopPick || !expandedMapRecommendation) {
+    const shouldShowMobileExpandedMapTopPick =
+      isMobilePreviewLayout && resolvedMobileExpandedOverlayMode === "topPick" && expandedMapRecommendation;
+
+    if (!shouldShowExpandedMapTopPick && !shouldShowMobileExpandedMapTopPick) {
       return null;
     }
 
-    const distanceLabel = hasRealUserLocation ? toApproximateDistanceLabel(expandedMapRecommendation.distanceMiles) : "";
-    const isFarFromUser = hasRealUserLocation && expandedMapRecommendation.distanceMiles > RECOMMENDATION_EXTENDED_RADIUS_MILES;
-    const topSignalDescriptor = expandedMapRecommendation.ratings.qualitySignals[0]
-      ? getReviewQuickTagDescriptor(expandedMapRecommendation.ratings.qualitySignals[0])
+    const expandedTopPickRestroom = expandedMapRecommendation;
+    if (!expandedTopPickRestroom) {
+      return null;
+    }
+
+    const distanceLabel = hasRealUserLocation ? toApproximateDistanceLabel(expandedTopPickRestroom.distanceMiles) : "";
+    const isFarFromUser = hasRealUserLocation && expandedTopPickRestroom.distanceMiles > RECOMMENDATION_EXTENDED_RADIUS_MILES;
+    const topSignalDescriptor = expandedTopPickRestroom.ratings.qualitySignals[0]
+      ? getReviewQuickTagDescriptor(expandedTopPickRestroom.ratings.qualitySignals[0])
       : null;
     const activateRecommendation = () => {
-      focusExpandedRecommendation(expandedMapRecommendation.id);
+      focusExpandedRecommendation(expandedTopPickRestroom.id);
     };
     const stopCardActionPropagation = (event: ReactMouseEvent<HTMLElement>) => {
       event.stopPropagation();
@@ -1814,8 +1867,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Top pick in this area</p>
-                  <h2 className="mt-1 truncate text-sm font-semibold text-slate-900">{getRestroomDisplayName(expandedMapRecommendation)}</h2>
-                  <p className="mt-0.5 truncate text-xs text-slate-500">{getRestroomCardSubtitle(expandedMapRecommendation)}</p>
+                  <h2 className="mt-1 truncate text-sm font-semibold text-slate-900">{getRestroomDisplayName(expandedTopPickRestroom)}</h2>
+                  <p className="mt-0.5 truncate text-xs text-slate-500">{getRestroomCardSubtitle(expandedTopPickRestroom)}</p>
                   <p className="mt-1 text-[11px] font-medium text-slate-500">
                     {isFarFromUser ? "Browsing outside your current location." : "Based on distance and visible review signal."}
                   </p>
@@ -1838,17 +1891,17 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                     {topSignalDescriptor.icon} {topSignalDescriptor.label}
                   </span>
                 ) : null}
-                {expandedMapRecommendation.ratings.overall > 0 ? (
+                {expandedTopPickRestroom.ratings.overall > 0 ? (
                   <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                    ⭐ {expandedMapRecommendation.ratings.overall.toFixed(1)}
+                    ⭐ {expandedTopPickRestroom.ratings.overall.toFixed(1)}
                   </span>
                 ) : null}
               </div>
 
               <div className="mt-3 flex items-center gap-2" onClick={stopCardActionPropagation}>
                 <TrackedNavigateLink
-                  href={getGoogleMapsDirectionsUrl(expandedMapRecommendation.lat, expandedMapRecommendation.lng)}
-                  bathroomId={expandedMapRecommendation.id}
+                  href={getGoogleMapsDirectionsUrl(expandedTopPickRestroom.lat, expandedTopPickRestroom.lng)}
+                  bathroomId={expandedTopPickRestroom.id}
                   source="mobile_preview"
                   sourceSurface="mobile_preview"
                   viewportMode="expanded_map"
@@ -1859,10 +1912,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                   Navigate
                 </TrackedNavigateLink>
                 <Link
-                  href={`/restroom/${expandedMapRecommendation.id}`}
+                  href={`/restroom/${expandedTopPickRestroom.id}`}
                   onClick={(event) => {
                     stopCardActionPropagation(event);
-                    handleNavigateToDetail(expandedMapRecommendation.id);
+                    handleNavigateToDetail(expandedTopPickRestroom.id);
                   }}
                   className="inline-flex min-h-[40px] items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
@@ -1879,10 +1932,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               role="button"
               tabIndex={0}
               onClick={activateRecommendation}
-              onMouseEnter={() => handleRailRestroomHoverChange(expandedMapRecommendation.id, true)}
-              onMouseLeave={() => handleRailRestroomHoverChange(expandedMapRecommendation.id, false)}
-              onFocusCapture={() => handleRailRestroomHoverChange(expandedMapRecommendation.id, true)}
-              onBlurCapture={(event) => handleRailRestroomBlur(expandedMapRecommendation.id, event)}
+              onMouseEnter={() => handleRailRestroomHoverChange(expandedTopPickRestroom.id, true)}
+              onMouseLeave={() => handleRailRestroomHoverChange(expandedTopPickRestroom.id, false)}
+              onFocusCapture={() => handleRailRestroomHoverChange(expandedTopPickRestroom.id, true)}
+              onBlurCapture={(event) => handleRailRestroomBlur(expandedTopPickRestroom.id, event)}
               onKeyDown={(event) => {
                 if (event.key !== "Enter" && event.key !== " ") {
                   return;
@@ -1896,8 +1949,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Top pick in this area</p>
-                  <h2 className="mt-1 truncate text-base font-semibold text-slate-900">{getRestroomDisplayName(expandedMapRecommendation)}</h2>
-                  <p className="mt-0.5 truncate text-sm text-slate-500">{getRestroomCardSubtitle(expandedMapRecommendation)}</p>
+                  <h2 className="mt-1 truncate text-base font-semibold text-slate-900">{getRestroomDisplayName(expandedTopPickRestroom)}</h2>
+                  <p className="mt-0.5 truncate text-sm text-slate-500">{getRestroomCardSubtitle(expandedTopPickRestroom)}</p>
                 </div>
                 {distanceLabel ? (
                   <div className="shrink-0 text-right">
@@ -1918,9 +1971,9 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                     {topSignalDescriptor.icon} {topSignalDescriptor.label}
                   </span>
                 ) : null}
-                {expandedMapRecommendation.ratings.overall > 0 ? (
+                {expandedTopPickRestroom.ratings.overall > 0 ? (
                   <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                    ⭐ {expandedMapRecommendation.ratings.overall.toFixed(1)} · {expandedMapRecommendation.ratings.reviewCount} reviews
+                    ⭐ {expandedTopPickRestroom.ratings.overall.toFixed(1)} · {expandedTopPickRestroom.ratings.reviewCount} reviews
                   </span>
                 ) : null}
               </div>
@@ -1931,8 +1984,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
               <div className="mt-3 flex items-center gap-2" onClick={stopCardActionPropagation}>
                 <TrackedNavigateLink
-                  href={getGoogleMapsDirectionsUrl(expandedMapRecommendation.lat, expandedMapRecommendation.lng)}
-                  bathroomId={expandedMapRecommendation.id}
+                  href={getGoogleMapsDirectionsUrl(expandedTopPickRestroom.lat, expandedTopPickRestroom.lng)}
+                  bathroomId={expandedTopPickRestroom.id}
                   source="restroom_card"
                   sourceSurface="restroom_card"
                   viewportMode="expanded_map"
@@ -1943,10 +1996,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                   Navigate
                 </TrackedNavigateLink>
                 <Link
-                  href={`/restroom/${expandedMapRecommendation.id}`}
+                  href={`/restroom/${expandedTopPickRestroom.id}`}
                   onClick={(event) => {
                     stopCardActionPropagation(event);
-                    handleNavigateToDetail(expandedMapRecommendation.id);
+                    handleNavigateToDetail(expandedTopPickRestroom.id);
                   }}
                   className="inline-flex min-h-[40px] items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
