@@ -174,6 +174,9 @@ const RECOMMENDATION_EXTENDED_RADIUS_MILES = 6;
 const RECOMMENDATION_FALLBACK_RADIUS_MILES = 12;
 const RECOMMENDATION_TITLE = "Closest in this area";
 const RECOMMENDATION_HELPER_TEXT = "A quick option to start with before browsing the full list.";
+const RECOMMENDATION_WRAPPER_CLASSNAME =
+  "rounded-2xl border border-brand-300/90 bg-brand-50/80 p-2.5 shadow-md ring-2 ring-brand-100/90";
+const RECOMMENDATION_CARD_CLASSNAME = "border-brand-300/90 bg-white shadow-lg ring-1 ring-brand-100/90";
 
 interface RecommendationResult {
   restroom: NearbyBathroom;
@@ -597,7 +600,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     isMobilePreviewLayout,
     selectedMapRestroom
   ]);
-  const shouldShowExpandedMapTopPick = isMapExpanded && expandedMapRecommendation && !mapFocusedRestroomId && !isMobilePreviewLayout;
+  const shouldShowExpandedMapTopPick =
+    isMapExpanded && expandedMapRecommendation && !mapFocusedRestroomId && !isMobilePreviewLayout && !isExpandedListOpen;
 
   const clearMobileSheetInteractionTimeout = useCallback(() => {
     if (typeof window === "undefined" || mobileSheetInteractionTimeoutRef.current === null) {
@@ -1632,6 +1636,47 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     );
   };
 
+  const renderRecommendationSection = ({
+    restroom,
+    viewportMode,
+    className,
+    disablePointerEvents = false
+  }: {
+    restroom: NearbyBathroom;
+    viewportMode: "homepage" | "expanded_map";
+    className?: string;
+    disablePointerEvents?: boolean;
+  }) => {
+    const isHighlighted = isRailRestroomHighlighted(restroom.id);
+
+    return (
+      <section
+        className={cn(
+          RECOMMENDATION_WRAPPER_CLASSNAME,
+          disablePointerEvents && "pointer-events-none",
+          className
+        )}
+      >
+        <div className="mb-2.5 px-1">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-800">{RECOMMENDATION_TITLE}</p>
+          <p className="mt-0.5 text-xs leading-5 text-slate-600">{RECOMMENDATION_HELPER_TEXT}</p>
+        </div>
+
+        <RestroomCard
+          restroom={restroom}
+          showDistance={hasRealUserLocation}
+          viewportMode={viewportMode}
+          hasUserLocation={hasRealUserLocation}
+          isHighlighted={isHighlighted}
+          onHoverChange={(isHovering) => handleRailRestroomHoverChange(restroom.id, isHovering)}
+          onTouchSelect={handleRailRestroomTouchSelect}
+          onNavigateToDetail={handleNavigateToDetail}
+          className={RECOMMENDATION_CARD_CLASSNAME}
+        />
+      </section>
+    );
+  };
+
   const renderTopPickCard = (variant: "mobile" | "desktop") => {
     if (!recommendation || !topPickRestroom) {
       return null;
@@ -1642,33 +1687,22 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       return null;
     }
 
-    const isHighlighted = isRailRestroomHighlighted(topPickRestroom.id);
+    return renderRecommendationSection({
+      restroom: topPickRestroom,
+      viewportMode: "homepage",
+      className: isDesktopVariant ? "hidden lg:block" : "lg:hidden"
+    });
+  };
 
-    return (
-      <section
-        className={cn(
-          "rounded-2xl border border-brand-200/80 bg-brand-50/50 p-2 shadow-sm ring-1 ring-brand-100/80",
-          isDesktopVariant ? "hidden lg:block" : "lg:hidden"
-        )}
-      >
-        <div className="mb-2 px-1">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-700">{RECOMMENDATION_TITLE}</p>
-          <p className="mt-0.5 text-xs text-slate-500">{RECOMMENDATION_HELPER_TEXT}</p>
-        </div>
+  const renderExpandedDesktopRecommendationSection = () => {
+    if (isMobilePreviewLayout || !isMapExpanded || !expandedMapRecommendation) {
+      return null;
+    }
 
-        <RestroomCard
-          restroom={topPickRestroom}
-          showDistance={hasRealUserLocation}
-          viewportMode="homepage"
-          hasUserLocation={hasRealUserLocation}
-          isHighlighted={isHighlighted}
-          onHoverChange={(isHovering) => handleRailRestroomHoverChange(topPickRestroom.id, isHovering)}
-          onTouchSelect={handleRailRestroomTouchSelect}
-          onNavigateToDetail={handleNavigateToDetail}
-          className="border-brand-200 bg-white shadow-md ring-1 ring-brand-100/80"
-        />
-      </section>
-    );
+    return renderRecommendationSection({
+      restroom: expandedMapRecommendation,
+      viewportMode: "expanded_map"
+    });
   };
 
   const renderExpandedMapTopPickOverlay = () => {
@@ -1712,11 +1746,11 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 event.preventDefault();
                 activateRecommendation();
               }}
-              className="rounded-2xl border border-slate-200/90 bg-white/96 p-4 shadow-xl backdrop-blur"
+              className="rounded-2xl border border-brand-300/80 bg-white/96 p-4 shadow-xl ring-2 ring-brand-100/80 backdrop-blur"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{RECOMMENDATION_TITLE}</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-800">{RECOMMENDATION_TITLE}</p>
                   <h2 className="mt-1 truncate text-base font-semibold text-slate-900">{getRestroomDisplayName(expandedTopPickRestroom)}</h2>
                   <p className="mt-0.5 truncate text-sm text-slate-500">{getRestroomCardSubtitle(expandedTopPickRestroom)}</p>
                 </div>
@@ -1990,48 +2024,22 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       return null;
     }
 
-    const isHighlighted = highlightedListRestroomId === expandedMapRecommendation.id;
-
-    return (
-      <section
-        className={cn(
-          "rounded-2xl border border-brand-200/80 bg-brand-50/50 p-2 shadow-sm ring-1 ring-brand-100/80 sm:hidden",
-          isMobileSheetInteractionLocked && "pointer-events-none"
-        )}
-      >
-        <div className="mb-2 px-1">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-700">{RECOMMENDATION_TITLE}</p>
-          <p className="mt-0.5 text-xs text-slate-500">{RECOMMENDATION_HELPER_TEXT}</p>
-        </div>
-
-        <RestroomCard
-          restroom={expandedMapRecommendation}
-          showDistance={hasRealUserLocation}
-          viewportMode="expanded_map"
-          hasUserLocation={hasRealUserLocation}
-          isHighlighted={isHighlighted}
-          onHoverChange={(isHovering) => handleRailRestroomHoverChange(expandedMapRecommendation.id, isHovering)}
-          onTouchSelect={handleRailRestroomTouchSelect}
-          onNavigateToDetail={handleNavigateToDetail}
-          className="border-brand-200 bg-white shadow-md ring-1 ring-brand-100/80"
-        />
-      </section>
-    );
+    return renderRecommendationSection({
+      restroom: expandedMapRecommendation,
+      viewportMode: "expanded_map",
+      className: "sm:hidden",
+      disablePointerEvents: isMobileSheetInteractionLocked
+    });
   };
 
   const renderRestroomListSection = (variant: "default" | "expanded") => {
     const isExpandedVariant = variant === "expanded";
     const viewportMode = isExpandedVariant ? "expanded_map" : "homepage";
+    const recommendationRestroomId = isExpandedVariant ? expandedMapRecommendation?.id ?? null : topPickRestroom?.id ?? null;
     const restroomsForSection =
-      isExpandedVariant && isMobilePreviewLayout && expandedMapRecommendation
-        ? listRestrooms.filter((restroom) => restroom.id !== expandedMapRecommendation.id)
-        : listRestrooms;
+      recommendationRestroomId ? listRestrooms.filter((restroom) => restroom.id !== recommendationRestroomId) : listRestrooms;
     const sectionTitle =
-      isExpandedVariant && isMobilePreviewLayout && expandedMapRecommendation
-        ? "More nearby restrooms"
-        : !isExpandedVariant && topPickRestroom
-          ? "More nearby restrooms"
-          : "Nearby restrooms";
+      recommendationRestroomId ? "More nearby restrooms" : "Nearby restrooms";
 
     return (
       <RestroomList
@@ -2040,7 +2048,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         helperText={
           !isExpandedVariant && topPickRestroom
             ? "Start with the recommended option above, then compare a few more close choices here."
-            : isExpandedVariant && isMobilePreviewLayout && expandedMapRecommendation
+            : isExpandedVariant && expandedMapRecommendation
               ? "Start with the recommended option above, then compare the rest of the visible options."
             : listHelperText
         }
@@ -2063,16 +2071,17 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const renderExpandedListPanel = () => {
     if (isMobilePreviewLayout) {
       return (
-        <div className="min-w-0 space-y-3">
+        <div className="min-w-0 space-y-2.5">
           {renderExpandedMobileRecommendationSection()}
-          {renderBrowseControls("expanded")}
           {renderRestroomListSection("expanded")}
+          {renderBrowseControls("expanded")}
         </div>
       );
     }
 
     return (
       <div className="min-w-0 space-y-3">
+        {renderExpandedDesktopRecommendationSection()}
         {renderBrowseControls("expanded")}
         {renderRestroomListSection("expanded")}
       </div>
@@ -2088,11 +2097,11 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           {areaDensityLabel}
         </section>
 
-        <div className="mt-4 flex min-w-0 flex-col gap-4 lg:hidden">
+        <div className="mt-3 flex min-w-0 flex-col gap-3 lg:hidden">
           {renderTopPickCard("mobile")}
           {renderRestroomListSection("default")}
-          {renderRecentlyViewedSection("mobile")}
           {renderBrowseControls("default")}
+          {renderRecentlyViewedSection("mobile")}
         </div>
 
         <div className="mt-4 hidden min-w-0 flex-col gap-4 lg:flex">
