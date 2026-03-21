@@ -650,11 +650,25 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       }
 
       setHasStartedBrowsing(true);
-      settleMobileSheetInteraction();
       setMapFocusedRestroomId(restroomId);
       setListHoveredRestroomId(null);
+
+      if (isMapExpanded && isMobilePreviewLayout) {
+        clearMobileSheetInteractionTimeout();
+        setIsMobileSheetInteractionLocked(false);
+        setMobileSheetState("collapsed");
+        return;
+      }
+
+      settleMobileSheetInteraction();
     },
-    [mapVisibleRestroomIds, settleMobileSheetInteraction]
+    [
+      clearMobileSheetInteractionTimeout,
+      isMapExpanded,
+      isMobilePreviewLayout,
+      mapVisibleRestroomIds,
+      settleMobileSheetInteraction
+    ]
   );
 
   const handleExpandMap = () => {
@@ -1446,6 +1460,11 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const handleUseMyLocation = () => {
     const sourceSurface = isMapExpanded ? "expanded_map_controls" : "homepage_controls";
     const viewportMode = isMapExpanded ? "expanded_map" : "homepage";
+    const geolocationOptions: PositionOptions = {
+      enableHighAccuracy: false,
+      timeout: 12000,
+      maximumAge: 15000
+    };
     captureAnalyticsEvent("locate_clicked", {
       source_surface: sourceSurface,
       viewport_mode: viewportMode,
@@ -1486,50 +1505,58 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       return;
     }
 
+    const handleResolvedPosition = (position: GeolocationPosition) => {
+      setUserLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
+      setGeoError(null);
+      setIsLocating(false);
+      setIsAwaitingLocationFix(false);
+      setIsLocationTrackingEnabled(true);
+      if (pendingLocationCenterOnResolveRef.current) {
+        pendingLocationCenterOnResolveRef.current = false;
+        setLocationCenterRequestKey((current) => current + 1);
+      }
+    };
+
+    const handleGeolocationError = (error: GeolocationPositionError) => {
+      setGeoError(toGeoErrorMessage(error));
+      setIsLocating(false);
+      setIsAwaitingLocationFix(false);
+      pendingLocationCenterOnResolveRef.current = false;
+
+      if (error.code === error.PERMISSION_DENIED) {
+        stopLocationWatch();
+        setUserLocation(null);
+        setIsLocationTrackingEnabled(false);
+        setIsFollowingUserLocation(false);
+      }
+    };
+
     pendingLocationCenterOnResolveRef.current = true;
     setIsAwaitingLocationFix(true);
-
-    if (locationWatchIdRef.current !== null) {
-      setIsLocating(true);
-      return;
-    }
-
     setIsLocating(true);
 
     try {
-      const watchId = navigator.geolocation.watchPosition(
+      navigator.geolocation.getCurrentPosition(
         (position) => {
-          setUserLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
-          setGeoError(null);
-          setIsLocating(false);
-          setIsAwaitingLocationFix(false);
-          setIsLocationTrackingEnabled(true);
-          if (pendingLocationCenterOnResolveRef.current) {
-            pendingLocationCenterOnResolveRef.current = false;
-            setLocationCenterRequestKey((current) => current + 1);
-          }
-        },
-        (error) => {
-          setGeoError(toGeoErrorMessage(error));
-          setIsLocating(false);
-          setIsAwaitingLocationFix(false);
-          pendingLocationCenterOnResolveRef.current = false;
+          handleResolvedPosition(position);
 
-          if (error.code === error.PERMISSION_DENIED) {
-            stopLocationWatch();
-            setUserLocation(null);
+          if (locationWatchIdRef.current !== null) {
+            return;
+          }
+
+          try {
+            const watchId = navigator.geolocation.watchPosition(handleResolvedPosition, handleGeolocationError, geolocationOptions);
+            locationWatchIdRef.current = watchId;
+          } catch {
+            setGeoError("Could not enable live location updates. Showing map results without user distance.");
             setIsLocationTrackingEnabled(false);
             setIsFollowingUserLocation(false);
+            setUserLocation(null);
           }
         },
-        {
-          enableHighAccuracy: false,
-          timeout: 12000,
-          maximumAge: 15000
-        }
+        handleGeolocationError,
+        geolocationOptions
       );
-
-      locationWatchIdRef.current = watchId;
     } catch {
       setGeoError("Could not enable live location updates. Showing map results without user distance.");
       setIsLocating(false);
