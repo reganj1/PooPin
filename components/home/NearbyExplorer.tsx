@@ -13,15 +13,18 @@ import {
 } from "react";
 import { TrackedNavigateLink } from "@/components/analytics/TrackedNavigateLink";
 import { MapPanel } from "@/components/map/MapPanel";
+import { PlaceSearchBar } from "@/components/map/PlaceSearchBar";
 import { MobileRestroomPreviewCard } from "@/components/map/MobileRestroomPreviewCard";
 import { useLocationTracking } from "@/components/providers/LocationTrackingProvider";
 import { RestroomCard } from "@/components/restroom/RestroomCard";
 import { RestroomList } from "@/components/restroom/RestroomList";
 import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
+import type { PlaceSearchResult } from "@/lib/mapbox/placeSearch";
 import { getRecentRestrooms, type RecentRestroomSnapshot, storeRecentRestroom } from "@/lib/utils/recentRestrooms";
 import { getRestroomCardSubtitle, getRestroomDisplayName, getRestroomSourceLabel } from "@/lib/utils/restroomPresentation";
 import { getReviewQuickTagDescriptor, reviewQuickTagToneClassName } from "@/lib/utils/reviewSignals";
 import { cn } from "@/lib/utils/cn";
+import { formatDistanceLabel, type DistanceReferenceKind } from "@/lib/utils/distancePresentation";
 import {
   fetchRestroomPreviewPhoto,
   getCachedRestroomPreviewPhoto,
@@ -54,6 +57,7 @@ interface MapCamera {
 type SortMode = "closest" | "recommended";
 type MobileSheetState = "collapsed" | "default" | "expanded";
 type MobileExpandedOverlayMode = "sheet" | "selected" | "none";
+type DistanceReferenceMode = "user" | "browse";
 
 interface FilterState {
   publicOnly: boolean;
@@ -156,6 +160,12 @@ interface RecommendationResult {
   originDistanceMiles: number;
 }
 
+interface DistanceReference {
+  origin: Coordinate | null;
+  kind: DistanceReferenceKind | null;
+  label: string | null;
+}
+
 interface MobileSheetMetrics {
   height: number;
   minOffset: number;
@@ -199,18 +209,6 @@ const getMobileSheetMetrics = (viewportHeight: number): MobileSheetMetrics => {
       expanded: expandedOffset
     }
   };
-};
-
-const toApproximateDistanceLabel = (value: number) => {
-  if (!Number.isFinite(value) || value < 0) {
-    return "";
-  }
-
-  if (value < 0.1) {
-    return "Very close";
-  }
-
-  return `~${value.toFixed(1)} mi away`;
 };
 
 const getRecommendationScore = (restroom: NearbyBathroom, originDistanceMiles: number) => {
@@ -315,6 +313,7 @@ const resolveClosestInAreaRecommendation = (candidates: NearbyBathroom[], origin
 export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const {
     currentLocation: userLocation,
+    lastKnownLocation,
     geoError,
     isLocating,
     isLocationTrackingEnabled,
@@ -330,7 +329,13 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [mobileSheetState, setMobileSheetState] = useState<MobileSheetState>("default");
   const [listHoveredRestroomId, setListHoveredRestroomId] = useState<string | null>(null);
   const [mapFocusedRestroomId, setMapFocusedRestroomId] = useState<string | null>(null);
+  const [selectedRestroomId, setSelectedRestroomId] = useState<string | null>(null);
   const [mapCamera, setMapCamera] = useState<MapCamera | null>(null);
+  const [selectedSearchPlace, setSelectedSearchPlace] = useState<PlaceSearchResult | null>(null);
+  const [referenceMode, setReferenceMode] = useState<DistanceReferenceMode>(() =>
+    isLocationTrackingEnabled && isFollowingUserLocation ? "user" : "browse"
+  );
+  const [searchCameraRequestKey, setSearchCameraRequestKey] = useState(0);
   const [sortMode, setSortMode] = useState<SortMode>("recommended");
   const [recentlyViewedRestrooms, setRecentlyViewedRestrooms] = useState<RecentRestroomSnapshot[]>([]);
   const [filters, setFilters] = useState<FilterState>({
@@ -340,10 +345,13 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   });
   const [isHomeStateReady, setIsHomeStateReady] = useState(false);
   const [mapRestrooms, setMapRestrooms] = useState<NearbyBathroom[]>(initialRestrooms);
+  const isLocationFollowing = isLocationTrackingEnabled && referenceMode === "user";
+  const isLocationTrackingPaused = isLocationTrackingEnabled && !isLocationFollowing;
 
   const latestBoundsKeyRef = useRef<string>("");
   const activeBoundsRequestIdRef = useRef(0);
   const invalidBoundsCoordinatesLogKeyRef = useRef<string>("");
+  const distanceReferenceLogKeyRef = useRef("");
   const mapCameraRef = useRef<MapCamera | null>(null);
   const hasHydratedMapStateRef = useRef(false);
   const lockedScrollYRef = useRef(0);
@@ -373,7 +381,105 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const [isMobileSheetInteractionLocked, setIsMobileSheetInteractionLocked] = useState(false);
   const [hasStartedBrowsing, setHasStartedBrowsing] = useState(false);
   const activeUserLocation = hasActiveUserLocation ? userLocation : null;
-  const distanceOrigin = activeUserLocation;
+  const searchCameraTarget = useMemo<MapCamera | null>(() => {
+    if (!selectedSearchPlace) {
+      return null;
+    }
+
+    return {
+      lat: selectedSearchPlace.lat,
+      lng: selectedSearchPlace.lng,
+      zoom: selectedSearchPlace.zoom
+    };
+  }, [selectedSearchPlace]);
+  const selectedPlaceDistanceLabel = selectedSearchPlace?.name ?? selectedSearchPlace?.fullName ?? null;
+
+  useEffect(() => {
+    if (!isLocationTrackingEnabled) {
+      setReferenceMode("browse");
+      return;
+    }
+
+    if (isFollowingUserLocation) {
+      setReferenceMode("user");
+    }
+  }, [isFollowingUserLocation, isLocationTrackingEnabled]);
+
+  const userDistanceOrigin = useMemo<Coordinate | null>(() => {
+    if (!isLocationFollowing) {
+      return null;
+    }
+
+    if (userLocation && isValidMapCoordinate(userLocation.lat, userLocation.lng)) {
+      return userLocation;
+    }
+
+    if (lastKnownLocation && isValidMapCoordinate(lastKnownLocation.lat, lastKnownLocation.lng)) {
+      return lastKnownLocation;
+    }
+
+    return activeUserLocation;
+  }, [activeUserLocation, isLocationFollowing, lastKnownLocation, userLocation]);
+  const distanceReference = useMemo<DistanceReference>(() => {
+    if (isLocationFollowing) {
+      if (userDistanceOrigin) {
+        return {
+          origin: userDistanceOrigin,
+          kind: "user",
+          label: null
+        };
+      }
+
+      return {
+        origin: null,
+        kind: null,
+        label: null
+      };
+    }
+
+    if (mapCamera && isValidMapCoordinate(mapCamera.lat, mapCamera.lng)) {
+      return {
+        origin: {
+          lat: mapCamera.lat,
+          lng: mapCamera.lng
+        },
+        kind: "map",
+        label: null
+      };
+    }
+
+    if (searchCameraTarget) {
+      return {
+        origin: {
+          lat: searchCameraTarget.lat,
+          lng: searchCameraTarget.lng
+        },
+        kind: "place",
+        label: selectedPlaceDistanceLabel
+      };
+    }
+
+    if (activeUserLocation) {
+      return {
+        origin: activeUserLocation,
+        kind: "user",
+        label: null
+      };
+    }
+
+    return {
+      origin: null,
+      kind: null,
+      label: null
+    };
+  }, [activeUserLocation, isLocationFollowing, mapCamera, searchCameraTarget, selectedPlaceDistanceLabel, userDistanceOrigin]);
+  const browseOrigin = distanceReference.origin;
+  const showReferenceDistance = Boolean(distanceReference.origin);
+  const recommendationModeSource = isLocationFollowing ? "user" : distanceReference.kind ? "browse" : "none";
+  const listDisplayOrigin = activeUserLocation && isValidMapCoordinate(activeUserLocation.lat, activeUserLocation.lng) ? activeUserLocation : null;
+  const listDistanceReferenceKind: DistanceReferenceKind | null = listDisplayOrigin ? "user" : distanceReference.kind;
+  const listDistanceReferenceLabel = listDisplayOrigin ? null : distanceReference.label;
+  const showListDistance = Boolean(listDisplayOrigin || distanceReference.origin);
   const mapRenderableRestrooms = useMemo(
     () => mapRestrooms.filter((restroom) => isValidMapCoordinate(restroom.lat, restroom.lng)),
     [mapRestrooms]
@@ -411,15 +517,15 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, [mapRestrooms]);
 
   const listBaseRestrooms = useMemo(() => {
-    if (!distanceOrigin) {
+    if (!browseOrigin) {
       return [...mapRenderableRestrooms];
     }
 
     return [...mapRenderableRestrooms].map((restroom) => ({
       ...restroom,
-      distanceMiles: roundToOne(haversineDistanceMiles(distanceOrigin, { lat: restroom.lat, lng: restroom.lng }))
+      distanceMiles: roundToOne(haversineDistanceMiles(browseOrigin, { lat: restroom.lat, lng: restroom.lng }))
     }));
-  }, [distanceOrigin, mapRenderableRestrooms]);
+  }, [browseOrigin, mapRenderableRestrooms]);
   const mapDisplayRestrooms = listBaseRestrooms;
 
   const filteredRestrooms = useMemo(
@@ -462,21 +568,30 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
     return filtered.slice(0, LIST_LIMIT);
   }, [filteredRestrooms, hasActiveUserLocation, sortMode]);
-
-  const recommendationOrigin = useMemo<Coordinate | null>(() => {
-    if (activeUserLocation) {
-      return activeUserLocation;
+  const listDisplayDistanceByRestroomId = useMemo<Record<string, number>>(() => {
+    if (!listDisplayOrigin) {
+      return {};
     }
 
-    if (mapCamera && isValidMapCoordinate(mapCamera.lat, mapCamera.lng)) {
-      return {
-        lat: mapCamera.lat,
-        lng: mapCamera.lng
-      };
-    }
+    return Object.fromEntries(
+      listRestrooms.map((restroom) => [
+        restroom.id,
+        roundToOne(haversineDistanceMiles(listDisplayOrigin, { lat: restroom.lat, lng: restroom.lng }))
+      ])
+    );
+  }, [listDisplayOrigin, listRestrooms]);
+  const getUserDisplayDistanceMiles = useCallback(
+    (restroom: NearbyBathroom) => {
+      if (!listDisplayOrigin) {
+        return null;
+      }
 
-    return null;
-  }, [activeUserLocation, mapCamera]);
+      return roundToOne(haversineDistanceMiles(listDisplayOrigin, { lat: restroom.lat, lng: restroom.lng }));
+    },
+    [listDisplayOrigin]
+  );
+
+  const recommendationOrigin = distanceReference.origin;
 
   const recommendation = useMemo<RecommendationResult | null>(() => {
     return resolveClosestInAreaRecommendation(filteredRestrooms, recommendationOrigin);
@@ -511,24 +626,44 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, [recentlyViewedRestrooms, topPickRestroom?.id]);
 
   const listHelperText = useMemo(() => {
-    if (!hasActiveUserLocation) {
-      return "Showing the currently visible map area. Enable location to see distance from you and sort by closest.";
+    if (!distanceReference.origin) {
+      if (isLocationFollowing) {
+        return "Waiting for your live location so we can show nearby restrooms around you.";
+      }
+
+      return "Showing the currently visible map area. Move the map or search another area to browse nearby restrooms.";
+    }
+
+    if (isLocationFollowing) {
+      if (sortMode === "closest") {
+        return "Showing the currently visible map area. Sorted by straight-line distance from your live location.";
+      }
+
+      return "Showing the currently visible map area. Sorted by recommended quality near your location.";
+    }
+
+    if (listDisplayOrigin) {
+      return "Showing the currently visible map area. Distance labels are from your location while browsing stays tied to this area.";
     }
 
     if (sortMode === "closest") {
-      return "Showing the currently visible map area. Sorted by straight-line distance from your live location.";
+      return "Showing the currently visible map area. Sorted by straight-line distance from map center.";
     }
 
-    return "Showing the currently visible map area. Sorted by recommended quality near your location.";
-  }, [hasActiveUserLocation, sortMode]);
+    return "Showing the currently visible map area. Sorted by recommended quality near map center.";
+  }, [distanceReference.origin, isLocationFollowing, listDisplayOrigin, sortMode]);
 
-  const highlightedListRestroomId = listHoveredRestroomId ?? mapFocusedRestroomId;
+  const highlightedListRestroomId = isMobilePreviewLayout ? selectedRestroomId : listHoveredRestroomId ?? mapFocusedRestroomId;
   const isRailRestroomHighlighted = useCallback(
     (restroomId: string) => mapVisibleRestroomIds.has(restroomId) && highlightedListRestroomId === restroomId,
     [highlightedListRestroomId, mapVisibleRestroomIds]
   );
   const handleRailRestroomHoverChange = useCallback(
     (restroomId: string, isHovering: boolean) => {
+      if (isMobilePreviewLayout) {
+        return;
+      }
+
       if (isHovering) {
         if (!mapVisibleRestroomIds.has(restroomId)) {
           return;
@@ -540,22 +675,135 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
       setListHoveredRestroomId((current) => (current === restroomId ? null : current));
     },
-    [mapVisibleRestroomIds]
+    [isMobilePreviewLayout, mapVisibleRestroomIds]
+  );
+  const handleRailRestroomFocusChange = useCallback(
+    (restroomId: string, isFocused: boolean) => {
+      if (isMobilePreviewLayout) {
+        return;
+      }
+
+      if (isFocused) {
+        if (!mapVisibleRestroomIds.has(restroomId)) {
+          return;
+        }
+
+        setMapFocusedRestroomId(restroomId);
+        return;
+      }
+
+      setMapFocusedRestroomId((current) => (current === restroomId ? null : current));
+    },
+    [isMobilePreviewLayout, mapVisibleRestroomIds]
   );
   const handleRailRestroomBlur = useCallback(
     (restroomId: string, event: ReactFocusEvent<HTMLElement>) => {
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-        handleRailRestroomHoverChange(restroomId, false);
+        handleRailRestroomFocusChange(restroomId, false);
       }
     },
-    [handleRailRestroomHoverChange]
+    [handleRailRestroomFocusChange]
   );
   const selectedMapRestroom = useMemo(
-    () => (mapFocusedRestroomId ? mapDisplayRestrooms.find((restroom) => restroom.id === mapFocusedRestroomId) ?? null : null),
-    [mapDisplayRestrooms, mapFocusedRestroomId]
+    () => (selectedRestroomId ? mapDisplayRestrooms.find((restroom) => restroom.id === selectedRestroomId) ?? null : null),
+    [mapDisplayRestrooms, selectedRestroomId]
   );
   const selectedMapRestroomId = selectedMapRestroom?.id ?? null;
   const selectedMapRestroomPreviewPhotoUrl = selectedMapRestroomId ? mobilePreviewPhotoByRestroomId[selectedMapRestroomId] ?? null : null;
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") {
+      return;
+    }
+
+    const originKey = browseOrigin ? `${browseOrigin.lat.toFixed(5)}:${browseOrigin.lng.toFixed(5)}` : "none";
+    const mapCameraKey = mapCamera ? `${mapCamera.lat.toFixed(5)}:${mapCamera.lng.toFixed(5)}@${mapCamera.zoom.toFixed(2)}` : "none";
+    const nextLogKey = [
+      isLocationTrackingEnabled ? "tracking" : "not_tracking",
+      isFollowingUserLocation ? "provider_following" : "provider_not_following",
+      referenceMode,
+      hasActiveUserLocation ? "active_user" : "no_active_user",
+      distanceReference.kind ?? "none",
+      originKey,
+      mapCameraKey,
+      selectedSearchPlace?.id ?? "no_place",
+      selectedMapRestroomId ?? "no_selected_restroom",
+      topPickRestroom?.id ?? "no_top_pick"
+    ].join("|");
+
+    if (nextLogKey === distanceReferenceLogKeyRef.current) {
+      return;
+    }
+
+    distanceReferenceLogKeyRef.current = nextLogKey;
+    console.debug("[Poopin] Explorer distance reference", {
+      userLocation: userLocation
+        ? {
+            lat: Number(userLocation.lat.toFixed(5)),
+            lng: Number(userLocation.lng.toFixed(5))
+          }
+        : null,
+      lastKnownLocation: lastKnownLocation
+        ? {
+            lat: Number(lastKnownLocation.lat.toFixed(5)),
+            lng: Number(lastKnownLocation.lng.toFixed(5))
+          }
+        : null,
+      isLocationTrackingEnabled,
+      providerFollowingUserLocation: isFollowingUserLocation,
+      referenceMode,
+      isLocationFollowing,
+      hasActiveUserLocation,
+      selectedSearchPlace: selectedSearchPlace?.fullName ?? null,
+      mapCamera: mapCamera
+        ? {
+            lat: Number(mapCamera.lat.toFixed(5)),
+            lng: Number(mapCamera.lng.toFixed(5)),
+            zoom: Number(mapCamera.zoom.toFixed(2))
+          }
+        : null,
+      distanceReference: {
+        kind: distanceReference.kind,
+        origin: browseOrigin
+          ? {
+              lat: Number(browseOrigin.lat.toFixed(5)),
+              lng: Number(browseOrigin.lng.toFixed(5))
+            }
+          : null
+      },
+      distanceReferenceSource: isLocationFollowing ? "user" : distanceReference.kind ?? "none",
+      recommendationModeSource,
+      closestCard: topPickRestroom
+        ? {
+            id: topPickRestroom.id,
+            distanceMiles: topPickRestroom.distanceMiles
+          }
+        : null,
+      listSample: listRestrooms.slice(0, 3).map((restroom) => ({
+        id: restroom.id,
+        distanceMiles: restroom.distanceMiles
+      })),
+      mobilePreviewRestroomId: selectedMapRestroomId
+    });
+  }, [
+    browseOrigin,
+    distanceReference.kind,
+    hasActiveUserLocation,
+    isFollowingUserLocation,
+    isLocationFollowing,
+    isLocationTrackingEnabled,
+    lastKnownLocation,
+    listRestrooms,
+    mapCamera,
+    recommendationModeSource,
+    referenceMode,
+    selectedMapRestroomId,
+    selectedSearchPlace?.fullName,
+    selectedSearchPlace?.id,
+    topPickRestroom,
+    userLocation
+  ]);
+
   const isMobileExpandedSheetWinning =
     isMapExpanded && isMobilePreviewLayout && (mobileSheetState !== "collapsed" || isMobileSheetInteractionLocked);
   const resolvedMobileExpandedOverlayMode = useMemo<MobileExpandedOverlayMode>(() => {
@@ -643,14 +891,16 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       if (isMobilePreviewLayout) {
         setHasStartedBrowsing(true);
         settleMobileSheetInteraction();
-        setMapFocusedRestroomId(restroomId);
+        setSelectedRestroomId(restroomId);
+        setMapFocusedRestroomId(null);
         setListHoveredRestroomId(null);
         setMobileSheetState("collapsed");
         return;
       }
 
       setMapFocusedRestroomId(restroomId);
-      setListHoveredRestroomId(restroomId);
+      setSelectedRestroomId(null);
+      setListHoveredRestroomId(null);
     },
     [isMobilePreviewLayout, mapVisibleRestroomIds, settleMobileSheetInteraction]
   );
@@ -741,7 +991,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       }
 
       setHasStartedBrowsing(true);
-      setMapFocusedRestroomId(restroomId);
+      setSelectedRestroomId(restroomId);
+      setMapFocusedRestroomId(null);
       setListHoveredRestroomId(null);
       collapseMobileSheetToSelectedPreview();
       return true;
@@ -760,7 +1011,13 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       }
 
       setHasStartedBrowsing(true);
-      setMapFocusedRestroomId(restroomId);
+      if (isMobilePreviewLayout) {
+        setSelectedRestroomId(restroomId);
+        setMapFocusedRestroomId(null);
+      } else {
+        setMapFocusedRestroomId(restroomId);
+        setSelectedRestroomId(null);
+      }
       setListHoveredRestroomId(null);
       settleMobileSheetInteraction();
     },
@@ -1335,6 +1592,19 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, [listHoveredRestroomId, mapFocusedRestroomId, mapRenderableRestrooms]);
 
   useEffect(() => {
+    if (!selectedRestroomId) {
+      return;
+    }
+
+    const isSelectedRestroomVisible = mapRenderableRestrooms.some((restroom) => restroom.id === selectedRestroomId);
+    if (isSelectedRestroomVisible) {
+      return;
+    }
+
+    setSelectedRestroomId(null);
+  }, [mapRenderableRestrooms, selectedRestroomId]);
+
+  useEffect(() => {
     if (!isMapExpanded || typeof document === "undefined" || typeof window === "undefined") {
       return;
     }
@@ -1423,6 +1693,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       }
 
       // Avoid stale "selected without popup" state when returning from detail pages.
+      setSelectedRestroomId(null);
       setMapFocusedRestroomId(null);
       setListHoveredRestroomId(null);
     };
@@ -1440,6 +1711,14 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, [hasActiveUserLocation, sortMode]);
 
   const handleUseMyLocation = () => {
+    setReferenceMode("user");
+    setIsFollowingUserLocation(true);
+    setSelectedSearchPlace(null);
+    mapCameraRef.current = null;
+    setMapCamera(null);
+    setSelectedRestroomId(null);
+    setMapFocusedRestroomId(null);
+    setListHoveredRestroomId(null);
     const sourceSurface = isMapExpanded ? "expanded_map_controls" : "homepage_controls";
     const viewportMode = isMapExpanded ? "expanded_map" : "homepage";
     captureAnalyticsEvent("locate_clicked", {
@@ -1452,8 +1731,41 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   };
 
   const handleStopLocationTracking = () => {
+    setReferenceMode("browse");
+    setSelectedRestroomId(null);
+    setMapFocusedRestroomId(null);
+    setListHoveredRestroomId(null);
     stopLocationTracking();
   };
+
+  const handlePlaceSearchClear = useCallback(() => {
+    setSelectedSearchPlace(null);
+    setSelectedRestroomId(null);
+    setMapFocusedRestroomId(null);
+    setListHoveredRestroomId(null);
+  }, []);
+
+  const handlePlaceSearchSelect = useCallback(
+    (place: PlaceSearchResult) => {
+      setReferenceMode("browse");
+      setSelectedSearchPlace(place);
+      setSearchCameraRequestKey((current) => current + 1);
+      setHasStartedBrowsing(true);
+      setIsFollowingUserLocation(false);
+      setSelectedRestroomId(null);
+      setMapFocusedRestroomId(null);
+      setListHoveredRestroomId(null);
+    },
+    [setIsFollowingUserLocation]
+  );
+
+  const handleLocationFollowChange = useCallback(
+    (enabled: boolean) => {
+      setReferenceMode(enabled ? "user" : "browse");
+      setIsFollowingUserLocation(enabled);
+    },
+    [setIsFollowingUserLocation]
+  );
 
   const handleViewportBoundsChange = useCallback((bounds: MapBounds) => {
     if (hasSeenInitialViewportBoundsRef.current) {
@@ -1522,12 +1834,20 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     [persistHomeMapState, restroomLookup]
   );
 
-  const handleMapFocusedRestroomIdChange = useCallback((restroomId: string | null) => {
-    if (restroomId && isMapExpanded && isMobilePreviewLayout && applyMobileExpandedRestroomSelection(restroomId)) {
+  const handleMapHoveredRestroomIdChange = useCallback((restroomId: string | null) => {
+    if (isMobilePreviewLayout) {
       return;
     }
 
-    if (isMapExpanded && isMobilePreviewLayout && isMobileSheetInteractionLocked) {
+    if (restroomId && !mapVisibleRestroomIds.has(restroomId)) {
+      return;
+    }
+
+    setListHoveredRestroomId(restroomId);
+  }, [isMobilePreviewLayout, mapVisibleRestroomIds]);
+
+  const handleMapFocusedRestroomIdChange = useCallback((restroomId: string | null) => {
+    if (isMobilePreviewLayout) {
       return;
     }
 
@@ -1536,8 +1856,27 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
     setMapFocusedRestroomId(restroomId);
     if (restroomId) {
+      setSelectedRestroomId(null);
       setListHoveredRestroomId(null);
     }
+  }, [isMobilePreviewLayout]);
+
+  const handleMapSelectedRestroomIdChange = useCallback((restroomId: string | null) => {
+    if (restroomId && isMapExpanded && isMobilePreviewLayout && applyMobileExpandedRestroomSelection(restroomId)) {
+      return;
+    }
+
+    if (restroomId && isMapExpanded && isMobilePreviewLayout && isMobileSheetInteractionLocked) {
+      return;
+    }
+
+    if (restroomId) {
+      setHasStartedBrowsing(true);
+    }
+
+    setSelectedRestroomId(restroomId);
+    setMapFocusedRestroomId(null);
+    setListHoveredRestroomId(null);
   }, [
     applyMobileExpandedRestroomSelection,
     isMapExpanded,
@@ -1568,7 +1907,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         <div className="pointer-events-auto mx-auto max-w-[430px]">
           <MobileRestroomPreviewCard
             restroom={selectedMapRestroom}
-            showDistance={hasActiveUserLocation}
+            showDistance={showReferenceDistance}
+            distanceReferenceKind={distanceReference.kind}
+            distanceReferenceLabel={distanceReference.label}
+            hasUserLocation={hasActiveUserLocation}
             photoUrl={selectedMapRestroomPreviewPhotoUrl}
             viewportMode={isExpandedVariant ? "expanded_map" : "homepage"}
             onNavigateToDetail={handleNavigateToDetail}
@@ -1590,7 +1932,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     disablePointerEvents?: boolean;
   }) => {
     const isHighlighted = isRailRestroomHighlighted(restroom.id);
-    const recommendationHelperText = hasActiveUserLocation
+    const displayDistanceMiles = getUserDisplayDistanceMiles(restroom);
+    const recommendationHelperText = isLocationFollowing
       ? RECOMMENDATION_HELPER_TEXT
       : RECOMMENDATION_MAP_AREA_HELPER_TEXT;
 
@@ -1609,12 +1952,16 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
         <RestroomCard
           restroom={restroom}
-          showDistance={hasActiveUserLocation}
+          showDistance={showListDistance}
+          displayDistanceMiles={displayDistanceMiles}
+          distanceReferenceKind={listDistanceReferenceKind}
+          distanceReferenceLabel={listDistanceReferenceLabel}
           isFeaturedRecommendation
           viewportMode={viewportMode}
           hasUserLocation={hasActiveUserLocation}
           isHighlighted={isHighlighted}
           onHoverChange={(isHovering) => handleRailRestroomHoverChange(restroom.id, isHovering)}
+          onFocusChange={(isFocused) => handleRailRestroomFocusChange(restroom.id, isFocused)}
           onNavigateToDetail={handleNavigateToDetail}
           className={RECOMMENDATION_CARD_CLASSNAME}
         />
@@ -1660,10 +2007,16 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       return null;
     }
 
-    const recommendationHelperText = hasActiveUserLocation
+    const recommendationHelperText = isLocationFollowing
       ? RECOMMENDATION_HELPER_TEXT
       : RECOMMENDATION_MAP_AREA_HELPER_TEXT;
-    const distanceLabel = hasActiveUserLocation ? toApproximateDistanceLabel(expandedTopPickRestroom.distanceMiles) : "";
+    const displayDistanceMiles = getUserDisplayDistanceMiles(expandedTopPickRestroom);
+    const distanceLabel = showListDistance
+      ? formatDistanceLabel(displayDistanceMiles ?? expandedTopPickRestroom.distanceMiles, {
+          referenceKind: listDistanceReferenceKind,
+          referenceLabel: listDistanceReferenceLabel
+        })
+      : "";
     const recommendationSignalDescriptors = expandedTopPickRestroom.ratings.qualitySignals
       .map((signal) => getReviewQuickTagDescriptor(signal))
       .filter((descriptor): descriptor is NonNullable<ReturnType<typeof getReviewQuickTagDescriptor>> => descriptor?.tone === "positive")
@@ -1685,7 +2038,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               onClick={activateRecommendation}
               onMouseEnter={() => handleRailRestroomHoverChange(expandedTopPickRestroom.id, true)}
               onMouseLeave={() => handleRailRestroomHoverChange(expandedTopPickRestroom.id, false)}
-              onFocusCapture={() => handleRailRestroomHoverChange(expandedTopPickRestroom.id, true)}
+              onFocusCapture={() => handleRailRestroomFocusChange(expandedTopPickRestroom.id, true)}
               onBlurCapture={(event) => handleRailRestroomBlur(expandedTopPickRestroom.id, event)}
               onKeyDown={(event) => {
                 if (event.key !== "Enter" && event.key !== " ") {
@@ -1704,10 +2057,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                   <p className="mt-0.5 truncate text-sm text-slate-500">{getRestroomCardSubtitle(expandedTopPickRestroom)}</p>
                 </div>
                 {distanceLabel ? (
-                  <div className="shrink-0 text-right">
-                    <p className="text-base font-semibold tracking-tight text-slate-900">{distanceLabel.replace(" away", "")}</p>
-                    <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">away</p>
-                  </div>
+                  <p className="shrink-0 max-w-[10rem] text-right text-sm font-semibold leading-5 text-slate-700">{distanceLabel}</p>
                 ) : null}
               </div>
 
@@ -1811,7 +2161,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                   onClick={() => handleNavigateToDetail(restroom.id)}
                   onMouseEnter={() => handleRailRestroomHoverChange(restroom.id, true)}
                   onMouseLeave={() => handleRailRestroomHoverChange(restroom.id, false)}
-                  onFocusCapture={() => handleRailRestroomHoverChange(restroom.id, true)}
+                  onFocusCapture={() => handleRailRestroomFocusChange(restroom.id, true)}
                   onBlurCapture={(event) => handleRailRestroomBlur(restroom.id, event)}
                   onTouchStart={() => handleRailRestroomTouchSelect(restroom.id)}
                   className={cn(
@@ -2010,13 +2360,17 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
             ? "Start with the recommended option above, then compare a few more close choices here."
             : isExpandedVariant && expandedMapRecommendation
               ? "Start with the recommended option above, then compare the rest of the visible options."
-            : listHelperText
+              : listHelperText
         }
-        showDistance={hasActiveUserLocation}
+        showDistance={showListDistance}
+        displayDistanceByRestroomId={listDisplayDistanceByRestroomId}
+        distanceReferenceKind={listDistanceReferenceKind}
+        distanceReferenceLabel={listDistanceReferenceLabel}
         viewportMode={viewportMode}
         hasUserLocation={hasActiveUserLocation}
         highlightedRestroomId={highlightedListRestroomId}
         onRestroomHoverChange={setListHoveredRestroomId}
+        onRestroomFocusChange={(restroomId) => setMapFocusedRestroomId(restroomId)}
         onRestroomTouchSelect={handleRailRestroomTouchSelect}
         onNavigateToDetail={handleNavigateToDetail}
         compact={isExpandedVariant}
@@ -2025,6 +2379,24 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           isExpandedVariant ? "sm:max-h-[calc(100vh-290px)] sm:overflow-y-auto sm:pr-1 lg:max-h-[calc(100vh-290px)]" : undefined
         }
       />
+    );
+  };
+
+  const renderPlaceSearchControls = (variant: "default" | "expanded") => {
+    const isExpandedVariant = variant === "expanded";
+
+    return (
+      <div className={cn("w-full", isExpandedVariant ? "sm:max-w-[420px] lg:max-w-[460px]" : "lg:max-w-[430px]")}>
+        <PlaceSearchBar
+          selectedPlace={selectedSearchPlace}
+          onPlaceSelect={handlePlaceSearchSelect}
+          onClear={handlePlaceSearchClear}
+          compact={isExpandedVariant}
+        />
+        {!isExpandedVariant ? (
+          <p className="mt-1.5 hidden px-1 text-xs text-slate-500 sm:block">Jump to a city, neighborhood, or street address to browse nearby restrooms.</p>
+        ) : null}
+      </div>
     );
   };
 
@@ -2076,8 +2448,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
   const isMobileSheetCollapsed = mobileSheetState === "collapsed";
   const activeMapPreviewVariant = isMapExpanded ? "expanded" : "default";
-  const isLocationFollowing = isLocationTrackingEnabled && isFollowingUserLocation;
-  const isLocationTrackingPaused = isLocationTrackingEnabled && !isFollowingUserLocation;
   const shouldShowStickyMobilePrimaryAction =
     !isMapExpanded && !isLocationTrackingEnabled && !isLocating && !isPrimaryLocationActionVisible && !hasStartedBrowsing;
 
@@ -2137,6 +2507,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
           </div>
         </section>
 
+        <div className="mb-3 sm:mb-4">
+          {renderPlaceSearchControls("default")}
+        </div>
+
         <section className="grid min-w-0 gap-5 overflow-x-clip lg:grid-cols-[minmax(0,1.45fr)_minmax(360px,1fr)] xl:grid-cols-[minmax(0,1.55fr)_420px]">
         <div
           className={cn(
@@ -2151,18 +2525,25 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               <MapPanel
                 restrooms={mapDisplayRestrooms}
                 userLocation={activeUserLocation}
-                showDistance={hasActiveUserLocation}
+                showDistance={showReferenceDistance}
+                distanceReferenceKind={distanceReference.kind}
+                distanceReferenceLabel={distanceReference.label}
                 hasUserLocation={hasActiveUserLocation}
-                hoveredRestroomId={listHoveredRestroomId}
-                focusedRestroomId={mapFocusedRestroomId}
+                hoveredRestroomId={isMobilePreviewLayout ? null : listHoveredRestroomId}
+                focusedRestroomId={isMobilePreviewLayout ? null : mapFocusedRestroomId}
+                selectedRestroomId={selectedRestroomId}
+                onHoveredRestroomIdChange={handleMapHoveredRestroomIdChange}
                 onFocusedRestroomIdChange={handleMapFocusedRestroomIdChange}
+                onSelectedRestroomIdChange={handleMapSelectedRestroomIdChange}
                 onViewportBoundsChange={handleViewportBoundsChange}
                 onCameraChange={handleMapCameraChange}
                 onNavigateToDetail={handleNavigateToDetail}
                 initialCamera={mapCamera}
+                searchCamera={searchCameraTarget}
                 locationCenterRequestKey={locationCenterRequestKey}
-                locationFollowEnabled={isFollowingUserLocation}
-                onLocationFollowChange={setIsFollowingUserLocation}
+                searchCameraRequestKey={searchCameraRequestKey}
+                locationFollowEnabled={isLocationFollowing}
+                onLocationFollowChange={handleLocationFollowChange}
                 analyticsViewportMode={isMapExpanded ? "expanded_map" : "homepage"}
                 className={cn(isMapExpanded && "relative z-10 h-full rounded-none border-0 shadow-none")}
                 mapClassName={cn(isMapExpanded && "h-full min-h-0")}
@@ -2182,67 +2563,78 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
             {isMapExpanded ? (
               <>
-                <div className="pointer-events-none absolute inset-x-2 top-[max(0.5rem,env(safe-area-inset-top))] z-20 sm:inset-x-4 sm:top-4">
-                  <div className="pointer-events-auto mx-auto flex w-full max-w-[1400px] min-w-0 flex-col gap-2 rounded-2xl border border-white/70 bg-white/95 px-3 py-2.5 shadow-xl backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-4">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-900">Restroom map</p>
-                      <p className="mt-0.5 hidden text-xs text-slate-600 sm:block">Move the map to browse nearby options.</p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                      {!isLocationTrackingEnabled ? (
-                        <button
-                          type="button"
-                          onClick={handleUseMyLocation}
-                          disabled={isLocating}
-                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {isLocating ? "Locating..." : "Use my location"}
-                        </button>
-                      ) : null}
-                      {isLocationFollowing ? (
-                        <span className="inline-flex min-h-[36px] items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 shadow-sm">
-                          📍 Following you
-                        </span>
-                      ) : null}
-                      {isLocationTrackingPaused ? (
-                        <button
-                          type="button"
-                          onClick={handleUseMyLocation}
-                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
-                        >
-                          Return to me
-                        </button>
-                      ) : null}
-                      {isLocationTrackingEnabled ? (
-                        <button
-                          type="button"
-                          onClick={handleStopLocationTracking}
-                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
-                        >
-                          Stop
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => setIsExpandedListOpen((current) => !current)}
-                        className="hidden rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 sm:inline-flex"
-                      >
-                        {isExpandedListOpen ? "Hide list" : "Show list"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setIsMapExpanded(false)}
-                        className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800"
-                      >
-                        Done
-                      </button>
-                    </div>
+                <div
+                  className={cn(
+                    "pointer-events-none absolute left-2 right-2 top-[max(0.5rem,env(safe-area-inset-top))] z-20 sm:left-4 sm:top-4",
+                    isExpandedListOpen && !isMobilePreviewLayout ? "sm:right-[428px]" : "sm:right-4"
+                  )}
+                >
+                  <div className="pointer-events-auto mr-auto w-full max-w-[820px] min-w-0 rounded-[20px] border border-white/75 bg-white/90 px-2.5 py-1.5 shadow-[0_20px_44px_rgba(15,23,42,0.16)] backdrop-blur-xl sm:rounded-[24px] sm:px-4 sm:py-3">
+                    <div className="flex flex-col gap-1.5 sm:gap-2.5">
+                      <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                        <div className="min-w-0 sm:max-w-[430px]">
+                          <p className="text-[13px] font-semibold text-slate-900 sm:text-sm">Restroom map</p>
+                          <p className="mt-0.5 hidden text-xs text-slate-600 lg:block">Move the map to browse nearby options.</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1 sm:justify-end sm:gap-2">
+                          {!isLocationTrackingEnabled ? (
+                            <button
+                              type="button"
+                              onClick={handleUseMyLocation}
+                              disabled={isLocating}
+                              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 sm:px-3 sm:py-2 sm:text-xs"
+                            >
+                              {isLocating ? "Locating..." : "Use my location"}
+                            </button>
+                          ) : null}
+                          {isLocationFollowing ? (
+                            <span className="inline-flex min-h-[32px] items-center rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700 shadow-sm sm:min-h-[36px] sm:px-3 sm:py-2 sm:text-xs">
+                              📍 Following you
+                            </span>
+                          ) : null}
+                          {isLocationTrackingPaused ? (
+                            <button
+                              type="button"
+                              onClick={handleUseMyLocation}
+                              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 sm:px-3 sm:py-2 sm:text-xs"
+                            >
+                              Return to me
+                            </button>
+                          ) : null}
+                          {isLocationTrackingEnabled ? (
+                            <button
+                              type="button"
+                              onClick={handleStopLocationTracking}
+                              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 sm:px-3 sm:py-2 sm:text-xs"
+                            >
+                              Stop
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => setIsExpandedListOpen((current) => !current)}
+                            className="hidden rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 sm:inline-flex"
+                          >
+                            {isExpandedListOpen ? "Hide list" : "Show list"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsMapExpanded(false)}
+                            className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-[11px] font-semibold text-white shadow-sm transition hover:bg-slate-800 sm:px-3 sm:py-2 sm:text-xs"
+                          >
+                            Done
+                          </button>
+                        </div>
+                      </div>
 
-                    {geoError ? (
-                      <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-medium text-amber-800">
-                        {geoError}
-                      </p>
-                    ) : null}
+                      {renderPlaceSearchControls("expanded")}
+
+                      {geoError ? (
+                        <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] font-medium text-amber-800 sm:py-2 sm:text-xs">
+                          {geoError}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
 
