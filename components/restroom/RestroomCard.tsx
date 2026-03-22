@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useRef, type FocusEvent, type TouchEvent as ReactTouchEvent } from "react";
+import { useRef, type FocusEvent, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from "react";
 import { NearbyBathroom } from "@/types";
 import { TrackedNavigateLink } from "@/components/analytics/TrackedNavigateLink";
 import type { AnalyticsViewportMode } from "@/lib/analytics/posthog";
@@ -113,6 +113,11 @@ export function RestroomCard({
     onNavigateToDetail?.(restroom.id);
   };
 
+  const handleCardBodyActivate = () => {
+    handleNavigateToDetail();
+    router.push(detailHref);
+  };
+
   const resetTouchSelectionState = () => {
     touchStartPointRef.current = null;
     didTouchMoveRef.current = false;
@@ -160,14 +165,21 @@ export function RestroomCard({
       return;
     }
 
-    event.preventDefault();
-    handleNavigateToDetail();
-    router.push(detailHref);
     resetTouchSelectionState();
+  };
+
+  const handleCardClick = (event: ReactMouseEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("[data-restroom-card-action='true']")) {
+      return;
+    }
+
+    handleCardBodyActivate();
   };
 
   return (
     <article
+      onClick={handleCardClick}
       onMouseEnter={() => onHoverChange?.(true)}
       onMouseLeave={() => onHoverChange?.(false)}
       onFocusCapture={() => onFocusChange?.(true)}
@@ -304,7 +316,10 @@ export function RestroomCard({
       <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
         <Link
           href={detailHref}
-          onClick={handleNavigateToDetail}
+          onClick={(event) => {
+            event.stopPropagation();
+            handleNavigateToDetail();
+          }}
           data-restroom-card-action="true"
           className="inline-flex items-center rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
         >
@@ -318,6 +333,7 @@ export function RestroomCard({
           sourceSurface="restroom_card"
           viewportMode={viewportMode}
           hasUserLocation={hasUserLocation}
+          onClick={(event) => event.stopPropagation()}
           dataRestroomCardAction
           className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
         >
