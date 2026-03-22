@@ -5,20 +5,19 @@ import { useRouter } from "next/navigation";
 import { NearbyBathroom } from "@/types";
 import { TrackedNavigateLink } from "@/components/analytics/TrackedNavigateLink";
 import type { AnalyticsViewportMode } from "@/lib/analytics/posthog";
+import { formatDistanceLabel, type DistanceReferenceKind } from "@/lib/utils/distancePresentation";
 import { getRestroomCardSubtitle, getRestroomDisplayName } from "@/lib/utils/restroomPresentation";
-interface MobileRestroomPreviewCardProps { restroom: NearbyBathroom; showDistance?: boolean; photoUrl?: string | null; viewportMode?: AnalyticsViewportMode; onNavigateToDetail?: (restroomId: string) => void; }
 
-const toDistanceLabel = (value: number) => {
-  if (!Number.isFinite(value) || value < 0) {
-    return "";
-  }
-
-  if (value < 0.1) {
-    return "Very close";
-  }
-
-  return `~${value.toFixed(1)} mi away`;
-};
+interface MobileRestroomPreviewCardProps {
+  restroom: NearbyBathroom;
+  showDistance?: boolean;
+  distanceReferenceKind?: DistanceReferenceKind | null;
+  distanceReferenceLabel?: string | null;
+  hasUserLocation?: boolean;
+  photoUrl?: string | null;
+  viewportMode?: AnalyticsViewportMode;
+  onNavigateToDetail?: (restroomId: string) => void;
+}
 
 function NavigateIcon({ className }: { className?: string }) {
   return (
@@ -46,6 +45,9 @@ function NavigateIcon({ className }: { className?: string }) {
 export function MobileRestroomPreviewCard({
   restroom,
   showDistance = false,
+  distanceReferenceKind = "user",
+  distanceReferenceLabel = null,
+  hasUserLocation = false,
   photoUrl = null,
   viewportMode = "homepage",
   onNavigateToDetail
@@ -54,7 +56,13 @@ export function MobileRestroomPreviewCard({
   const detailHref = `/restroom/${restroom.id}`;
   const displayName = getRestroomDisplayName(restroom);
   const subtitle = getRestroomCardSubtitle(restroom);
-  const distanceLabel = showDistance ? toDistanceLabel(restroom.distanceMiles) : "";
+  const distanceLabel = showDistance
+    ? formatDistanceLabel(restroom.distanceMiles, {
+        referenceKind: distanceReferenceKind,
+        referenceLabel: distanceReferenceLabel,
+        compact: true
+      })
+    : "";
   const reviewSummary =
     restroom.ratings.reviewCount > 0 && restroom.ratings.overall > 0
       ? `⭐ ${restroom.ratings.overall.toFixed(1)} • ${restroom.ratings.reviewCount} review${restroom.ratings.reviewCount === 1 ? "" : "s"}`
@@ -100,7 +108,7 @@ export function MobileRestroomPreviewCard({
             </div>
             {distanceLabel ? (
               <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
-                {distanceLabel.replace(" away", "")}
+                {distanceLabel}
               </span>
             ) : null}
           </div>
@@ -117,7 +125,7 @@ export function MobileRestroomPreviewCard({
           source="mobile_preview"
           sourceSurface="mobile_preview"
           viewportMode={viewportMode}
-          hasUserLocation={showDistance}
+          hasUserLocation={hasUserLocation}
           className="inline-flex min-h-[40px] w-full items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
         >
           <NavigateIcon className="h-3.5 w-3.5" />

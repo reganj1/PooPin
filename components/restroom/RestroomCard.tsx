@@ -6,17 +6,22 @@ import type { AnalyticsViewportMode } from "@/lib/analytics/posthog";
 import { RatingPills } from "@/components/restroom/RatingPills";
 import { RestroomTags } from "@/components/restroom/RestroomTags";
 import { cn } from "@/lib/utils/cn";
+import { formatDistanceLabel, type DistanceReferenceKind } from "@/lib/utils/distancePresentation";
 import { getRestroomCardSubtitle, getRestroomDisplayName, getRestroomSourceLabel } from "@/lib/utils/restroomPresentation";
 import { getReviewQuickTagDescriptor, reviewQuickTagToneClassName } from "@/lib/utils/reviewSignals";
 
 interface RestroomCardProps {
   restroom: NearbyBathroom;
   showDistance?: boolean;
+  displayDistanceMiles?: number | null;
+  distanceReferenceKind?: DistanceReferenceKind | null;
+  distanceReferenceLabel?: string | null;
   isHighlighted?: boolean;
   isFeaturedRecommendation?: boolean;
   viewportMode?: AnalyticsViewportMode;
   hasUserLocation?: boolean;
   onHoverChange?: (isHovering: boolean) => void;
+  onFocusChange?: (isFocused: boolean) => void;
   onTouchSelect?: (restroomId: string) => void;
   onNavigateToDetail?: (restroomId: string) => void;
   className?: string;
@@ -38,18 +43,6 @@ const toAccessLabel = (value: NearbyBathroom["access_type"]) => {
       return "Restroom";
   }
 };
-const toDistanceLabel = (value: number) => {
-  if (!Number.isFinite(value) || value < 0) {
-    return "";
-  }
-
-  if (value < 0.1) {
-    return "Very close";
-  }
-
-  return `~${value.toFixed(1)} mi away`;
-};
-
 function NavigateIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true" className={className}>
@@ -76,11 +69,15 @@ function NavigateIcon({ className }: { className?: string }) {
 export function RestroomCard({
   restroom,
   showDistance = false,
+  displayDistanceMiles = null,
+  distanceReferenceKind = "user",
+  distanceReferenceLabel = null,
   isHighlighted = false,
   isFeaturedRecommendation = false,
   viewportMode = "homepage",
   hasUserLocation = false,
   onHoverChange,
+  onFocusChange,
   onTouchSelect,
   onNavigateToDetail,
   className
@@ -95,10 +92,18 @@ export function RestroomCard({
     .filter((descriptor): descriptor is NonNullable<ReturnType<typeof getReviewQuickTagDescriptor>> => Boolean(descriptor?.tone === "positive"));
   const touchStartPointRef = useRef<{ x: number; y: number } | null>(null);
   const didTouchMoveRef = useRef(false);
+  const distanceValue = displayDistanceMiles ?? restroom.distanceMiles;
+  const distanceLabel = showDistance
+    ? formatDistanceLabel(distanceValue, {
+        referenceKind: distanceReferenceKind,
+        referenceLabel: distanceReferenceLabel,
+        compact: true
+      })
+    : "";
 
   const handleBlurCapture = (event: FocusEvent<HTMLElement>) => {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-      onHoverChange?.(false);
+      onFocusChange?.(false);
     }
   };
 
@@ -155,7 +160,7 @@ export function RestroomCard({
     <article
       onMouseEnter={() => onHoverChange?.(true)}
       onMouseLeave={() => onHoverChange?.(false)}
-      onFocusCapture={() => onHoverChange?.(true)}
+      onFocusCapture={() => onFocusChange?.(true)}
       onBlurCapture={handleBlurCapture}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
@@ -207,9 +212,14 @@ export function RestroomCard({
           ) : (
             <span />
           )}
-          {showDistance ? (
-            <span className={cn("text-xs font-medium", isFeaturedRecommendation ? "text-slate-700" : "text-slate-500")}>
-              {toDistanceLabel(restroom.distanceMiles)}
+          {distanceLabel ? (
+            <span
+              className={cn(
+                "max-w-[11rem] text-right text-xs font-medium",
+                isFeaturedRecommendation ? "text-slate-700" : "text-slate-500"
+              )}
+            >
+              {distanceLabel}
             </span>
           ) : null}
         </div>

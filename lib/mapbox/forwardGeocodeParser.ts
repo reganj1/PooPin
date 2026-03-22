@@ -1,6 +1,7 @@
 import { MapboxContext, MapboxFeature, ReverseGeocodeResolution } from "@/lib/mapbox/reverseGeocodeParser";
 
 export interface MapboxForwardFeature extends MapboxFeature {
+  id?: string;
   center?: number[];
   context?: MapboxContext[];
 }

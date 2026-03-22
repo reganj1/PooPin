@@ -12,6 +12,7 @@ import {
   getCachedRestroomPreviewPhoto,
   prefetchRestroomPreviewPhotos
 } from "@/lib/utils/restroomPreviewClient";
+import { formatDistanceLabel, type DistanceReferenceKind } from "@/lib/utils/distancePresentation";
 import { getRestroomDisplayName, getRestroomPopupAddress } from "@/lib/utils/restroomPresentation";
 import { getReviewQuickTagDescriptor } from "@/lib/utils/reviewSignals";
 
@@ -27,12 +28,22 @@ interface RestroomMapProps {
     lng: number;
     zoom: number;
   } | null;
+  searchCamera?: {
+    lat: number;
+    lng: number;
+    zoom: number;
+  } | null;
   showDistance?: boolean;
+  distanceReferenceKind?: DistanceReferenceKind | null;
+  distanceReferenceLabel?: string | null;
   hasUserLocation?: boolean;
   analyticsViewportMode?: AnalyticsViewportMode;
   hoveredRestroomId?: string | null;
   focusedRestroomId?: string | null;
+  selectedRestroomId?: string | null;
+  onHoveredRestroomIdChange?: (restroomId: string | null) => void;
   onFocusedRestroomIdChange?: (restroomId: string | null) => void;
+  onSelectedRestroomIdChange?: (restroomId: string | null) => void;
   onViewportBoundsChange?: (bounds: {
     minLat: number;
     maxLat: number;
@@ -46,6 +57,7 @@ interface RestroomMapProps {
   }) => void;
   onNavigateToDetail?: (restroomId: string) => void;
   locationCenterRequestKey?: number;
+  searchCameraRequestKey?: number;
   locationFollowEnabled?: boolean;
   onLocationFollowChange?: (enabled: boolean) => void;
 }
@@ -126,18 +138,6 @@ const toUserLocationFeatureCollection = (
   };
 };
 
-const toDistanceLabel = (value: number) => {
-  if (!Number.isFinite(value) || value < 0) {
-    return "";
-  }
-
-  if (value < 0.1) {
-    return "<0.1 mi straight-line";
-  }
-
-  return `${value.toFixed(1)} mi straight-line`;
-};
-
 const getLocationKey = (location: { lat: number; lng: number } | null) =>
   location ? `${location.lat.toFixed(5)}:${location.lng.toFixed(5)}` : "";
 
@@ -148,9 +148,11 @@ const buildDesktopHoverPreviewContent = (
   options: {
     showDistance: boolean;
     photoUrl: string | null;
+    distanceReferenceKind: DistanceReferenceKind | null;
+    distanceReferenceLabel: string | null;
   }
 ) => {
-  const { showDistance, photoUrl } = options;
+  const { showDistance, photoUrl, distanceReferenceKind, distanceReferenceLabel } = options;
   const container = document.createElement("div");
   container.className = "w-[246px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl";
 
@@ -204,7 +206,10 @@ const buildDesktopHoverPreviewContent = (
   }
 
   if (showDistance) {
-    const distanceLabel = toDistanceLabel(restroom.distanceMiles);
+    const distanceLabel = formatDistanceLabel(restroom.distanceMiles, {
+      referenceKind: distanceReferenceKind,
+      referenceLabel: distanceReferenceLabel
+    });
     if (distanceLabel) {
       const distanceLine = document.createElement("p");
       distanceLine.className = "text-xs font-medium text-slate-500";
@@ -222,16 +227,23 @@ export function RestroomMap({
   accessToken,
   userLocation = null,
   initialCamera = null,
+  searchCamera = null,
   showDistance = false,
+  distanceReferenceKind = "user",
+  distanceReferenceLabel = null,
   hasUserLocation = false,
   analyticsViewportMode = "homepage",
   hoveredRestroomId = null,
   focusedRestroomId = null,
+  selectedRestroomId = null,
+  onHoveredRestroomIdChange,
   onFocusedRestroomIdChange,
+  onSelectedRestroomIdChange,
   onViewportBoundsChange,
   onCameraChange,
   onNavigateToDetail,
   locationCenterRequestKey = 0,
+  searchCameraRequestKey = 0,
   locationFollowEnabled = false,
   onLocationFollowChange
 }: RestroomMapProps) {
@@ -258,15 +270,19 @@ export function RestroomMap({
   const desktopPopupRestroomIdRef = useRef<string | null>(null);
   const desktopPreviewFetchIntentTimeoutRef = useRef<number | null>(null);
   const desktopPreviewFetchIntentRestroomIdRef = useRef<string | null>(null);
+  const hoverPreviewLogKeyRef = useRef("");
   const missingHoveredMarkerLogRef = useRef<Set<string>>(new Set());
   const invalidCoordinatesLogKeyRef = useRef<string>("");
   const isCoarsePointerRef = useRef(false);
   const reenableTouchZoomTimeoutRef = useRef<number | null>(null);
   const appliedLocationCenterRequestRef = useRef(locationCenterRequestKey);
+  const appliedSearchCameraRequestRef = useRef(searchCameraRequestKey);
   const userInteractionHandlerRef = useRef<(() => void) | null>(null);
   const locationFollowEnabledRef = useRef(locationFollowEnabled);
   const onLocationFollowChangeRef = useRef(onLocationFollowChange);
+  const onHoveredRestroomIdChangeRef = useRef(onHoveredRestroomIdChange);
   const onFocusedRestroomIdChangeRef = useRef(onFocusedRestroomIdChange);
+  const onSelectedRestroomIdChangeRef = useRef(onSelectedRestroomIdChange);
   const onNavigateToDetailRef = useRef(onNavigateToDetail);
   const manualInteractionSignalRef = useRef(false);
   const manualInteractionResetTimeoutRef = useRef<number | null>(null);
@@ -298,18 +314,28 @@ export function RestroomMap({
   }, [onLocationFollowChange]);
 
   useEffect(() => {
+    onHoveredRestroomIdChangeRef.current = onHoveredRestroomIdChange;
+  }, [onHoveredRestroomIdChange]);
+
+  useEffect(() => {
     onFocusedRestroomIdChangeRef.current = onFocusedRestroomIdChange;
   }, [onFocusedRestroomIdChange]);
+
+  useEffect(() => {
+    onSelectedRestroomIdChangeRef.current = onSelectedRestroomIdChange;
+  }, [onSelectedRestroomIdChange]);
 
   useEffect(() => {
     onNavigateToDetailRef.current = onNavigateToDetail;
   }, [onNavigateToDetail]);
 
   useEffect(() => {
-    const prioritizedRestroomIds = [focusedRestroomId, hoveredRestroomId].filter((value): value is string => Boolean(value));
+    const prioritizedRestroomIds = [selectedRestroomId, focusedRestroomId, hoveredRestroomId].filter(
+      (value): value is string => Boolean(value)
+    );
     const candidateRestroomIds = [...prioritizedRestroomIds, ...restrooms.map((restroom) => restroom.id)];
     prefetchRestroomPreviewPhotos(candidateRestroomIds, 14);
-  }, [focusedRestroomId, hoveredRestroomId, restrooms]);
+  }, [focusedRestroomId, hoveredRestroomId, restrooms, selectedRestroomId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -481,7 +507,9 @@ export function RestroomMap({
       userInteractionHandlerRef.current = null;
       mapRef.current = null;
       mapboxRef.current = null;
+      onHoveredRestroomIdChangeRef.current?.(null);
       onFocusedRestroomIdChangeRef.current?.(null);
+      onSelectedRestroomIdChangeRef.current?.(null);
     };
   }, [accessToken]);
 
@@ -528,7 +556,7 @@ export function RestroomMap({
 
     const resolveHoveredRestroomId = () => {
       if (isCoarsePointerRef.current) {
-        return focusedRestroomId;
+        return selectedRestroomId ?? focusedRestroomId;
       }
 
       return hoveredRestroomId ?? mapHoveredRestroomIdRef.current ?? focusedRestroomId;
@@ -579,7 +607,9 @@ export function RestroomMap({
       const photoUrl = hasPreviewPhoto ? cachedPhotoUrl : null;
       const popupContent = buildDesktopHoverPreviewContent(restroom, {
         showDistance,
-        photoUrl
+        photoUrl,
+        distanceReferenceKind,
+        distanceReferenceLabel
       });
 
       let popup = popupRef.current;
@@ -816,7 +846,12 @@ export function RestroomMap({
         popupRef.current = null;
         activePopupRestroomIdRef.current = null;
         mapHoveredRestroomIdRef.current = null;
-        onFocusedRestroomIdChangeRef.current?.(null);
+        onHoveredRestroomIdChangeRef.current?.(null);
+        if (isCoarsePointerRef.current) {
+          onSelectedRestroomIdChangeRef.current?.(null);
+        } else {
+          onFocusedRestroomIdChangeRef.current?.(null);
+        }
         setHoveredFeatureState(null);
       };
 
@@ -843,9 +878,10 @@ export function RestroomMap({
           has_user_location: hasUserLocation
         });
 
-        onFocusedRestroomIdChangeRef.current?.(id);
         mapHoveredRestroomIdRef.current = null;
+        onHoveredRestroomIdChangeRef.current?.(null);
         if (isCoarsePointerRef.current) {
+          onSelectedRestroomIdChangeRef.current?.(id);
           if (activePopupRestroomIdRef.current !== id) {
             captureAnalyticsEvent("restroom_popup_opened", {
               bathroom_id: id,
@@ -875,6 +911,8 @@ export function RestroomMap({
           return;
         }
 
+        onFocusedRestroomIdChangeRef.current?.(id);
+        setHoveredFeatureState(id);
         clearDesktopHoverPopup();
         onNavigateToDetailRef.current?.(id);
         router.push(`/restroom/${id}`);
@@ -904,8 +942,8 @@ export function RestroomMap({
         const restroomId = feature?.properties?.id;
         if (typeof restroomId === "string" && mapHoveredRestroomIdRef.current !== restroomId) {
           mapHoveredRestroomIdRef.current = restroomId;
-          setHoveredFeatureState(resolveHoveredRestroomId());
-          onFocusedRestroomIdChangeRef.current?.(restroomId);
+          setHoveredFeatureState(restroomId);
+          onHoveredRestroomIdChangeRef.current?.(restroomId);
           syncDesktopHoverPopup();
         }
         map.getCanvas().style.cursor = "pointer";
@@ -917,8 +955,8 @@ export function RestroomMap({
         }
 
         mapHoveredRestroomIdRef.current = null;
+        onHoveredRestroomIdChangeRef.current?.(null);
         setHoveredFeatureState(resolveHoveredRestroomId());
-        onFocusedRestroomIdChangeRef.current?.(hoveredRestroomId ?? null);
         syncDesktopHoverPopup();
         map.getCanvas().style.cursor = "";
       };
@@ -937,30 +975,39 @@ export function RestroomMap({
         }
 
         mapHoveredRestroomIdRef.current = null;
+        onHoveredRestroomIdChangeRef.current?.(null);
         setHoveredFeatureState(resolveHoveredRestroomId());
-        onFocusedRestroomIdChangeRef.current?.(hoveredRestroomId ?? null);
         syncDesktopHoverPopup();
       };
 
-      const maybeDisableLocationFollow = (requireManualSignal: boolean) => {
+      const maybeDisableLocationFollow = (requireManualSignal: boolean, reason: "drag" | "zoom") => {
         if (!locationFollowEnabledRef.current) {
           return;
         }
 
-        if (requireManualSignal && !manualInteractionSignalRef.current) {
+        const hasManualSignal = manualInteractionSignalRef.current;
+
+        if (requireManualSignal && !hasManualSignal) {
           return;
+        }
+
+        if (process.env.NODE_ENV !== "production") {
+          console.debug("[Poopin] Map switching to browse reference", {
+            reason,
+            hasManualSignal
+          });
         }
 
         onLocationFollowChangeRef.current?.(false);
       };
 
       const dragStartHandler = () => {
-        maybeDisableLocationFollow(false);
+        maybeDisableLocationFollow(true, "drag");
         clearFocusedSelectionOnMapMoveStart();
       };
 
       const zoomStartHandler = () => {
-        maybeDisableLocationFollow(true);
+        maybeDisableLocationFollow(true, "zoom");
         clearFocusedSelectionOnMapMoveStart();
       };
 
@@ -987,7 +1034,9 @@ export function RestroomMap({
       desktopPopupRestroomIdRef.current = null;
       mapHoveredRestroomIdRef.current = null;
       setHoveredFeatureState(null);
+      onHoveredRestroomIdChangeRef.current?.(null);
       onFocusedRestroomIdChangeRef.current?.(null);
+      onSelectedRestroomIdChangeRef.current?.(null);
     }
     setHoveredFeatureState(resolveHoveredRestroomId());
     syncDesktopHoverPopup();
@@ -1002,7 +1051,10 @@ export function RestroomMap({
     restroomById,
     restrooms.length,
     router,
+    selectedRestroomId,
     showDistance,
+    distanceReferenceKind,
+    distanceReferenceLabel,
     userLocationData
   ]);
 
@@ -1050,6 +1102,57 @@ export function RestroomMap({
       visibleMarkerCount: markerData.features.length
     });
   }, [hoveredRestroomId, markerData.features.length, markerFeatureIds]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") {
+      return;
+    }
+
+    const nextLogKey = [
+      distanceReferenceKind ?? "none",
+      distanceReferenceLabel ?? "none",
+      hoveredRestroomId ?? "none",
+      focusedRestroomId ?? "none",
+      selectedRestroomId ?? "none"
+    ].join("|");
+    if (nextLogKey === hoverPreviewLogKeyRef.current) {
+      return;
+    }
+
+    hoverPreviewLogKeyRef.current = nextLogKey;
+    console.debug("[Poopin] Map hover preview distance reference", {
+      distanceReferenceKind,
+      distanceReferenceLabel,
+      hoveredRestroomId,
+      focusedRestroomId,
+      selectedRestroomId
+    });
+  }, [distanceReferenceKind, distanceReferenceLabel, focusedRestroomId, hoveredRestroomId, selectedRestroomId]);
+
+  useEffect(() => {
+    if (!isMapReady) {
+      return;
+    }
+
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const hasPendingSearchRequest = searchCameraRequestKey !== appliedSearchCameraRequestRef.current;
+    if (!hasPendingSearchRequest || !isValidCamera(searchCamera)) {
+      return;
+    }
+
+    onLocationFollowChangeRef.current?.(false);
+    map.easeTo({
+      center: [searchCamera.lng, searchCamera.lat],
+      zoom: searchCamera.zoom,
+      duration: 800
+    });
+    hasInitializedCameraRef.current = true;
+    appliedSearchCameraRequestRef.current = searchCameraRequestKey;
+  }, [isMapReady, searchCamera, searchCameraRequestKey]);
 
   useEffect(() => {
     if (!isMapReady) {

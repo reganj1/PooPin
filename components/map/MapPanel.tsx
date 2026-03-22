@@ -3,6 +3,7 @@ import type { AnalyticsViewportMode } from "@/lib/analytics/posthog";
 import { MAPBOX_ACCESS_TOKEN, isMapboxConfigured } from "@/lib/mapbox/config";
 import { RestroomMap } from "@/components/map/RestroomMap";
 import { cn } from "@/lib/utils/cn";
+import { formatDistanceLabel, type DistanceReferenceKind } from "@/lib/utils/distancePresentation";
 
 interface MapPanelProps {
   restrooms: NearbyBathroom[];
@@ -15,12 +16,22 @@ interface MapPanelProps {
     lng: number;
     zoom: number;
   } | null;
+  searchCamera?: {
+    lat: number;
+    lng: number;
+    zoom: number;
+  } | null;
   showDistance?: boolean;
+  distanceReferenceKind?: DistanceReferenceKind | null;
+  distanceReferenceLabel?: string | null;
   hasUserLocation?: boolean;
   analyticsViewportMode?: AnalyticsViewportMode;
   hoveredRestroomId?: string | null;
   focusedRestroomId?: string | null;
+  selectedRestroomId?: string | null;
+  onHoveredRestroomIdChange?: (restroomId: string | null) => void;
   onFocusedRestroomIdChange?: (restroomId: string | null) => void;
+  onSelectedRestroomIdChange?: (restroomId: string | null) => void;
   onViewportBoundsChange?: (bounds: {
     minLat: number;
     maxLat: number;
@@ -30,6 +41,7 @@ interface MapPanelProps {
   onCameraChange?: (camera: { lat: number; lng: number; zoom: number }) => void;
   onNavigateToDetail?: (restroomId: string) => void;
   locationCenterRequestKey?: number;
+  searchCameraRequestKey?: number;
   locationFollowEnabled?: boolean;
   onLocationFollowChange?: (enabled: boolean) => void;
   className?: string;
@@ -42,16 +54,23 @@ export function MapPanel({
   restrooms,
   userLocation = null,
   initialCamera = null,
+  searchCamera = null,
   showDistance = false,
+  distanceReferenceKind = "user",
+  distanceReferenceLabel = null,
   hasUserLocation = false,
   analyticsViewportMode = "homepage",
   hoveredRestroomId = null,
   focusedRestroomId = null,
+  selectedRestroomId = null,
+  onHoveredRestroomIdChange,
   onFocusedRestroomIdChange,
+  onSelectedRestroomIdChange,
   onViewportBoundsChange,
   onCameraChange,
   onNavigateToDetail,
   locationCenterRequestKey = 0,
+  searchCameraRequestKey = 0,
   locationFollowEnabled = false,
   onLocationFollowChange,
   className,
@@ -109,7 +128,7 @@ export function MapPanel({
                 {restrooms.slice(0, 4).map((restroom) => (
                   <li key={restroom.id}>
                     • {restroom.name}
-                    {showDistance ? ` (${restroom.distanceMiles.toFixed(1)} mi straight-line)` : ""}
+                    {showDistance ? ` (${formatDistanceLabel(restroom.distanceMiles, { referenceKind: distanceReferenceKind, referenceLabel: distanceReferenceLabel })})` : ""}
                   </li>
                 ))}
               </ul>
@@ -153,16 +172,23 @@ export function MapPanel({
           accessToken={MAPBOX_ACCESS_TOKEN}
           userLocation={userLocation}
           initialCamera={initialCamera}
+          searchCamera={searchCamera}
           showDistance={showDistance}
+          distanceReferenceKind={distanceReferenceKind}
+          distanceReferenceLabel={distanceReferenceLabel}
           hasUserLocation={hasUserLocation}
           analyticsViewportMode={analyticsViewportMode}
           hoveredRestroomId={hoveredRestroomId}
           focusedRestroomId={focusedRestroomId}
+          selectedRestroomId={selectedRestroomId}
+          onHoveredRestroomIdChange={onHoveredRestroomIdChange}
           onFocusedRestroomIdChange={onFocusedRestroomIdChange}
+          onSelectedRestroomIdChange={onSelectedRestroomIdChange}
           onViewportBoundsChange={onViewportBoundsChange}
           onCameraChange={onCameraChange}
           onNavigateToDetail={onNavigateToDetail}
           locationCenterRequestKey={locationCenterRequestKey}
+          searchCameraRequestKey={searchCameraRequestKey}
           locationFollowEnabled={locationFollowEnabled}
           onLocationFollowChange={onLocationFollowChange}
         />

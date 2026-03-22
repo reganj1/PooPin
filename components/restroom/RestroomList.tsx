@@ -2,16 +2,21 @@ import { NearbyBathroom } from "@/types";
 import { RestroomCard } from "@/components/restroom/RestroomCard";
 import type { AnalyticsViewportMode } from "@/lib/analytics/posthog";
 import { cn } from "@/lib/utils/cn";
+import type { DistanceReferenceKind } from "@/lib/utils/distancePresentation";
 
 interface RestroomListProps {
   restrooms: NearbyBathroom[];
   title?: string;
   helperText?: string;
   showDistance?: boolean;
+  displayDistanceByRestroomId?: Record<string, number>;
+  distanceReferenceKind?: DistanceReferenceKind | null;
+  distanceReferenceLabel?: string | null;
   viewportMode?: AnalyticsViewportMode;
   hasUserLocation?: boolean;
   highlightedRestroomId?: string | null;
   onRestroomHoverChange?: (restroomId: string | null) => void;
+  onRestroomFocusChange?: (restroomId: string | null) => void;
   onRestroomTouchSelect?: (restroomId: string) => void;
   onNavigateToDetail?: (restroomId: string) => void;
   compact?: boolean;
@@ -24,10 +29,14 @@ export function RestroomList({
   title = "Nearby restrooms",
   helperText = "Showing nearby restrooms for the current map context.",
   showDistance = false,
+  displayDistanceByRestroomId,
+  distanceReferenceKind = "user",
+  distanceReferenceLabel = null,
   viewportMode = "homepage",
   hasUserLocation = false,
   highlightedRestroomId = null,
   onRestroomHoverChange,
+  onRestroomFocusChange,
   onRestroomTouchSelect,
   onNavigateToDetail,
   compact = false,
@@ -63,10 +72,14 @@ export function RestroomList({
               key={restroom.id}
               restroom={restroom}
               showDistance={showDistance}
+              displayDistanceMiles={displayDistanceByRestroomId?.[restroom.id] ?? null}
+              distanceReferenceKind={distanceReferenceKind}
+              distanceReferenceLabel={distanceReferenceLabel}
               viewportMode={viewportMode}
               hasUserLocation={hasUserLocation}
               isHighlighted={highlightedRestroomId === restroom.id}
               onHoverChange={(isHovering) => onRestroomHoverChange?.(isHovering ? restroom.id : null)}
+              onFocusChange={(isFocused) => onRestroomFocusChange?.(isFocused ? restroom.id : null)}
               onTouchSelect={onRestroomTouchSelect}
               onNavigateToDetail={onNavigateToDetail}
             />
