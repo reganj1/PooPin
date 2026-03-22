@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   type FocusEvent as ReactFocusEvent,
   type MouseEvent as ReactMouseEvent,
@@ -311,6 +312,7 @@ const resolveClosestInAreaRecommendation = (candidates: NearbyBathroom[], origin
 };
 
 export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
+  const router = useRouter();
   const {
     currentLocation: userLocation,
     lastKnownLocation,
@@ -375,6 +377,9 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const mobileSheetDragResetTimeoutRef = useRef<number | null>(null);
   const mobileSheetInteractionTimeoutRef = useRef<number | null>(null);
   const hasSeenInitialViewportBoundsRef = useRef(false);
+  const expandedMobileRecommendationTouchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const expandedMobileRecommendationDidMoveRef = useRef(false);
+  const didHandleExpandedMobileRecommendationTouchTapRef = useRef(false);
   const [mobilePreviewPhotoByRestroomId, setMobilePreviewPhotoByRestroomId] = useState<Record<string, string | null>>({});
   const [isMobilePreviewLayout, setIsMobilePreviewLayout] = useState(false);
   const [isPrimaryLocationActionVisible, setIsPrimaryLocationActionVisible] = useState(true);
@@ -2334,12 +2339,83 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       return null;
     }
 
-    return renderRecommendationSection({
-      restroom: expandedMapRecommendation,
-      viewportMode: "expanded_map",
-      className: "sm:hidden",
-      disablePointerEvents: isMobileSheetInteractionLocked
-    });
+    const recommendationRestroom = expandedMapRecommendation;
+    const resetExpandedMobileRecommendationTouchState = () => {
+      expandedMobileRecommendationTouchStartRef.current = null;
+      expandedMobileRecommendationDidMoveRef.current = false;
+    };
+    const openExpandedMobileRecommendationDetail = () => {
+      handleNavigateToDetail(recommendationRestroom.id);
+      router.push(`/restroom/${recommendationRestroom.id}`);
+    };
+    const handleExpandedMobileRecommendationTouchStart = (event: TouchEvent<HTMLDivElement>) => {
+      const touch = event.touches[0];
+      if (!touch) {
+        resetExpandedMobileRecommendationTouchState();
+        return;
+      }
+
+      expandedMobileRecommendationTouchStartRef.current = { x: touch.clientX, y: touch.clientY };
+      expandedMobileRecommendationDidMoveRef.current = false;
+    };
+    const handleExpandedMobileRecommendationTouchMove = (event: TouchEvent<HTMLDivElement>) => {
+      const touch = event.touches[0];
+      const startPoint = expandedMobileRecommendationTouchStartRef.current;
+      if (!touch || !startPoint) {
+        return;
+      }
+
+      if (Math.abs(touch.clientX - startPoint.x) > 8 || Math.abs(touch.clientY - startPoint.y) > 8) {
+        expandedMobileRecommendationDidMoveRef.current = true;
+      }
+    };
+    const handleExpandedMobileRecommendationTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
+      const startPoint = expandedMobileRecommendationTouchStartRef.current;
+      if (!startPoint || expandedMobileRecommendationDidMoveRef.current) {
+        resetExpandedMobileRecommendationTouchState();
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("[data-restroom-card-action='true']")) {
+        resetExpandedMobileRecommendationTouchState();
+        return;
+      }
+
+      event.preventDefault();
+      didHandleExpandedMobileRecommendationTouchTapRef.current = true;
+      openExpandedMobileRecommendationDetail();
+      resetExpandedMobileRecommendationTouchState();
+    };
+    const handleExpandedMobileRecommendationClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (didHandleExpandedMobileRecommendationTouchTapRef.current) {
+        didHandleExpandedMobileRecommendationTouchTapRef.current = false;
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("[data-restroom-card-action='true']")) {
+        return;
+      }
+
+      openExpandedMobileRecommendationDetail();
+    };
+
+    return (
+      <div
+        className={cn("sm:hidden", isMobileSheetInteractionLocked && "pointer-events-none")}
+        onClick={handleExpandedMobileRecommendationClick}
+        onTouchStart={handleExpandedMobileRecommendationTouchStart}
+        onTouchMove={handleExpandedMobileRecommendationTouchMove}
+        onTouchEnd={handleExpandedMobileRecommendationTouchEnd}
+        onTouchCancel={resetExpandedMobileRecommendationTouchState}
+      >
+        {renderRecommendationSection({
+          restroom: recommendationRestroom,
+          viewportMode: "expanded_map"
+        })}
+      </div>
+    );
   };
 
   const renderRestroomListSection = (variant: "default" | "expanded") => {

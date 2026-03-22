@@ -1,12 +1,5 @@
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import {
-  useRef,
-  type FocusEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
-  type TouchEvent as ReactTouchEvent
-} from "react";
+import { useRef, type FocusEvent, type TouchEvent as ReactTouchEvent } from "react";
 import { NearbyBathroom } from "@/types";
 import { TrackedNavigateLink } from "@/components/analytics/TrackedNavigateLink";
 import type { AnalyticsViewportMode } from "@/lib/analytics/posthog";
@@ -89,7 +82,6 @@ export function RestroomCard({
   onNavigateToDetail,
   className
 }: RestroomCardProps) {
-  const router = useRouter();
   const detailHref = `/restroom/${restroom.id}`;
   const displayName = getRestroomDisplayName(restroom);
   const subtitle = getRestroomCardSubtitle(restroom);
@@ -100,7 +92,6 @@ export function RestroomCard({
     .filter((descriptor): descriptor is NonNullable<ReturnType<typeof getReviewQuickTagDescriptor>> => Boolean(descriptor?.tone === "positive"));
   const touchStartPointRef = useRef<{ x: number; y: number } | null>(null);
   const didTouchMoveRef = useRef(false);
-  const didHandleTouchTapRef = useRef(false);
   const distanceValue = displayDistanceMiles ?? restroom.distanceMiles;
   const distanceLabel = showDistance
     ? formatDistanceLabel(distanceValue, {
@@ -118,11 +109,6 @@ export function RestroomCard({
 
   const handleNavigateToDetail = () => {
     onNavigateToDetail?.(restroom.id);
-  };
-
-  const handleCardBodyActivate = () => {
-    handleNavigateToDetail();
-    router.push(detailHref);
   };
 
   const resetTouchSelectionState = () => {
@@ -172,46 +158,11 @@ export function RestroomCard({
       return;
     }
 
-    event.preventDefault();
-    didHandleTouchTapRef.current = true;
-    handleCardBodyActivate();
     resetTouchSelectionState();
-  };
-
-  const handleCardClick = (event: ReactMouseEvent<HTMLElement>) => {
-    if (didHandleTouchTapRef.current) {
-      didHandleTouchTapRef.current = false;
-      return;
-    }
-
-    const target = event.target as HTMLElement | null;
-    if (target?.closest("[data-restroom-card-action='true']")) {
-      return;
-    }
-
-    handleCardBodyActivate();
-  };
-
-  const handleCardKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
-
-    const target = event.target as HTMLElement | null;
-    if (target?.closest("[data-restroom-card-action='true']")) {
-      return;
-    }
-
-    event.preventDefault();
-    handleCardBodyActivate();
   };
 
   return (
     <article
-      role="link"
-      tabIndex={0}
-      onClick={handleCardClick}
-      onKeyDown={handleCardKeyDown}
       onMouseEnter={() => onHoverChange?.(true)}
       onMouseLeave={() => onHoverChange?.(false)}
       onFocusCapture={() => onFocusChange?.(true)}
@@ -221,12 +172,17 @@ export function RestroomCard({
       onTouchEnd={handleTouchEnd}
       onTouchCancel={resetTouchSelectionState}
       className={cn(
-        "group rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm outline-none transition duration-150 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md focus-visible:ring-2 focus-visible:ring-brand-200 sm:p-5",
+        "group rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition duration-150 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md sm:p-5",
         isHighlighted && "border-brand-300 shadow-md ring-2 ring-brand-100",
         className
       )}
     >
-      <div className="block rounded-lg">
+      <Link
+        href={detailHref}
+        onClick={handleNavigateToDetail}
+        data-restroom-card-action="true"
+        className="block rounded-lg outline-none transition focus-visible:ring-2 focus-visible:ring-brand-200"
+      >
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h3 className="truncate text-base font-semibold text-slate-900 transition group-hover:text-brand-600">{displayName}</h3>
@@ -338,15 +294,12 @@ export function RestroomCard({
             </div>
           </>
         )}
-      </div>
+      </Link>
 
       <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
         <Link
           href={detailHref}
-          onClick={(event) => {
-            event.stopPropagation();
-            handleNavigateToDetail();
-          }}
+          onClick={handleNavigateToDetail}
           data-restroom-card-action="true"
           className="inline-flex items-center rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
         >
@@ -360,7 +313,6 @@ export function RestroomCard({
           sourceSurface="restroom_card"
           viewportMode={viewportMode}
           hasUserLocation={hasUserLocation}
-          onClick={(event) => event.stopPropagation()}
           dataRestroomCardAction
           className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
         >
