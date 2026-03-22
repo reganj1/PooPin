@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useRef, type FocusEvent, type TouchEvent as ReactTouchEvent } from "react";
 import { NearbyBathroom } from "@/types";
 import { TrackedNavigateLink } from "@/components/analytics/TrackedNavigateLink";
@@ -82,6 +83,7 @@ export function RestroomCard({
   onNavigateToDetail,
   className
 }: RestroomCardProps) {
+  const router = useRouter();
   const detailHref = `/restroom/${restroom.id}`;
   const displayName = getRestroomDisplayName(restroom);
   const subtitle = getRestroomCardSubtitle(restroom);
@@ -152,7 +154,15 @@ export function RestroomCard({
       return;
     }
 
-    onTouchSelect?.(restroom.id);
+    if (onTouchSelect) {
+      onTouchSelect(restroom.id);
+      resetTouchSelectionState();
+      return;
+    }
+
+    event.preventDefault();
+    handleNavigateToDetail();
+    router.push(detailHref);
     resetTouchSelectionState();
   };
 
