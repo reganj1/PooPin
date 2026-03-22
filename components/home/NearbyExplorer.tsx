@@ -150,8 +150,10 @@ const RECOMMENDATION_NEARBY_RADIUS_MILES = 2.5;
 const RECOMMENDATION_EXTENDED_RADIUS_MILES = 6;
 const RECOMMENDATION_FALLBACK_RADIUS_MILES = 12;
 const RECOMMENDATION_TITLE = "Closest in this area";
-const RECOMMENDATION_HELPER_TEXT = "A quick option to start with before browsing the full list.";
+const RECOMMENDATION_USER_TITLE = "Closest to you";
 const RECOMMENDATION_MAP_AREA_HELPER_TEXT = "Based on the visible map area until you use your location.";
+const RECOMMENDATION_CLOSEST_USER_HELPER_TEXT = "The closest visible option from your current location.";
+const RECOMMENDATION_CLOSEST_AREA_HELPER_TEXT = "The closest visible option in the current map area.";
 const RECOMMENDATION_WRAPPER_CLASSNAME =
   "rounded-2xl border border-brand-300 bg-brand-50/90 p-3 shadow-lg ring-2 ring-brand-100";
 const RECOMMENDATION_CARD_CLASSNAME = "border-brand-300 bg-white shadow-lg ring-1 ring-brand-100";
@@ -159,6 +161,16 @@ const RECOMMENDATION_CARD_CLASSNAME = "border-brand-300 bg-white shadow-lg ring-
 interface RecommendationResult {
   restroom: NearbyBathroom;
   originDistanceMiles: number;
+}
+
+interface RecommendationCandidate extends RecommendationResult {
+  score: number;
+}
+
+interface FeaturedRecommendation {
+  restroom: NearbyBathroom;
+  title: string;
+  helperText: string;
 }
 
 interface DistanceReference {
@@ -230,17 +242,94 @@ const getRecommendationScore = (restroom: NearbyBathroom, originDistanceMiles: n
   );
 };
 
-const resolveClosestInAreaRecommendation = (candidates: NearbyBathroom[], origin: Coordinate | null): RecommendationResult | null => {
+const compareRecommendationCandidates = (a: RecommendationCandidate, b: RecommendationCandidate) => {
+  if (b.score !== a.score) {
+    return b.score - a.score;
+  }
+
+  if (a.originDistanceMiles !== b.originDistanceMiles) {
+    return a.originDistanceMiles - b.originDistanceMiles;
+  }
+
+  if (b.restroom.ratings.overall !== a.restroom.ratings.overall) {
+    return b.restroom.ratings.overall - a.restroom.ratings.overall;
+  }
+
+  if (b.restroom.ratings.reviewCount !== a.restroom.ratings.reviewCount) {
+    return b.restroom.ratings.reviewCount - a.restroom.ratings.reviewCount;
+  }
+
+  return a.restroom.name.localeCompare(b.restroom.name);
+};
+
+const buildRecommendationCandidates = (candidates: NearbyBathroom[], origin: Coordinate | null): RecommendationCandidate[] => {
+  if (!origin || candidates.length === 0) {
+    return [];
+  }
+
+  return candidates
+    .map((restroom) => {
+      const originDistanceMiles = roundToOne(haversineDistanceMiles(origin, { lat: restroom.lat, lng: restroom.lng }));
+      return {
+        restroom,
+        originDistanceMiles,
+        score: getRecommendationScore(restroom, originDistanceMiles)
+      };
+    })
+    .filter(({ originDistanceMiles }) => Number.isFinite(originDistanceMiles) && originDistanceMiles >= 0);
+};
+
+const sortRestroomsByRecommendation = (candidates: NearbyBathroom[], origin: Coordinate | null) => {
+  const recommendationCandidates = buildRecommendationCandidates(candidates, origin);
+  if (recommendationCandidates.length === 0) {
+    return [...candidates].sort((a, b) => {
+      if (b.ratings.overall !== a.ratings.overall) {
+        return b.ratings.overall - a.ratings.overall;
+      }
+
+      if (b.ratings.reviewCount !== a.ratings.reviewCount) {
+        return b.ratings.reviewCount - a.ratings.reviewCount;
+      }
+
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  return [...recommendationCandidates].sort(compareRecommendationCandidates).map(({ restroom }) => restroom);
+};
+
+const resolveClosestRestroom = (candidates: NearbyBathroom[], origin: Coordinate | null): RecommendationResult | null => {
   if (!origin || candidates.length === 0) {
     return null;
   }
 
-  const candidatesWithDistance = candidates
-    .map((restroom) => ({
-      restroom,
-      originDistanceMiles: roundToOne(haversineDistanceMiles(origin, { lat: restroom.lat, lng: restroom.lng }))
-    }))
-    .filter(({ originDistanceMiles }) => Number.isFinite(originDistanceMiles) && originDistanceMiles >= 0);
+  return (
+    candidates
+      .map((restroom) => ({
+        restroom,
+        originDistanceMiles: roundToOne(haversineDistanceMiles(origin, { lat: restroom.lat, lng: restroom.lng }))
+      }))
+      .filter(({ originDistanceMiles }) => Number.isFinite(originDistanceMiles) && originDistanceMiles >= 0)
+      .sort((a, b) => {
+        if (a.originDistanceMiles !== b.originDistanceMiles) {
+          return a.originDistanceMiles - b.originDistanceMiles;
+        }
+
+        if (b.restroom.ratings.overall !== a.restroom.ratings.overall) {
+          return b.restroom.ratings.overall - a.restroom.ratings.overall;
+        }
+
+        if (b.restroom.ratings.reviewCount !== a.restroom.ratings.reviewCount) {
+          return b.restroom.ratings.reviewCount - a.restroom.ratings.reviewCount;
+        }
+
+        return a.restroom.name.localeCompare(b.restroom.name);
+      })[0] ?? null
+  );
+};
+
+const resolveClosestInAreaRecommendation = (candidates: NearbyBathroom[], origin: Coordinate | null): RecommendationResult | null => {
+  const candidatesWithDistance = buildRecommendationCandidates(candidates, origin);
 
   if (candidatesWithDistance.length === 0) {
     return null;
@@ -287,27 +376,7 @@ const resolveClosestInAreaRecommendation = (candidates: NearbyBathroom[], origin
   }
 
   return (
-    [...scopedCandidates].sort((a, b) => {
-      const scoreDifference =
-        getRecommendationScore(b.restroom, b.originDistanceMiles) - getRecommendationScore(a.restroom, a.originDistanceMiles);
-      if (scoreDifference !== 0) {
-        return scoreDifference;
-      }
-
-      if (a.originDistanceMiles !== b.originDistanceMiles) {
-        return a.originDistanceMiles - b.originDistanceMiles;
-      }
-
-      if (b.restroom.ratings.overall !== a.restroom.ratings.overall) {
-        return b.restroom.ratings.overall - a.restroom.ratings.overall;
-      }
-
-      if (b.restroom.ratings.reviewCount !== a.restroom.ratings.reviewCount) {
-        return b.restroom.ratings.reviewCount - a.restroom.ratings.reviewCount;
-      }
-
-      return a.restroom.name.localeCompare(b.restroom.name);
-    })[0] ?? null
+    [...scopedCandidates].sort(compareRecommendationCandidates)[0] ?? null
   );
 };
 
@@ -478,6 +547,13 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       label: null
     };
   }, [activeUserLocation, isLocationFollowing, mapCamera, searchCameraTarget, selectedPlaceDistanceLabel, userDistanceOrigin]);
+  // Reference model:
+  // - `browseOrigin` drives the featured recommendation and the "recommended" list order.
+  // - `listDisplayOrigin` drives the miles shown on list cards and the "nearest" list order when a live user location is available.
+  // QA checklist:
+  // - "Closest in this area" should stay tied to browse origin.
+  // - "Nearest" should match the miles shown on list cards.
+  // - "Recommended" should stay stable for the same viewport on desktop and mobile.
   const browseOrigin = distanceReference.origin;
   const showReferenceDistance = Boolean(distanceReference.origin);
   const recommendationModeSource = isLocationFollowing ? "user" : distanceReference.kind ? "browse" : "none";
@@ -586,22 +662,12 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         .slice(0, LIST_LIMIT);
     }
 
-    if (sortMode === "recommended" || !hasActiveUserLocation) {
-      return [...filtered]
-        .sort((a, b) => {
-          if (b.ratings.overall !== a.ratings.overall) {
-            return b.ratings.overall - a.ratings.overall;
-          }
-          if (b.ratings.reviewCount !== a.ratings.reviewCount) {
-            return b.ratings.reviewCount - a.ratings.reviewCount;
-          }
-          return a.name.localeCompare(b.name);
-        })
-        .slice(0, LIST_LIMIT);
+    if (sortMode === "recommended") {
+      return sortRestroomsByRecommendation(filtered, browseOrigin).slice(0, LIST_LIMIT);
     }
 
     return filtered.slice(0, LIST_LIMIT);
-  }, [filteredRestrooms, hasActiveUserLocation, listDisplayOrigin, listUserDistanceByRestroomId, sortMode]);
+  }, [browseOrigin, filteredRestrooms, listDisplayOrigin, listUserDistanceByRestroomId, sortMode]);
   const listDisplayDistanceByRestroomId = useMemo<Record<string, number>>(() => {
     if (!listDisplayOrigin) {
       return {};
@@ -627,9 +693,44 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const recommendation = useMemo<RecommendationResult | null>(() => {
     return resolveClosestInAreaRecommendation(filteredRestrooms, recommendationOrigin);
   }, [filteredRestrooms, recommendationOrigin]);
-
   const topPickRestroom = recommendation?.restroom ?? null;
-  const expandedMapRecommendation = topPickRestroom;
+  const closestUserRestroom = useMemo(
+    () => resolveClosestRestroom(filteredRestrooms, listDisplayOrigin)?.restroom ?? null,
+    [filteredRestrooms, listDisplayOrigin]
+  );
+  const closestBrowseRestroom = useMemo(
+    () => resolveClosestRestroom(filteredRestrooms, browseOrigin)?.restroom ?? null,
+    [browseOrigin, filteredRestrooms]
+  );
+  const featuredRecommendation = useMemo<FeaturedRecommendation | null>(() => {
+    if (closestUserRestroom) {
+      return {
+        restroom: closestUserRestroom,
+        title: RECOMMENDATION_USER_TITLE,
+        helperText: RECOMMENDATION_CLOSEST_USER_HELPER_TEXT
+      };
+    }
+
+    if (closestBrowseRestroom) {
+      return {
+        restroom: closestBrowseRestroom,
+        title: RECOMMENDATION_TITLE,
+        helperText: RECOMMENDATION_CLOSEST_AREA_HELPER_TEXT
+      };
+    }
+
+    if (!topPickRestroom) {
+      return null;
+    }
+
+    return {
+      restroom: topPickRestroom,
+      title: RECOMMENDATION_TITLE,
+      helperText: RECOMMENDATION_MAP_AREA_HELPER_TEXT
+    };
+  }, [closestBrowseRestroom, closestUserRestroom, topPickRestroom]);
+  const featuredRestroom = featuredRecommendation?.restroom ?? null;
+  const expandedMapRecommendation = featuredRestroom;
   const mapVisibleRestroomIds = useMemo(() => new Set(mapDisplayRestrooms.map((restroom) => restroom.id)), [mapDisplayRestrooms]);
 
   const restroomLookup = useMemo(() => {
@@ -645,7 +746,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     const restroomsForDisplay: RecentRestroomSnapshot[] = [];
 
     for (const restroom of recentlyViewedRestrooms) {
-      if (restroom.id === topPickRestroom?.id || seenRestroomIds.has(restroom.id)) {
+      if (restroom.id === featuredRestroom?.id || seenRestroomIds.has(restroom.id)) {
         continue;
       }
 
@@ -654,7 +755,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     return restroomsForDisplay;
-  }, [recentlyViewedRestrooms, topPickRestroom?.id]);
+  }, [featuredRestroom?.id, recentlyViewedRestrooms]);
 
   const listHelperText = useMemo(() => {
     if (!distanceReference.origin) {
@@ -670,7 +771,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         return "Showing the currently visible map area. Sorted by straight-line distance from your live location.";
       }
 
-      return "Showing the currently visible map area. Sorted by recommended quality near your location.";
+      return "Showing the currently visible map area. Ranked by quick quality signals near your location.";
     }
 
     if (listDisplayOrigin) {
@@ -678,15 +779,23 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         return "Showing the currently visible map area. Sorted by straight-line distance from your location.";
       }
 
-      return "Showing the currently visible map area. Distance labels are from your location while browsing stays tied to this area.";
+      return "Showing the currently visible map area. Ranked for this area while distance labels stay tied to your location.";
     }
 
     if (sortMode === "closest") {
+      if (distanceReference.kind === "place") {
+        return "Showing the currently visible map area. Sorted by straight-line distance from the searched area.";
+      }
+
       return "Showing the currently visible map area. Sorted by straight-line distance from map center.";
     }
 
-    return "Showing the currently visible map area. Sorted by recommended quality near map center.";
-  }, [distanceReference.origin, isLocationFollowing, listDisplayOrigin, sortMode]);
+    if (distanceReference.kind === "place") {
+      return "Showing the currently visible map area. Ranked by quick quality signals near the searched area.";
+    }
+
+    return "Showing the currently visible map area. Ranked by quick quality signals near map center.";
+  }, [distanceReference.kind, distanceReference.origin, isLocationFollowing, listDisplayOrigin, sortMode]);
 
   const highlightedListRestroomId = isMobilePreviewLayout ? selectedRestroomId : listHoveredRestroomId ?? mapFocusedRestroomId;
   const isRailRestroomHighlighted = useCallback(
@@ -763,7 +872,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       mapCameraKey,
       selectedSearchPlace?.id ?? "no_place",
       selectedMapRestroomId ?? "no_selected_restroom",
-      topPickRestroom?.id ?? "no_top_pick"
+      featuredRestroom?.id ?? "no_featured"
     ].join("|");
 
     if (nextLogKey === distanceReferenceLogKeyRef.current) {
@@ -808,10 +917,16 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       },
       distanceReferenceSource: isLocationFollowing ? "user" : distanceReference.kind ?? "none",
       recommendationModeSource,
-      closestCard: topPickRestroom
+      areaRecommendationCard: topPickRestroom
         ? {
             id: topPickRestroom.id,
             distanceMiles: topPickRestroom.distanceMiles
+          }
+        : null,
+      featuredCard: featuredRestroom
+        ? {
+            id: featuredRestroom.id,
+            sortMode
           }
         : null,
       listSample: listRestrooms.slice(0, 3).map((restroom) => ({
@@ -829,12 +944,14 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     isLocationFollowing,
     isLocationTrackingEnabled,
     lastKnownLocation,
+    featuredRestroom,
     listDisplayOrigin,
     listUserDistanceByRestroomId,
     listRestrooms,
     mapCamera,
     recommendationModeSource,
     referenceMode,
+    sortMode,
     selectedMapRestroomId,
     selectedSearchPlace?.fullName,
     selectedSearchPlace?.id,
@@ -1742,12 +1859,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     };
   }, []);
 
-  useEffect(() => {
-    if (!hasActiveUserLocation && sortMode === "closest") {
-      setSortMode("recommended");
-    }
-  }, [hasActiveUserLocation, sortMode]);
-
   const handleUseMyLocation = () => {
     setReferenceMode("user");
     setIsFollowingUserLocation(true);
@@ -1960,20 +2071,21 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
   const renderRecommendationSection = ({
     restroom,
+    title,
+    helperText,
     viewportMode,
     className,
     disablePointerEvents = false
   }: {
     restroom: NearbyBathroom;
+    title: string;
+    helperText: string;
     viewportMode: "homepage" | "expanded_map";
     className?: string;
     disablePointerEvents?: boolean;
   }) => {
     const isHighlighted = isRailRestroomHighlighted(restroom.id);
     const displayDistanceMiles = getUserDisplayDistanceMiles(restroom);
-    const recommendationHelperText = isLocationFollowing
-      ? RECOMMENDATION_HELPER_TEXT
-      : RECOMMENDATION_MAP_AREA_HELPER_TEXT;
 
     return (
       <section
@@ -1984,8 +2096,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         )}
       >
         <div className="mb-2.5 px-1">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-800">{RECOMMENDATION_TITLE}</p>
-          <p className="mt-0.5 text-xs leading-5 text-slate-600">{recommendationHelperText}</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-800">{title}</p>
+          <p className="mt-0.5 text-xs leading-5 text-slate-600">{helperText}</p>
         </div>
 
         <RestroomCard
@@ -2008,7 +2120,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   };
 
   const renderTopPickCard = (variant: "mobile" | "desktop") => {
-    if (!recommendation || !topPickRestroom) {
+    if (!featuredRecommendation || !featuredRestroom) {
       return null;
     }
 
@@ -2018,25 +2130,29 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     return renderRecommendationSection({
-      restroom: topPickRestroom,
+      restroom: featuredRestroom,
+      title: featuredRecommendation.title,
+      helperText: featuredRecommendation.helperText,
       viewportMode: "homepage",
       className: isDesktopVariant ? "hidden lg:block" : "lg:hidden"
     });
   };
 
   const renderExpandedDesktopRecommendationSection = () => {
-    if (isMobilePreviewLayout || !isMapExpanded || !expandedMapRecommendation) {
+    if (isMobilePreviewLayout || !isMapExpanded || !featuredRecommendation || !expandedMapRecommendation) {
       return null;
     }
 
     return renderRecommendationSection({
       restroom: expandedMapRecommendation,
+      title: featuredRecommendation.title,
+      helperText: featuredRecommendation.helperText,
       viewportMode: "expanded_map"
     });
   };
 
   const renderExpandedMapTopPickOverlay = () => {
-    if (!shouldShowExpandedMapTopPick) {
+    if (!shouldShowExpandedMapTopPick || !featuredRecommendation) {
       return null;
     }
 
@@ -2045,9 +2161,6 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       return null;
     }
 
-    const recommendationHelperText = isLocationFollowing
-      ? RECOMMENDATION_HELPER_TEXT
-      : RECOMMENDATION_MAP_AREA_HELPER_TEXT;
     const displayDistanceMiles = getUserDisplayDistanceMiles(expandedTopPickRestroom);
     const distanceLabel = showListDistance
       ? formatDistanceLabel(displayDistanceMiles ?? expandedTopPickRestroom.distanceMiles, {
@@ -2090,7 +2203,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-800">{RECOMMENDATION_TITLE}</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-800">{featuredRecommendation.title}</p>
                   <h2 className="mt-1 truncate text-base font-semibold text-slate-900">{getRestroomDisplayName(expandedTopPickRestroom)}</h2>
                   <p className="mt-0.5 truncate text-sm text-slate-500">{getRestroomCardSubtitle(expandedTopPickRestroom)}</p>
                 </div>
@@ -2128,7 +2241,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               </div>
 
               <p className="mt-2 text-xs font-medium text-slate-500">
-                {recommendationHelperText}
+                {featuredRecommendation.helperText}
               </p>
 
               <div className="mt-3 flex items-center gap-2" onClick={stopCardActionPropagation}>
@@ -2270,6 +2383,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
   const renderBrowseControls = (variant: "default" | "expanded") => {
     const isExpandedVariant = variant === "expanded";
+    const closestSortLabel = hasActiveUserLocation ? "Nearest to you" : "Nearest in this area";
 
     return (
       <section
@@ -2357,8 +2471,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
               )}
             >
               <option value="recommended">Recommended</option>
-              <option value="closest" disabled={!hasActiveUserLocation}>
-                Closest to you
+              <option value="closest">
+                {closestSortLabel}
               </option>
             </select>
           </div>
@@ -2368,7 +2482,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   };
 
   const renderExpandedMobileRecommendationSection = () => {
-    if (!isMobilePreviewLayout || !isMapExpanded || !expandedMapRecommendation) {
+    if (!isMobilePreviewLayout || !isMapExpanded || !featuredRecommendation || !expandedMapRecommendation) {
       return null;
     }
 
@@ -2448,6 +2562,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       >
         {renderRecommendationSection({
           restroom: recommendationRestroom,
+          title: featuredRecommendation.title,
+          helperText: featuredRecommendation.helperText,
           viewportMode: "expanded_map"
         })}
       </div>
@@ -2457,7 +2573,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   const renderRestroomListSection = (variant: "default" | "expanded") => {
     const isExpandedVariant = variant === "expanded";
     const viewportMode = isExpandedVariant ? "expanded_map" : "homepage";
-    const recommendationRestroomId = isExpandedVariant ? expandedMapRecommendation?.id ?? null : topPickRestroom?.id ?? null;
+    const recommendationRestroomId = isExpandedVariant ? expandedMapRecommendation?.id ?? null : featuredRestroom?.id ?? null;
     const restroomsForSection =
       recommendationRestroomId ? listRestrooms.filter((restroom) => restroom.id !== recommendationRestroomId) : listRestrooms;
     const sectionTitle =
@@ -2468,10 +2584,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         restrooms={restroomsForSection}
         title={sectionTitle}
         helperText={
-          !isExpandedVariant && topPickRestroom
-            ? "Start with the recommended option above, then compare a few more close choices here."
+          !isExpandedVariant && featuredRestroom
+            ? "Start with the closest option above, then compare a few more choices here."
             : isExpandedVariant && expandedMapRecommendation
-              ? "Start with the recommended option above, then compare the rest of the visible options."
+              ? "Start with the closest option above, then compare the rest of the visible options."
               : listHelperText
         }
         showDistance={showListDistance}
