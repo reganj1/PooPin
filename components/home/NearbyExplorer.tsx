@@ -549,12 +549,41 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       }),
     [filters, listBaseRestrooms]
   );
+  const listUserDistanceByRestroomId = useMemo<Record<string, number>>(() => {
+    if (!listDisplayOrigin) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      filteredRestrooms.map((restroom) => [
+        restroom.id,
+        roundToOne(haversineDistanceMiles(listDisplayOrigin, { lat: restroom.lat, lng: restroom.lng }))
+      ])
+    );
+  }, [filteredRestrooms, listDisplayOrigin]);
 
   const listRestrooms = useMemo(() => {
     const filtered = filteredRestrooms;
 
-    if (sortMode === "closest" && hasActiveUserLocation) {
-      return [...filtered].sort((a, b) => a.distanceMiles - b.distanceMiles).slice(0, LIST_LIMIT);
+    if (sortMode === "closest") {
+      return [...filtered]
+        .sort((a, b) => {
+          const aDistanceMiles = listDisplayOrigin ? listUserDistanceByRestroomId[a.id] ?? Number.POSITIVE_INFINITY : a.distanceMiles;
+          const bDistanceMiles = listDisplayOrigin ? listUserDistanceByRestroomId[b.id] ?? Number.POSITIVE_INFINITY : b.distanceMiles;
+
+          if (aDistanceMiles !== bDistanceMiles) {
+            return aDistanceMiles - bDistanceMiles;
+          }
+
+          if (b.ratings.overall !== a.ratings.overall) {
+            return b.ratings.overall - a.ratings.overall;
+          }
+          if (b.ratings.reviewCount !== a.ratings.reviewCount) {
+            return b.ratings.reviewCount - a.ratings.reviewCount;
+          }
+          return a.name.localeCompare(b.name);
+        })
+        .slice(0, LIST_LIMIT);
     }
 
     if (sortMode === "recommended" || !hasActiveUserLocation) {
@@ -572,19 +601,16 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     return filtered.slice(0, LIST_LIMIT);
-  }, [filteredRestrooms, hasActiveUserLocation, sortMode]);
+  }, [filteredRestrooms, hasActiveUserLocation, listDisplayOrigin, listUserDistanceByRestroomId, sortMode]);
   const listDisplayDistanceByRestroomId = useMemo<Record<string, number>>(() => {
     if (!listDisplayOrigin) {
       return {};
     }
 
     return Object.fromEntries(
-      listRestrooms.map((restroom) => [
-        restroom.id,
-        roundToOne(haversineDistanceMiles(listDisplayOrigin, { lat: restroom.lat, lng: restroom.lng }))
-      ])
+      listRestrooms.map((restroom) => [restroom.id, listUserDistanceByRestroomId[restroom.id] ?? restroom.distanceMiles])
     );
-  }, [listDisplayOrigin, listRestrooms]);
+  }, [listDisplayOrigin, listRestrooms, listUserDistanceByRestroomId]);
   const getUserDisplayDistanceMiles = useCallback(
     (restroom: NearbyBathroom) => {
       if (!listDisplayOrigin) {
@@ -648,6 +674,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     if (listDisplayOrigin) {
+      if (sortMode === "closest") {
+        return "Showing the currently visible map area. Sorted by straight-line distance from your location.";
+      }
+
       return "Showing the currently visible map area. Distance labels are from your location while browsing stays tied to this area.";
     }
 
@@ -786,7 +816,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
         : null,
       listSample: listRestrooms.slice(0, 3).map((restroom) => ({
         id: restroom.id,
-        distanceMiles: restroom.distanceMiles
+        browseDistanceMiles: restroom.distanceMiles,
+        displayDistanceMiles: listDisplayOrigin ? listUserDistanceByRestroomId[restroom.id] ?? null : null
       })),
       mobilePreviewRestroomId: selectedMapRestroomId
     });
@@ -798,6 +829,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     isLocationFollowing,
     isLocationTrackingEnabled,
     lastKnownLocation,
+    listDisplayOrigin,
+    listUserDistanceByRestroomId,
     listRestrooms,
     mapCamera,
     recommendationModeSource,
