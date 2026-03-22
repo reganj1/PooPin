@@ -2377,12 +2377,13 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       }
 
       const target = event.target as HTMLElement | null;
-      if (target?.closest("[data-restroom-card-action='true']")) {
+      if (target?.closest("[data-restroom-card-footer-actions='true']")) {
         resetExpandedMobileRecommendationTouchState();
         return;
       }
 
       event.preventDefault();
+      event.stopPropagation();
       didHandleExpandedMobileRecommendationTouchTapRef.current = true;
       openExpandedMobileRecommendationDetail();
       resetExpandedMobileRecommendationTouchState();
@@ -2394,21 +2395,23 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       }
 
       const target = event.target as HTMLElement | null;
-      if (target?.closest("[data-restroom-card-action='true']")) {
+      if (target?.closest("[data-restroom-card-footer-actions='true']")) {
         return;
       }
 
+      event.preventDefault();
+      event.stopPropagation();
       openExpandedMobileRecommendationDetail();
     };
 
     return (
       <div
         className={cn("sm:hidden", isMobileSheetInteractionLocked && "pointer-events-none")}
-        onClick={handleExpandedMobileRecommendationClick}
-        onTouchStart={handleExpandedMobileRecommendationTouchStart}
-        onTouchMove={handleExpandedMobileRecommendationTouchMove}
-        onTouchEnd={handleExpandedMobileRecommendationTouchEnd}
-        onTouchCancel={resetExpandedMobileRecommendationTouchState}
+        onClickCapture={handleExpandedMobileRecommendationClick}
+        onTouchStartCapture={handleExpandedMobileRecommendationTouchStart}
+        onTouchMoveCapture={handleExpandedMobileRecommendationTouchMove}
+        onTouchEndCapture={handleExpandedMobileRecommendationTouchEnd}
+        onTouchCancelCapture={resetExpandedMobileRecommendationTouchState}
       >
         {renderRecommendationSection({
           restroom: recommendationRestroom,

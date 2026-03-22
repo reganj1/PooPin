@@ -296,7 +296,7 @@ export function RestroomCard({
         )}
       </Link>
 
-      <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
+      <div data-restroom-card-footer-actions="true" className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
         <Link
           href={detailHref}
           onClick={handleNavigateToDetail}
