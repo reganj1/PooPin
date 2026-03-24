@@ -20,8 +20,10 @@ type BathroomInsertRow = Pick<
   | "source"
   | "status"
   | "source_external_id"
-  | "created_by"
->;
+  | "created_by_profile_id"
+> & {
+  created_by?: string | null;
+};
 
 interface NearbyBathroomLookupRow {
   id: string;
@@ -36,6 +38,10 @@ export interface SubmitBathroomResult {
   bathroomId: string | null;
   status: Bathroom["status"] | null;
   duplicateBathroomId?: string;
+}
+
+interface SubmitBathroomOptions {
+  createdByProfileId?: string | null;
 }
 
 const PUBLIC_SUBMISSION_STATUS: Bathroom["status"] = "pending";
@@ -153,7 +159,7 @@ const findDuplicateBathroomId = async (
   return null;
 };
 
-const toInsertPayload = (input: BathroomCreateInput, bathroomId: string): BathroomInsertRow => {
+const toInsertPayload = (input: BathroomCreateInput, bathroomId: string, options?: SubmitBathroomOptions): BathroomInsertRow => {
   return {
     id: bathroomId,
     name: input.name,
@@ -171,13 +177,15 @@ const toInsertPayload = (input: BathroomCreateInput, bathroomId: string): Bathro
     source: "user",
     status: PUBLIC_SUBMISSION_STATUS,
     source_external_id: null,
-    created_by: null
+    created_by_profile_id: options?.createdByProfileId ?? null,
+    created_by: options?.createdByProfileId ?? null
   };
 };
 
 export const submitBathroom = async (
   supabaseClient: SupabaseClient,
-  input: BathroomCreateInput
+  input: BathroomCreateInput,
+  options?: SubmitBathroomOptions
 ): Promise<SubmitBathroomResult> => {
   const duplicateBathroomId = await findDuplicateBathroomId(supabaseClient, input);
   if (duplicateBathroomId) {
@@ -190,7 +198,7 @@ export const submitBathroom = async (
   }
 
   const bathroomId = crypto.randomUUID();
-  const payload = toInsertPayload(input, bathroomId);
+  const payload = toInsertPayload(input, bathroomId, options);
 
   const { error: insertError } = await supabaseClient.from("bathrooms").insert(payload);
   if (insertError) {

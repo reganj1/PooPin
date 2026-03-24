@@ -178,6 +178,32 @@ export function LocationTrackingProvider({ children }: { children: React.ReactNo
     [stopLocationWatch]
   );
 
+  const startLocationWatch = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      return false;
+    }
+
+    if (locationWatchIdRef.current !== null) {
+      return true;
+    }
+
+    try {
+      const watchId = navigator.geolocation.watchPosition(
+        handleResolvedPosition,
+        handleGeolocationError,
+        GEOLOCATION_OPTIONS
+      );
+      locationWatchIdRef.current = watchId;
+      return true;
+    } catch {
+      return false;
+    }
+  }, [handleGeolocationError, handleResolvedPosition]);
+
+  // QA checklist:
+  // 1. First tap "Find bathroom now" on iPhone Safari, iPhone Chrome, and Android Chrome should prompt once, recenter on first fix, then keep following.
+  // 2. Home -> detail -> back should preserve "Following you" without creating a second watchPosition subscription.
+  // 3. "Return to me" should recenter immediately when live tracking is already active.
   const requestLocationTracking = useCallback(() => {
     setGeoError(null);
 
@@ -205,44 +231,36 @@ export function LocationTrackingProvider({ children }: { children: React.ReactNo
     setIsFollowingUserLocation(true);
     setIsLocationTrackingEnabled(true);
 
-    if (locationWatchIdRef.current !== null && currentLocation) {
-      pendingLocationCenterOnResolveRef.current = false;
-      setIsAwaitingLocationFix(false);
-      setLocationCenterRequestKey((current) => current + 1);
+    if (locationWatchIdRef.current !== null) {
+      if (currentLocation) {
+        pendingLocationCenterOnResolveRef.current = false;
+        setIsLocating(false);
+        setIsAwaitingLocationFix(false);
+        setLocationCenterRequestKey((current) => current + 1);
+        return;
+      }
+
+      pendingLocationCenterOnResolveRef.current = true;
+      setIsLocating(true);
+      setIsAwaitingLocationFix(true);
       return;
     }
 
+    const hasStartedWatch = startLocationWatch();
     pendingLocationCenterOnResolveRef.current = true;
     setIsAwaitingLocationFix(true);
     setIsLocating(true);
 
     try {
       navigator.geolocation.getCurrentPosition(
-        (position) => {
-          handleResolvedPosition(position);
-
-          if (locationWatchIdRef.current !== null) {
+        handleResolvedPosition,
+        (error) => {
+          if (hasStartedWatch && error.code !== error.PERMISSION_DENIED) {
             return;
           }
 
-          try {
-            const watchId = navigator.geolocation.watchPosition(
-              handleResolvedPosition,
-              handleGeolocationError,
-              GEOLOCATION_OPTIONS
-            );
-            locationWatchIdRef.current = watchId;
-          } catch {
-            setGeoError("Could not enable live location updates. Showing map results without user distance.");
-            setIsLocating(false);
-            setIsAwaitingLocationFix(false);
-            pendingLocationCenterOnResolveRef.current = false;
-            setIsLocationTrackingEnabled(false);
-            setIsFollowingUserLocation(false);
-            setCurrentLocation(null);
-          }
+          handleGeolocationError(error);
         },
-        handleGeolocationError,
         GEOLOCATION_OPTIONS
       );
     } catch {
@@ -254,7 +272,7 @@ export function LocationTrackingProvider({ children }: { children: React.ReactNo
       setIsLocationTrackingEnabled(false);
       setIsFollowingUserLocation(false);
     }
-  }, [currentLocation, handleGeolocationError, handleResolvedPosition, stopLocationWatch]);
+  }, [currentLocation, handleGeolocationError, handleResolvedPosition, startLocationWatch, stopLocationWatch]);
 
   const stopLocationTracking = useCallback(() => {
     stopLocationWatch();

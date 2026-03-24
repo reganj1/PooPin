@@ -81,6 +81,10 @@ interface LocationFeedback {
   message: string;
 }
 
+interface AddRestroomFormProps {
+  viewerDisplayName: string;
+}
+
 const toFirstFieldErrors = (
   fieldErrors: Partial<Record<keyof BathroomCreateInput, string[]>> | undefined
 ): ServerFieldErrors => {
@@ -159,7 +163,7 @@ function Field({ label, htmlFor, error, children }: FieldProps) {
   );
 }
 
-export function AddRestroomForm() {
+export function AddRestroomForm({ viewerDisplayName }: AddRestroomFormProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccessId, setSubmitSuccessId] = useState<string | null>(null);
   const [duplicateBathroomId, setDuplicateBathroomId] = useState<string | null>(null);
@@ -553,6 +557,7 @@ export function AddRestroomForm() {
         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
           Drop a pin, fill in a few details, and send it in. We review submissions before they appear publicly.
         </p>
+        <p className="mt-2 text-sm font-medium text-slate-500">Submitting as {viewerDisplayName}.</p>
       </div>
 
       <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600">

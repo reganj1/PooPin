@@ -1,4 +1,6 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
+import { type SupabaseClient } from "@supabase/supabase-js";
+import { getSupabaseAuthCookieOptions } from "@/lib/auth/config";
 
 interface BrowserSupabaseConfig {
   url: string;
@@ -45,10 +47,8 @@ export const getSupabaseBrowserClient = () => {
     return globalThis.__poopinSupabaseBrowserClient;
   }
 
-  const client = createClient(config.url, config.anonKey, {
-    auth: {
-      storageKey: "poopin-supabase-auth"
-    }
+  const client = createBrowserClient(config.url, config.anonKey, {
+    cookieOptions: getSupabaseAuthCookieOptions()
   });
 
   globalThis.__poopinSupabaseBrowserClient = client;

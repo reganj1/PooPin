@@ -1,5 +1,6 @@
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { SUPABASE_PHOTOS_BUCKET } from "@/lib/supabase/photos";
+import { isNonEmptyPath } from "@/lib/utils/files";
 import { Photo } from "@/types";
 
 interface PhotoRow {
@@ -45,7 +46,9 @@ export async function getApprovedBathroomPhotosData(bathroomId: string): Promise
     return [];
   }
 
-  const approvedRows = (photoRows as PhotoRow[]).filter((row) => isPhotoStatus(row.status) && row.status === ACTIVE_STATUS);
+  const approvedRows = (photoRows as PhotoRow[]).filter(
+    (row) => isPhotoStatus(row.status) && row.status === ACTIVE_STATUS && isNonEmptyPath(row.storage_path)
+  );
   if (approvedRows.length === 0) {
     return [];
   }
@@ -118,7 +121,7 @@ export async function getApprovedBathroomPreviewPhotoData(bathroomId: string): P
   }
 
   const row = photoRows[0] as Pick<PhotoRow, "storage_path" | "status">;
-  if (!isPhotoStatus(row.status) || row.status !== ACTIVE_STATUS || !row.storage_path) {
+  if (!isPhotoStatus(row.status) || row.status !== ACTIVE_STATUS || !isNonEmptyPath(row.storage_path)) {
     return null;
   }
 

@@ -18,9 +18,9 @@ const formatDate = (value: string) =>
 export function ReviewList({ reviews }: ReviewListProps) {
   if (reviews.length === 0) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-        <p className="font-semibold text-slate-700">No reviews yet</p>
-        <p className="mt-1">Be the first to help others by sharing your experience.</p>
+      <div className="rounded-2xl bg-slate-50/80 px-4 py-5 text-sm text-slate-600 ring-1 ring-slate-200/80">
+        <p className="font-semibold text-slate-800">No reviews yet</p>
+        <p className="mt-1">Be the first to share a quick restroom update.</p>
       </div>
     );
   }
@@ -30,6 +30,7 @@ export function ReviewList({ reviews }: ReviewListProps) {
       {reviews.map((review) => (
         <article key={review.id} className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm sm:p-4">
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 sm:gap-2">
+            <span className="font-medium text-slate-600">{review.author_display_name?.trim() || "Anonymous"}</span>
             <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 font-semibold text-slate-700">
               Overall {review.overall_rating.toFixed(1)}
             </span>

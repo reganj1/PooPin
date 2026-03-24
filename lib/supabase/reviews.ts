@@ -6,7 +6,7 @@ type ReviewInsertRow = Pick<
   Review,
   | "id"
   | "bathroom_id"
-  | "user_id"
+  | "profile_id"
   | "overall_rating"
   | "smell_rating"
   | "cleanliness_rating"
@@ -16,17 +16,24 @@ type ReviewInsertRow = Pick<
   | "quick_tags"
   | "visit_time"
   | "status"
->;
+> & {
+  user_id?: string | null;
+};
 
 export interface InsertReviewResult {
   reviewId: string;
 }
 
-const toInsertPayload = (input: ReviewCreateInput, reviewId: string): ReviewInsertRow => {
+interface InsertReviewOptions {
+  profileId?: string | null;
+}
+
+const toInsertPayload = (input: ReviewCreateInput, reviewId: string, options?: InsertReviewOptions): ReviewInsertRow => {
   return {
     id: reviewId,
     bathroom_id: input.bathroom_id,
-    user_id: null,
+    profile_id: options?.profileId ?? null,
+    user_id: options?.profileId ?? null,
     overall_rating: input.overall_rating,
     smell_rating: input.smell_rating,
     cleanliness_rating: input.cleanliness_rating,
@@ -41,10 +48,11 @@ const toInsertPayload = (input: ReviewCreateInput, reviewId: string): ReviewInse
 
 export const insertReview = async (
   supabaseClient: SupabaseClient,
-  input: ReviewCreateInput
+  input: ReviewCreateInput,
+  options?: InsertReviewOptions
 ): Promise<InsertReviewResult> => {
   const reviewId = crypto.randomUUID();
-  const payload = toInsertPayload(input, reviewId);
+  const payload = toInsertPayload(input, reviewId, options);
 
   const { error } = await supabaseClient.from("reviews").insert(payload);
 

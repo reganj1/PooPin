@@ -1,10 +1,9 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { uploadBathroomPhoto, toUploadPhotoErrorMessage } from "@/lib/supabase/photos";
+import { getSafeImageUploadFileName } from "@/lib/utils/files";
 import {
   moderatePhotoForUpload,
   photoUploadAcceptAttribute,
@@ -14,6 +13,15 @@ import {
 
 interface PhotoUploadFormProps {
   bathroomId: string;
+  defaultOpen?: boolean;
+  viewerDisplayName: string;
+}
+
+interface PhotoUploadResponse {
+  success?: boolean;
+  photoId?: string;
+  moderationState?: string;
+  error?: string;
 }
 
 const SESSION_UPLOAD_LIMIT_PER_RESTROOM = 3;
@@ -59,14 +67,19 @@ const getImageDimensions = (file: File): Promise<{ width: number; height: number
     image.src = objectUrl;
   });
 
-export function PhotoUploadForm({ bathroomId }: PhotoUploadFormProps) {
+export function PhotoUploadForm({ bathroomId, defaultOpen = false, viewerDisplayName }: PhotoUploadFormProps) {
   const router = useRouter();
-  const supabaseClient = useMemo(() => getSupabaseBrowserClient(), []);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(defaultOpen);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (defaultOpen) {
+      setIsOpen(true);
+    }
+  }, [defaultOpen]);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     setSubmitError(null);
@@ -93,11 +106,6 @@ export function PhotoUploadForm({ bathroomId }: PhotoUploadFormProps) {
     setSubmitError(null);
     setSubmitSuccess(null);
 
-    if (!supabaseClient) {
-      setSubmitError("Photo upload is unavailable until Supabase is configured.");
-      return;
-    }
-
     if (!selectedFile) {
       setSubmitError("Select a photo to upload.");
       return;
@@ -112,8 +120,9 @@ export function PhotoUploadForm({ bathroomId }: PhotoUploadFormProps) {
 
     try {
       const dimensions = await getImageDimensions(selectedFile);
+      const safeFileName = getSafeImageUploadFileName(selectedFile);
       const moderation = moderatePhotoForUpload({
-        fileName: selectedFile.name,
+        fileName: safeFileName,
         mimeType: selectedFile.type,
         sizeBytes: selectedFile.size,
         width: dimensions.width,
@@ -125,16 +134,24 @@ export function PhotoUploadForm({ bathroomId }: PhotoUploadFormProps) {
         return;
       }
 
-      const result = await uploadBathroomPhoto(supabaseClient, {
-        bathroomId,
-        file: selectedFile,
-        moderationState: "pending"
-      });
+      const formData = new FormData();
+      formData.append("file", selectedFile);
 
-      console.groupCollapsed("[Poopin] restroom photo upload payload (supabase)");
+      const response = await fetch(`/api/restrooms/${bathroomId}/photos`, {
+        method: "POST",
+        body: formData
+      });
+      const result = (await response.json()) as PhotoUploadResponse;
+
+      if (!response.ok) {
+        setSubmitError(result.error ?? "Could not upload photo right now. Please try again.");
+        return;
+      }
+
+      console.groupCollapsed("[Poopin] restroom photo upload payload");
       console.log("bathroomId:", bathroomId);
       console.log("file:", {
-        name: selectedFile.name,
+        name: safeFileName,
         type: selectedFile.type,
         size: selectedFile.size,
         dimensions
@@ -154,7 +171,8 @@ export function PhotoUploadForm({ bathroomId }: PhotoUploadFormProps) {
       setSelectedFile(null);
       router.refresh();
     } catch (error) {
-      setSubmitError(toUploadPhotoErrorMessage(error));
+      console.error("[Poopin] restroom photo upload failed", error);
+      setSubmitError("Could not upload photo right now. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -172,7 +190,7 @@ export function PhotoUploadForm({ bathroomId }: PhotoUploadFormProps) {
         </button>
       ) : (
         <form onSubmit={handleSubmit} className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5">
-          <p className="text-xs font-medium text-slate-600">Photos are reviewed before appearing publicly.</p>
+          <p className="text-xs font-medium text-slate-600">Photos are reviewed before appearing publicly. Uploading as {viewerDisplayName}.</p>
 
           <div className="mt-2.5 space-y-2">
             <input

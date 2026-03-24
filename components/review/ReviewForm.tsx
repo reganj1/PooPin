@@ -1,18 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { cn } from "@/lib/utils/cn";
 import { captureAnalyticsEvent } from "@/lib/analytics/posthog";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { insertReview, toAddReviewErrorMessage } from "@/lib/supabase/reviews";
 import { isPositiveReviewQuickTag, reviewQuickTagOptions } from "@/lib/utils/reviewSignals";
 import { mapReviewFormToCreateInput, reviewFormSchema, ReviewFormInput } from "@/lib/validations/review";
 
 interface ReviewFormProps {
   bathroomId: string;
+  viewerDisplayName: string;
+}
+
+interface ReviewSubmissionResponse {
+  success?: boolean;
+  reviewId?: string;
+  error?: string;
 }
 
 const MAX_QUICK_TAGS = 2;
@@ -41,21 +46,13 @@ const shouldConfirmContradictoryReview = (values: ReviewFormInput) => {
   return values.quick_tags.every((tag) => isPositiveReviewQuickTag(tag));
 };
 
-export function ReviewForm({ bathroomId }: ReviewFormProps) {
+export function ReviewForm({ bathroomId, viewerDisplayName }: ReviewFormProps) {
   const router = useRouter();
-  const [supabaseClient, setSupabaseClient] = useState<ReturnType<typeof getSupabaseBrowserClient>>(null);
-  const [hasResolvedSupabaseClient, setHasResolvedSupabaseClient] = useState(false);
-  const isSupabaseConfigured = Boolean(supabaseClient);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [showNoteField, setShowNoteField] = useState(false);
   const [quickTagHint, setQuickTagHint] = useState<string | null>(null);
   const hasTrackedReviewStartedRef = useRef(false);
-
-  useEffect(() => {
-    setSupabaseClient(getSupabaseBrowserClient());
-    setHasResolvedSupabaseClient(true);
-  }, []);
 
   const {
     register,
@@ -119,20 +116,27 @@ export function ReviewForm({ bathroomId }: ReviewFormProps) {
       }
     }
 
-    if (!supabaseClient) {
-      setSubmitError("Review submission is temporarily unavailable.");
-      return;
-    }
-
     const payload = mapReviewFormToCreateInput(bathroomId, values);
 
     try {
-      const result = await insertReview(supabaseClient, payload);
+      const response = await fetch("/api/reviews", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
 
-      console.groupCollapsed("[Poopin] review payload (supabase)");
+      const result = (await response.json()) as ReviewSubmissionResponse;
+      if (!response.ok) {
+        setSubmitError(result.error ?? "Could not submit review right now. Please try again.");
+        return;
+      }
+
+      console.groupCollapsed("[Poopin] review payload");
       console.log("Form values:", values);
-      console.log("Payload inserted:", payload);
-      console.log("Supabase review insert result:", result);
+      console.log("Payload submitted:", payload);
+      console.log("API review response:", result);
       console.groupEnd();
 
       captureAnalyticsEvent("review_submitted", {
@@ -149,7 +153,7 @@ export function ReviewForm({ bathroomId }: ReviewFormProps) {
       router.refresh();
     } catch (error) {
       console.error("[Poopin] review insert failed", error);
-      setSubmitError(toAddReviewErrorMessage(error));
+      setSubmitError("Could not submit review right now. Please try again.");
     }
   };
 
@@ -158,14 +162,8 @@ export function ReviewForm({ bathroomId }: ReviewFormProps) {
       <div className="mb-3">
         <p className="text-xs font-semibold uppercase tracking-[0.12em] text-brand-600">Quick review</p>
         <h2 className="mt-1 text-xl font-semibold text-slate-900">How was it?</h2>
-        <p className="mt-1 text-sm text-slate-600">Share a quick update in a few taps.</p>
+        <p className="mt-1 text-sm text-slate-600">Share a quick update in a few taps as {viewerDisplayName}.</p>
       </div>
-
-      {hasResolvedSupabaseClient && !isSupabaseConfigured ? (
-        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-          Review submission is temporarily unavailable.
-        </div>
-      ) : null}
 
       {submitError ? (
         <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{submitError}</div>

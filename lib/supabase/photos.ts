@@ -1,15 +1,19 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { Photo } from "@/types";
 import { PhotoModerationState, toPhotoDbStatus } from "@/lib/validations/photo";
+import { getSafeImageFileExtension } from "@/lib/utils/files";
 
 export const SUPABASE_PHOTOS_BUCKET = process.env.NEXT_PUBLIC_SUPABASE_PHOTOS_BUCKET ?? "restroom-photos";
 
-type PhotoInsertRow = Pick<Photo, "id" | "bathroom_id" | "user_id" | "storage_path" | "status">;
+type PhotoInsertRow = Pick<Photo, "id" | "bathroom_id" | "profile_id" | "storage_path" | "status"> & {
+  user_id?: string | null;
+};
 
 export interface UploadBathroomPhotoInput {
   bathroomId: string;
   file: File;
   moderationState: Exclude<PhotoModerationState, "approved">;
+  profileId?: string | null;
 }
 
 export interface UploadBathroomPhotoResult {
@@ -17,26 +21,6 @@ export interface UploadBathroomPhotoResult {
   storagePath: string;
   moderationState: Exclude<PhotoModerationState, "approved">;
 }
-
-const toSafeFileExtension = (file: File) => {
-  const byMimeType: Record<string, string> = {
-    "image/jpeg": "jpg",
-    "image/png": "png",
-    "image/webp": "webp"
-  };
-
-  const mimeExt = byMimeType[file.type];
-  if (mimeExt) {
-    return mimeExt;
-  }
-
-  const rawExt = file.name.split(".").pop()?.toLowerCase() ?? "";
-  if (["jpg", "jpeg", "png", "webp"].includes(rawExt)) {
-    return rawExt === "jpeg" ? "jpg" : rawExt;
-  }
-
-  return "jpg";
-};
 
 const toStoragePath = (bathroomId: string, photoId: string, extension: string) => `${bathroomId}/${photoId}.${extension}`;
 
@@ -48,7 +32,8 @@ const toInsertPayload = (
   return {
     id: photoId,
     bathroom_id: input.bathroomId,
-    user_id: null,
+    profile_id: input.profileId ?? null,
+    user_id: input.profileId ?? null,
     storage_path: storagePath,
     status: toPhotoDbStatus(input.moderationState)
   };
@@ -59,7 +44,7 @@ export const uploadBathroomPhoto = async (
   input: UploadBathroomPhotoInput
 ): Promise<UploadBathroomPhotoResult> => {
   const photoId = crypto.randomUUID();
-  const extension = toSafeFileExtension(input.file);
+  const extension = getSafeImageFileExtension(input.file);
   const storagePath = toStoragePath(input.bathroomId, photoId, extension);
 
   const { error: uploadError } = await supabaseClient.storage.from(SUPABASE_PHOTOS_BUCKET).upload(storagePath, input.file, {
@@ -114,4 +99,3 @@ export const toUploadPhotoErrorMessage = (error: unknown): string => {
 
   return error.message || fallback;
 };
-

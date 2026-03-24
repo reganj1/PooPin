@@ -1,4 +1,5 @@
 import { Bathroom, NearbyBathroom, Review } from "@/types";
+import { getUserProfilesByIds } from "@/lib/auth/userProfiles";
 import { getSupabaseServerClient, getSupabaseServerClientConfigIssue } from "@/lib/supabase/server";
 import {
   getBathroomById as getMockBathroomById,
@@ -42,6 +43,7 @@ interface BathroomRow {
   is_gender_neutral: boolean;
   is_accessible: boolean;
   requires_purchase: boolean;
+  created_by_profile_id: string | null;
   created_by: string | null;
   created_at: string;
   status: string;
@@ -52,6 +54,7 @@ interface BathroomRow {
 interface ReviewRow {
   id: string;
   bathroom_id: string;
+  profile_id: string | null;
   user_id: string | null;
   overall_rating: number;
   smell_rating: number;
@@ -113,7 +116,7 @@ const toBathroom = (row: BathroomRow): Bathroom | null => {
     is_gender_neutral: row.is_gender_neutral,
     is_accessible: row.is_accessible,
     requires_purchase: row.requires_purchase,
-    created_by: row.created_by,
+    created_by_profile_id: row.created_by_profile_id ?? row.created_by,
     created_at: row.created_at,
     status: row.status,
     source: row.source,
@@ -129,7 +132,8 @@ const toReview = (row: ReviewRow): Review | null => {
   return {
     id: row.id,
     bathroom_id: row.bathroom_id,
-    user_id: row.user_id,
+    profile_id: row.profile_id ?? row.user_id,
+    author_display_name: null,
     overall_rating: row.overall_rating,
     smell_rating: row.smell_rating,
     cleanliness_rating: row.cleanliness_rating,
@@ -141,6 +145,24 @@ const toReview = (row: ReviewRow): Review | null => {
     created_at: row.created_at,
     status: row.status
   };
+};
+
+const attachReviewAuthors = async (reviews: Review[]): Promise<Review[]> => {
+  const profileIds = reviews.map((review) => review.profile_id).filter((profileId): profileId is string => typeof profileId === "string");
+  if (profileIds.length === 0) {
+    return reviews;
+  }
+
+  try {
+    const profilesById = await getUserProfilesByIds(profileIds);
+    return reviews.map((review) => ({
+      ...review,
+      author_display_name: review.profile_id ? profilesById.get(review.profile_id)?.display_name ?? null : null
+    }));
+  } catch (error) {
+    console.warn("[Poopin] Could not load review author profiles, falling back to anonymous labels.", getErrorMessage(error));
+    return reviews;
+  }
 };
 
 const buildRatingMap = (reviews: Review[]) => {
@@ -443,7 +465,8 @@ export async function getBathroomReviewsData(bathroomId: string): Promise<Review
       return getMockBathroomReviews(bathroomId);
     }
 
-    return ((reviewRows ?? []) as ReviewRow[]).map(toReview).filter((row): row is Review => row !== null);
+    const reviews = ((reviewRows ?? []) as ReviewRow[]).map(toReview).filter((row): row is Review => row !== null);
+    return await attachReviewAuthors(reviews);
   } catch (error) {
     logSupabaseFallback("Supabase review list query", error);
     return getMockBathroomReviews(bathroomId);

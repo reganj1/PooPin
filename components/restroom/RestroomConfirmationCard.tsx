@@ -66,26 +66,30 @@ export function RestroomConfirmationCard({ bathroomId, initialCount }: RestroomC
   };
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+    <section className="flex h-full min-h-[172px] flex-col rounded-[26px] border border-slate-200/90 bg-slate-50/80 p-4 shadow-sm sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Community trust</p>
-          <p className="mt-1 text-sm font-semibold text-slate-800">{toConfirmationLabel(confirmationCount)}</p>
+          <p className="mt-1 text-sm font-semibold text-slate-900">{toConfirmationLabel(confirmationCount)}</p>
+          <p className="mt-2 max-w-sm text-sm leading-6 text-slate-600">
+            Anonymous confirmations help other people trust that this listing is still accurate.
+          </p>
         </div>
 
         <button
           type="button"
           onClick={handleConfirm}
           disabled={isSubmitting || hasConfirmed}
-          className="inline-flex w-full items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-65 sm:w-auto"
+          className="inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-65 sm:w-auto"
         >
           {hasConfirmed ? "Confirmed" : isSubmitting ? "Confirming..." : "Confirm this restroom exists"}
         </button>
       </div>
 
-      <p className="mt-2 text-xs text-slate-500">Anonymous confirmations help others trust listing accuracy.</p>
-      {successMessage ? <p className="mt-2 text-xs font-medium text-emerald-700">{successMessage}</p> : null}
-      {errorMessage ? <p className="mt-2 text-xs font-medium text-rose-600">{errorMessage}</p> : null}
+      <div className="mt-auto pt-3">
+        {successMessage ? <p className="text-xs font-medium text-emerald-700">{successMessage}</p> : null}
+        {errorMessage ? <p className="text-xs font-medium text-rose-600">{errorMessage}</p> : null}
+      </div>
     </section>
   );
 }

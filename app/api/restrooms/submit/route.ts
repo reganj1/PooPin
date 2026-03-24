@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createSupabaseServerAuthClient, getAuthenticatedProfile } from "@/lib/auth/server";
+import { awardPointsForContribution } from "@/lib/points/pointEvents";
 import { submitBathroom, toAddRestroomErrorMessage } from "@/lib/supabase/bathrooms";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { bathroomCreateSchema } from "@/lib/validations/bathroom";
 
 const COOLDOWN_MS = 60_000;
@@ -57,6 +59,14 @@ const getRemainingCooldownMs = (now: number, previousTimestamp: number) =>
   Math.max(0, COOLDOWN_MS - (now - previousTimestamp));
 
 export async function POST(request: NextRequest) {
+  const authContext = await getAuthenticatedProfile();
+  if (!authContext) {
+    return NextResponse.json({ error: "Sign in to add a restroom." }, { status: 401 });
+  }
+  if (!authContext.profile) {
+    return NextResponse.json({ error: "Could not load your account right now." }, { status: 503 });
+  }
+
   let rawBody: unknown;
 
   try {
@@ -107,13 +117,18 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const supabase = getSupabaseServerClient();
+  const { profile } = authContext;
+
+  const supabaseAdmin = getSupabaseAdminClient();
+  const supabase = supabaseAdmin ?? (await createSupabaseServerAuthClient());
   if (!supabase) {
     return NextResponse.json({ error: "Restroom submissions are temporarily unavailable." }, { status: 503 });
   }
 
   try {
-    const result = await submitBathroom(supabase, parsed.data);
+    const result = await submitBathroom(supabase, parsed.data, {
+      createdByProfileId: profile.id
+    });
 
     if (result.outcome === "duplicate") {
       cooldownStore.set(rateLimitKey, now);
@@ -131,6 +146,21 @@ export async function POST(request: NextRequest) {
         path: "/"
       });
       return response;
+    }
+
+    if (result.bathroomId && supabaseAdmin) {
+      try {
+        await awardPointsForContribution(supabaseAdmin, {
+          profileId: profile.id,
+          eventType: "restroom_added",
+          entityType: "restroom",
+          entityId: result.bathroomId
+        });
+      } catch (pointsError) {
+        console.error("[Poopin] Restroom added but point award failed.", pointsError);
+      }
+    } else if (result.bathroomId) {
+      console.warn("[Poopin] Restroom added without awarding points because SUPABASE_SERVICE_ROLE_KEY is missing.");
     }
 
     cooldownStore.set(rateLimitKey, now);
