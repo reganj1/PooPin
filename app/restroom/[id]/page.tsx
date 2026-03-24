@@ -93,7 +93,7 @@ export default async function RestroomDetailPage({ params, searchParams }: Restr
   const contributionIntent = getContributionIntent(resolvedSearchParams.intent);
   const reviewLoginHref = buildContributionLoginHref(`/restroom/${restroom.id}`, "review", "add-review");
   const photoLoginHref = buildContributionLoginHref(`/restroom/${restroom.id}`, "photo", "photos");
-  const reviews = await getBathroomReviewsData(restroom.id);
+  const reviews = await getBathroomReviewsData(restroom.id, viewerProfile?.id ?? null);
   const displayName = getRestroomDisplayName(restroom);
   const locationLine = getRestroomDetailLocationLine(restroom);
   const sourceLabel = getRestroomSourceLabel(restroom.source);
@@ -270,7 +270,7 @@ export default async function RestroomDetailPage({ params, searchParams }: Restr
               {reviews.length}
             </span>
           </div>
-          <ReviewList reviews={reviews} />
+          <ReviewList reviews={reviews} isAuthConfigured={isAuthConfigured} viewerProfileId={viewerProfile?.id ?? null} />
         </section>
       </section>
     </main>

@@ -75,8 +75,8 @@ export function AuthStatusNav({ isAuthConfigured, viewerDisplayName, variant = "
         href={buildLoginHref("/")}
         className={
           isMobileVariant
-            ? "inline-flex h-10 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
-            : "inline-flex h-9 items-center rounded-lg border border-slate-200 px-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 sm:px-3"
+            ? "inline-flex h-9 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-2.5 text-[13px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+            : "inline-flex h-9 items-center rounded-lg border border-slate-200 px-2.5 text-[13px] font-semibold text-slate-700 transition hover:bg-slate-100"
         }
       >
         Log in
@@ -94,13 +94,13 @@ export function AuthStatusNav({ isAuthConfigured, viewerDisplayName, variant = "
         aria-controls={menuId}
         className={
           isMobileVariant
-            ? "inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
-            : "inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+            ? "inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 text-[13px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+            : "inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 text-[13px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
         }
         title={viewerDisplayName}
         onClick={() => setIsOpen((current) => !current)}
       >
-        <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-[11px] font-bold tracking-wide text-white">
+        <span className="inline-flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold tracking-wide text-white">
           {initials}
         </span>
         <span className={isMobileVariant ? "truncate" : "hidden max-w-[132px] truncate lg:inline"}>

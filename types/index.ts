@@ -52,6 +52,22 @@ export interface Review {
   visit_time: string;
   created_at: string;
   status: ModerationStatus;
+  like_count?: number;
+  viewer_has_liked?: boolean;
+  comment_count?: number;
+  featured_comment?: ReviewComment | null;
+  comments?: ReviewComment[];
+}
+
+export interface ReviewComment {
+  id: string;
+  review_id: string;
+  profile_id: string | null;
+  author_display_name?: string | null;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  status: ModerationStatus;
 }
 
 export interface Photo {

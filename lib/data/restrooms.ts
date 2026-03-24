@@ -1,5 +1,6 @@
 import { Bathroom, NearbyBathroom, Review } from "@/types";
 import { getUserProfilesByIds } from "@/lib/auth/userProfiles";
+import { attachReviewEngagement } from "@/lib/data/reviewEngagement";
 import { getSupabaseServerClient, getSupabaseServerClientConfigIssue } from "@/lib/supabase/server";
 import {
   getBathroomById as getMockBathroomById,
@@ -445,7 +446,7 @@ export async function getBathroomByIdData(id: string): Promise<NearbyBathroom | 
   }
 }
 
-export async function getBathroomReviewsData(bathroomId: string): Promise<Review[]> {
+export async function getBathroomReviewsData(bathroomId: string, viewerProfileId?: string | null): Promise<Review[]> {
   const supabase = getSupabaseServerClient();
   if (!supabase) {
     logSupabaseConfigFallback();
@@ -466,7 +467,8 @@ export async function getBathroomReviewsData(bathroomId: string): Promise<Review
     }
 
     const reviews = ((reviewRows ?? []) as ReviewRow[]).map(toReview).filter((row): row is Review => row !== null);
-    return await attachReviewAuthors(reviews);
+    const reviewsWithAuthors = await attachReviewAuthors(reviews);
+    return await attachReviewEngagement(reviewsWithAuthors, viewerProfileId);
   } catch (error) {
     logSupabaseFallback("Supabase review list query", error);
     return getMockBathroomReviews(bathroomId);
