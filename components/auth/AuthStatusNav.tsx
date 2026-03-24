@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { buildLoginHref, buildLogoutHref } from "@/lib/auth/login";
 
@@ -22,11 +25,49 @@ const getViewerInitials = (viewerDisplayName: string) => {
 };
 
 export function AuthStatusNav({ isAuthConfigured, viewerDisplayName, variant = "default" }: AuthStatusNavProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const menuId = useId();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+
+      if (!containerRef.current?.contains(target)) {
+        setIsOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown, true);
+    document.addEventListener("touchstart", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown, true);
+      document.removeEventListener("touchstart", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
   if (!isAuthConfigured) {
     return null;
   }
 
   const isMobileVariant = variant === "mobile";
+  const closeMenu = () => setIsOpen(false);
 
   if (!viewerDisplayName) {
     return (
@@ -46,14 +87,18 @@ export function AuthStatusNav({ isAuthConfigured, viewerDisplayName, variant = "
   const initials = getViewerInitials(viewerDisplayName);
 
   return (
-    <details className="group relative [&_summary::-webkit-details-marker]:hidden">
-      <summary
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        aria-controls={menuId}
         className={
           isMobileVariant
             ? "inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
             : "inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
         }
         title={viewerDisplayName}
+        onClick={() => setIsOpen((current) => !current)}
       >
         <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-[11px] font-bold tracking-wide text-white">
           {initials}
@@ -64,7 +109,7 @@ export function AuthStatusNav({ isAuthConfigured, viewerDisplayName, variant = "
         <svg
           viewBox="0 0 20 20"
           aria-hidden="true"
-          className={isMobileVariant ? "h-4 w-4 text-slate-400 transition group-open:rotate-180" : "hidden h-4 w-4 text-slate-400 transition group-open:rotate-180 lg:block"}
+          className={isMobileVariant ? `h-4 w-4 text-slate-400 transition ${isOpen ? "rotate-180" : ""}` : `hidden h-4 w-4 text-slate-400 transition lg:block ${isOpen ? "rotate-180" : ""}`}
         >
           <path
             d="m5.5 7.5 4.5 5 4.5-5"
@@ -75,34 +120,39 @@ export function AuthStatusNav({ isAuthConfigured, viewerDisplayName, variant = "
             strokeWidth="1.6"
           />
         </svg>
-      </summary>
+      </button>
 
-      <div
-        className={
-          isMobileVariant
-            ? "absolute right-0 top-full z-30 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_18px_48px_rgba(15,23,42,0.12)]"
-            : "absolute right-0 top-full z-30 mt-2 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_18px_48px_rgba(15,23,42,0.12)]"
-        }
-      >
-        <div className="rounded-xl bg-slate-50 px-3 py-2.5">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Signed in as</p>
-          <p className="mt-1 truncate text-sm font-semibold text-slate-900">{viewerDisplayName}</p>
+      {isOpen ? (
+        <div
+          id={menuId}
+          className={
+            isMobileVariant
+              ? "absolute right-0 top-full z-30 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_18px_48px_rgba(15,23,42,0.12)]"
+              : "absolute right-0 top-full z-30 mt-2 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_18px_48px_rgba(15,23,42,0.12)]"
+          }
+        >
+          <div className="rounded-xl bg-slate-50 px-3 py-2.5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Signed in as</p>
+            <p className="mt-1 truncate text-sm font-semibold text-slate-900">{viewerDisplayName}</p>
+          </div>
+          <div className="mt-2 space-y-1">
+            <Link
+              href="/profile"
+              onClick={closeMenu}
+              className="flex min-h-10 items-center rounded-xl px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
+            >
+              View profile
+            </Link>
+            <a
+              href={buildLogoutHref("/")}
+              onClick={closeMenu}
+              className="flex min-h-10 items-center rounded-xl px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
+            >
+              Log out
+            </a>
+          </div>
         </div>
-        <div className="mt-2 space-y-1">
-          <Link
-            href="/profile"
-            className="flex min-h-10 items-center rounded-xl px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
-          >
-            View profile
-          </Link>
-          <a
-            href={buildLogoutHref("/")}
-            className="flex min-h-10 items-center rounded-xl px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
-          >
-            Log out
-          </a>
-        </div>
-      </div>
-    </details>
+      ) : null}
+    </div>
   );
 }
