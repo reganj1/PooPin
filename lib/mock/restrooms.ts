@@ -1,5 +1,5 @@
 import { Bathroom, NearbyBathroom, Review } from "@/types";
-import { buildTopReviewSignals } from "@/lib/utils/reviewSignals";
+import { buildBathroomRatingSummary } from "@/lib/utils/reviewPresentation";
 
 const DEFAULT_ORIGIN = { lat: 37.7749, lng: -122.4194 };
 
@@ -462,23 +462,7 @@ const getRatingsForBathroom = (bathroomId: string) => {
     };
   }
 
-  const totals = reviews.reduce(
-    (acc, review) => {
-      acc.overall += review.overall_rating;
-      acc.smell += review.smell_rating;
-      acc.cleanliness += review.cleanliness_rating;
-      return acc;
-    },
-    { overall: 0, smell: 0, cleanliness: 0 }
-  );
-
-  return {
-    overall: roundToOne(totals.overall / reviews.length),
-    smell: roundToOne(totals.smell / reviews.length),
-    cleanliness: roundToOne(totals.cleanliness / reviews.length),
-    reviewCount: reviews.length,
-    qualitySignals: buildTopReviewSignals(reviews, 2)
-  };
+  return buildBathroomRatingSummary(reviews);
 };
 
 export const getNearbyBathrooms = (

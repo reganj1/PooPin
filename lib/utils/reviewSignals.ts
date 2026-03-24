@@ -155,6 +155,49 @@ export const deriveReviewQuickTagsFromLegacyRatings = (review: ReviewLegacyRatin
 };
 
 type ReviewQuickTagSource = Pick<Review, "quick_tags" | "smell_rating" | "cleanliness_rating" | "wait_rating" | "privacy_rating">;
+type ExplicitReviewQuickTagSource = Pick<Review, "quick_tags">;
+
+const DAYS_PER_MONTH = 30;
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+const getReviewAgeInDays = (createdAt: string) => {
+  const createdAtMs = new Date(createdAt).getTime();
+  if (!Number.isFinite(createdAtMs)) {
+    return 365;
+  }
+
+  return Math.max(0, (Date.now() - createdAtMs) / MS_PER_DAY);
+};
+
+export const getReviewAggregationWeight = (createdAt: string) => {
+  const ageDays = getReviewAgeInDays(createdAt);
+  if (ageDays <= DAYS_PER_MONTH) {
+    return 1;
+  }
+
+  if (ageDays <= DAYS_PER_MONTH * 3) {
+    return 0.85;
+  }
+
+  if (ageDays <= DAYS_PER_MONTH * 6) {
+    return 0.65;
+  }
+
+  if (ageDays <= DAYS_PER_MONTH * 12) {
+    return 0.45;
+  }
+
+  return 0.25;
+};
+
+const getExplicitReviewQuickTags = (review: ExplicitReviewQuickTagSource) => normalizeReviewQuickTags(review.quick_tags ?? []);
+
+const opposingTagMap: Partial<Record<ReviewQuickTag, ReviewQuickTag[]>> = {
+  clean: ["no_toilet_paper"],
+  no_toilet_paper: ["clean"],
+  no_line: ["crowded"],
+  crowded: ["no_line"]
+};
 
 export const getReviewQuickTagsForDisplay = (review: ReviewQuickTagSource): ReviewQuickTag[] => {
   const normalized = normalizeReviewQuickTags(review.quick_tags ?? []);
@@ -210,14 +253,11 @@ type ReviewCategorySignalSource = Pick<Review, "quick_tags" | "overall_rating" |
 export const getReviewCategoryRatingsForAggregation = (
   review: ReviewCategorySignalSource
 ): Partial<Record<RatingField, number>> => {
-  const normalizedTags = normalizeReviewQuickTags(review.quick_tags ?? []);
+  // Restroom-level category summaries should only use explicit standout tags,
+  // not inferred category ratings copied from an overall score.
+  const normalizedTags = getExplicitReviewQuickTags(review);
   if (normalizedTags.length === 0) {
-    return {
-      smell_rating: review.smell_rating,
-      cleanliness_rating: review.cleanliness_rating,
-      wait_rating: review.wait_rating,
-      privacy_rating: review.privacy_rating
-    };
+    return {};
   }
 
   const impactedFields = new Set<RatingField>();
@@ -248,7 +288,7 @@ type ReviewForSignalAggregate = Pick<
 >;
 
 export const buildTopReviewSignals = (reviews: ReviewForSignalAggregate[], maxSignals = 2): ReviewQuickTag[] => {
-  if (reviews.length === 0) {
+  if (reviews.length < 2) {
     return [];
   }
 
@@ -257,21 +297,39 @@ export const buildTopReviewSignals = (reviews: ReviewForSignalAggregate[], maxSi
     .slice(0, 40);
 
   const counts = new Map<ReviewQuickTag, number>();
+  let totalReviewWeight = 0;
+
   for (const review of recentReviews) {
-    const tags = getReviewQuickTagsForDisplay(review);
+    const reviewWeight = getReviewAggregationWeight(review.created_at);
+    totalReviewWeight += reviewWeight;
+
+    const tags = getExplicitReviewQuickTags(review);
     for (const tag of tags) {
-      counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      counts.set(tag, (counts.get(tag) ?? 0) + reviewWeight);
     }
   }
 
-  if (counts.size === 0) {
+  if (counts.size === 0 || totalReviewWeight < 1.4) {
     return [];
   }
 
-  const minimumSupport = recentReviews.length >= 8 ? 2 : 1;
+  const minimumSupport = 1.15;
+  const minimumShare = 0.34;
 
   return [...counts.entries()]
-    .filter(([, count]) => count >= minimumSupport)
+    .filter(([tag, count]) => {
+      if (count < minimumSupport) {
+        return false;
+      }
+
+      const supportShare = count / totalReviewWeight;
+      if (supportShare < minimumShare) {
+        return false;
+      }
+
+      const opposingSupport = (opposingTagMap[tag] ?? []).reduce((total, opposingTag) => total + (counts.get(opposingTag) ?? 0), 0);
+      return opposingSupport < count * 0.85;
+    })
     .sort((a, b) => b[1] - a[1] || (tagOrder.get(a[0]) ?? 99) - (tagOrder.get(b[0]) ?? 99))
     .slice(0, maxSignals)
     .map(([tag]) => tag);
