@@ -1,8 +1,11 @@
+import { MobileBackButton } from "@/components/navigation/MobileBackButton";
 import { ContactForm } from "@/components/contact/ContactForm";
 
 export default function ContactPage() {
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 lg:py-10">
+      <MobileBackButton fallbackHref="/" className="mb-4" />
+
       <section className="mb-5 rounded-3xl border border-slate-200/80 bg-white px-5 py-4 shadow-sm sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>

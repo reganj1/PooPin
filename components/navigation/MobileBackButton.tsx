@@ -44,12 +44,12 @@ export function MobileBackButton({
       href={preferredHref ?? fallbackHref}
       onClick={handleClick}
       className={cn(
-        "inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50",
+        "inline-flex min-h-10 items-center gap-1.5 py-1 text-sm font-medium text-brand-600 transition hover:text-brand-700",
         "md:hidden",
         className
       )}
     >
-      <span aria-hidden="true" className="text-base leading-none">
+      <span aria-hidden="true" className="text-sm leading-none">
         ←
       </span>
       <span>{label}</span>
