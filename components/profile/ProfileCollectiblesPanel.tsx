@@ -157,19 +157,19 @@ export function ProfileCollectiblesPanel({ progress, profileId, displayName }: P
         </div>
       </div>
 
-      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(18rem,0.92fr)]">
+      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1.18fr)_minmax(18rem,0.82fr)]">
         <CollectibleCard
           card={activeCard}
           isActive
           footer={
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Showcased on profile</p>
-                <p className="mt-1 text-sm font-semibold text-slate-950">{displayName}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/70">Showcased on profile</p>
+                <p className="mt-1 text-sm font-semibold text-white">{displayName}</p>
               </div>
               <div className="sm:text-right">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Unlock progress</p>
-                <p className="mt-1 text-lg font-semibold text-slate-950">{progress.contributionScore}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/70">Unlock progress</p>
+                <p className="mt-1 text-lg font-semibold text-white">{progress.contributionScore}</p>
               </div>
             </div>
           }
@@ -271,8 +271,8 @@ export function ProfileCollectiblesPanel({ progress, profileId, displayName }: P
                   isActive={isCurrent}
                   footer={
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-medium text-slate-500">Unlocked at {card.threshold}</span>
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${isCurrent ? "bg-slate-900 text-white" : "bg-white/80 text-slate-700 ring-1 ring-slate-200/80"}`}>
+                      <span className="text-xs font-medium text-white/75">Unlocked at {card.threshold}</span>
+                      <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${isCurrent ? "bg-white text-slate-900" : "bg-white/18 text-white ring-1 ring-white/25 backdrop-blur-sm"}`}>
                         {isCurrent ? "Active" : card.rarity}
                       </span>
                     </div>

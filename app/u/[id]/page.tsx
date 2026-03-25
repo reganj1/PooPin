@@ -113,7 +113,7 @@ export default async function PublicProfilePage({ params, searchParams }: Public
       </div>
 
       <section className="rounded-[32px] border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] p-5 shadow-sm sm:p-7">
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.02fr)_minmax(20rem,0.98fr)] xl:items-start">
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,0.92fr)_minmax(22rem,1.08fr)] xl:items-start">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-600">Contributor profile</p>
             <div className="mt-3 flex flex-wrap items-center gap-2.5">
@@ -154,12 +154,12 @@ export default async function PublicProfilePage({ params, searchParams }: Public
               footer={
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Showcased collectible</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-950">{activeCard.rarity}</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/70">Showcased collectible</p>
+                    <p className="mt-1 text-sm font-semibold text-white">{activeCard.rarity}</p>
                   </div>
                   <div className="sm:text-right">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Current tier</p>
-                    <span className="mt-1 inline-flex rounded-full bg-white/80 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200/80">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/70">Current tier</p>
+                    <span className="mt-1 inline-flex rounded-full bg-white/18 px-2.5 py-1 text-xs font-semibold text-white ring-1 ring-white/25 backdrop-blur-sm">
                       Tier {activeCard.tier}
                     </span>
                   </div>
