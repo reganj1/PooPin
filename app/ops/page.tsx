@@ -141,6 +141,7 @@ const truncateText = (value: string, max: number) => {
 
 const sourceLabelByType: Record<BathroomSource, string> = {
   city_open_data: "Verified public facility",
+  la_controller: "Verified public facility",
   openstreetmap: "Community mapped",
   google_places: "Partner source",
   partner: "Partner source",

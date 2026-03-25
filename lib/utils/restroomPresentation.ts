@@ -238,6 +238,7 @@ export const getRestroomSourceLabel = (source: BathroomSource) => {
     case "openstreetmap":
       return "Community mapped";
     case "city_open_data":
+    case "la_controller":
       return "Verified public facility";
     default:
       return "Community submitted";

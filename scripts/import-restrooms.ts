@@ -59,7 +59,7 @@ const STREET_CONTEXT_PATTERN =
 
 const allowedPlaceTypes = new Set<BathroomPlaceType>(bathroomPlaceTypeOptions);
 const allowedAccessTypes = new Set<BathroomAccessType>(bathroomAccessTypeOptions);
-const allowedSources = new Set<BathroomSource>(["user", "google_places", "city_open_data", "openstreetmap", "partner", "other"]);
+const allowedSources = new Set<BathroomSource>(["user", "google_places", "city_open_data", "openstreetmap", "partner", "la_controller", "other"]);
 
 const normalizeKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 const normalizeName = (value: string) =>
@@ -1057,7 +1057,7 @@ const parseArgs = (): ImportOptions => {
         break;
       case "--source":
         if (!allowedSources.has(next as BathroomSource)) {
-          throw new Error("--source must be one of user|google_places|city_open_data|openstreetmap|partner|other");
+          throw new Error("--source must be one of user|google_places|city_open_data|openstreetmap|partner|la_controller|other");
         }
         options.source = next as BathroomSource;
         i += 1;

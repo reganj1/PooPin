@@ -30,7 +30,15 @@ export interface RecentRestroomSnapshot {
 
 const STORAGE_KEY = "poopin:recent-restrooms:v1";
 const RECENT_RESTROOM_LIMIT = 6;
-const bathroomSourceValues = new Set<BathroomSource>(["user", "google_places", "city_open_data", "openstreetmap", "partner", "other"]);
+const bathroomSourceValues = new Set<BathroomSource>([
+  "user",
+  "google_places",
+  "city_open_data",
+  "openstreetmap",
+  "partner",
+  "la_controller",
+  "other"
+]);
 const bathroomPlaceTypeValues = new Set<BathroomPlaceType>([
   "park",
   "restaurant",
