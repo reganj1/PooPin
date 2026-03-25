@@ -1,15 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createSupabaseServerAuthClient, getAuthenticatedProfile } from "@/lib/auth/server";
-import { updateUserDisplayName } from "@/lib/auth/userProfiles";
+import { DisplayNameTakenError, normalizeDisplayName, updateUserDisplayName } from "@/lib/auth/userProfiles";
+
+const normalizedDisplayNameSchema = z
+  .string({ required_error: "Display name is required." })
+  .trim()
+  .transform(normalizeDisplayName)
+  .pipe(
+    z
+      .string()
+      .min(3, "Display name must be at least 3 characters.")
+      .max(40, "Display name must be 40 characters or fewer.")
+      .regex(/^[A-Za-z0-9' -]+$/, "Use letters, numbers, spaces, apostrophes, or hyphens only.")
+  );
 
 const profileDisplayNameSchema = z.object({
-  displayName: z
-    .string({ required_error: "Display name is required." })
-    .trim()
-    .min(3, "Display name must be at least 3 characters.")
-    .max(40, "Display name must be 40 characters or fewer.")
-    .regex(/^[A-Za-z0-9' -]+$/, "Use letters, numbers, spaces, apostrophes, or hyphens only.")
+  displayName: normalizedDisplayNameSchema
 });
 
 export async function POST(request: NextRequest) {
@@ -43,6 +50,10 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ success: true, displayName: updatedProfile.display_name });
   } catch (error) {
+    if (error instanceof DisplayNameTakenError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+
     const message = error instanceof Error ? error.message : "Could not update your name right now.";
     return NextResponse.json({ error: message }, { status: 500 });
   }

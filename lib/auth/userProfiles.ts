@@ -21,6 +21,14 @@ interface UserProfileRow {
 
 const userProfileSelect = "id, supabase_auth_user_id, display_name, active_card_key, created_at, updated_at";
 const getSupabaseProfileClient = (supabaseClient?: SupabaseClient | null) => supabaseClient ?? getSupabaseAdminClient();
+const GENERATED_DISPLAY_NAME_MAX_ATTEMPTS = 24;
+
+type ProfileMutationErrorLike = {
+  code?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+};
 
 const toUserProfile = (row: UserProfileRow | null | undefined): UserProfile | null => {
   if (!row) {
@@ -37,9 +45,50 @@ const toUserProfile = (row: UserProfileRow | null | undefined): UserProfile | nu
   };
 };
 
-const randomFourDigits = () => Math.floor(1000 + Math.random() * 9000);
+const randomDigits = (digits: number) => {
+  const minimum = 10 ** (digits - 1);
+  const maximum = 10 ** digits;
+  return Math.floor(minimum + Math.random() * (maximum - minimum));
+};
 
-export const generatePoopinDisplayName = () => `poopin${randomFourDigits()}`;
+const getGeneratedDisplayNameDigits = (attempt: number) => {
+  if (attempt < 12) {
+    return 4;
+  }
+
+  if (attempt < 20) {
+    return 5;
+  }
+
+  return 6;
+};
+
+export const generatePoopinDisplayName = (attempt = 0) => `poopin${randomDigits(getGeneratedDisplayNameDigits(attempt))}`;
+
+export const normalizeDisplayName = (value: string) => value.trim().replace(/\s+/g, " ");
+
+export class DisplayNameTakenError extends Error {
+  constructor() {
+    super("That name is already taken. Try another one.");
+    this.name = "DisplayNameTakenError";
+  }
+}
+
+const getErrorText = (error: ProfileMutationErrorLike | null | undefined) =>
+  [error?.message, error?.details, error?.hint].filter(Boolean).join(" ").toLowerCase();
+
+const isUniqueViolationError = (error: ProfileMutationErrorLike | null | undefined) =>
+  error?.code === "23505" || getErrorText(error).includes("duplicate") || getErrorText(error).includes("unique");
+
+const isDisplayNameConflictError = (error: ProfileMutationErrorLike | null | undefined) => {
+  const message = getErrorText(error);
+  return isUniqueViolationError(error) && message.includes("display_name");
+};
+
+const isSupabaseAuthUserIdConflictError = (error: ProfileMutationErrorLike | null | undefined) => {
+  const message = getErrorText(error);
+  return isUniqueViolationError(error) && message.includes("supabase_auth_user_id");
+};
 
 export const getUserProfileBySupabaseAuthUserId = async (
   supabaseAuthUserId: string,
@@ -91,26 +140,33 @@ export const ensureUserProfileForAuthUser = async (
     return existingProfile;
   }
 
-  const displayName = generatePoopinDisplayName();
-  const { data, error } = await supabase
-    .from("profiles")
-    .insert({
-      supabase_auth_user_id: supabaseAuthUserId,
-      display_name: displayName
-    })
-    .select(userProfileSelect)
-    .maybeSingle();
+  for (let attempt = 0; attempt < GENERATED_DISPLAY_NAME_MAX_ATTEMPTS; attempt += 1) {
+    const displayName = generatePoopinDisplayName(attempt);
+    const { data, error } = await supabase
+      .from("profiles")
+      .insert({
+        supabase_auth_user_id: supabaseAuthUserId,
+        display_name: displayName
+      })
+      .select(userProfileSelect)
+      .maybeSingle();
 
-  if (error) {
-    const message = error.message.toLowerCase();
-    if (message.includes("duplicate") || message.includes("unique")) {
+    if (!error) {
+      return toUserProfile(data as UserProfileRow | null);
+    }
+
+    if (isDisplayNameConflictError(error)) {
+      continue;
+    }
+
+    if (isSupabaseAuthUserIdConflictError(error)) {
       return getUserProfileBySupabaseAuthUserId(supabaseAuthUserId, supabase);
     }
 
     throw new Error(error.message);
   }
 
-  return toUserProfile(data as UserProfileRow | null);
+  throw new Error("Could not create a unique display name right now.");
 };
 
 export const getUserProfilesByIds = async (ids: string[]): Promise<Map<string, UserProfile>> => {
@@ -157,9 +213,11 @@ export const updateUserDisplayName = async (
     throw new Error("Profile updates are temporarily unavailable.");
   }
 
+  const normalizedDisplayName = normalizeDisplayName(displayName);
+
   let query = supabase
     .from("profiles")
-    .update({ display_name: displayName, updated_at: new Date().toISOString() })
+    .update({ display_name: normalizedDisplayName, updated_at: new Date().toISOString() })
     .eq("id", profileId);
 
   if (options?.supabaseAuthUserId) {
@@ -169,6 +227,10 @@ export const updateUserDisplayName = async (
   const { data, error } = await query.select(userProfileSelect).maybeSingle();
 
   if (error) {
+    if (isDisplayNameConflictError(error)) {
+      throw new DisplayNameTakenError();
+    }
+
     throw new Error(error.message);
   }
 
