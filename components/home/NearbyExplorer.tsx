@@ -70,6 +70,10 @@ interface BoundsApiResponse {
   restrooms: NearbyBathroom[];
 }
 
+interface NearbyApiResponse {
+  restrooms: NearbyBathroom[];
+}
+
 interface PersistedHomeMapState {
   updatedAt: number;
   isMapExpanded: boolean;
@@ -132,6 +136,8 @@ const MOBILE_SHEET_EXPANDED_VISIBLE_RATIO = 0.84;
 const MOBILE_SHEET_MAX_HEIGHT_RATIO = 0.86;
 const MOBILE_SHEET_SWIPE_VELOCITY_THRESHOLD = 0.55;
 const MOBILE_SHEET_INTERACTION_COOLDOWN_MS = 320;
+const USER_NEARBY_FETCH_LIMIT = 120;
+const USER_NEARBY_LOCATION_KEY_PRECISION = 4;
 const topPickAccessScore: Record<NearbyBathroom["access_type"], number> = {
   public: 12,
   customer_only: 6,
@@ -421,6 +427,8 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
 
   const latestBoundsKeyRef = useRef<string>("");
   const activeBoundsRequestIdRef = useRef(0);
+  const activeNearbyRequestIdRef = useRef(0);
+  const latestNearbyLocationKeyRef = useRef("");
   const invalidBoundsCoordinatesLogKeyRef = useRef<string>("");
   const distanceReferenceLogKeyRef = useRef("");
   const mapCameraRef = useRef<MapCamera | null>(null);
@@ -467,6 +475,83 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     };
   }, [selectedSearchPlace]);
   const selectedPlaceDistanceLabel = selectedSearchPlace?.name ?? selectedSearchPlace?.fullName ?? null;
+
+  useEffect(() => {
+    if (!isLocationFollowing || !activeUserLocation) {
+      latestNearbyLocationKeyRef.current = "";
+      activeNearbyRequestIdRef.current += 1;
+      return;
+    }
+
+    const nextLocationKey = `${activeUserLocation.lat.toFixed(USER_NEARBY_LOCATION_KEY_PRECISION)}:${activeUserLocation.lng.toFixed(
+      USER_NEARBY_LOCATION_KEY_PRECISION
+    )}`;
+    if (nextLocationKey === latestNearbyLocationKeyRef.current) {
+      return;
+    }
+
+    latestNearbyLocationKeyRef.current = nextLocationKey;
+    const requestId = activeNearbyRequestIdRef.current + 1;
+    activeNearbyRequestIdRef.current = requestId;
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      lat: activeUserLocation.lat.toString(),
+      lng: activeUserLocation.lng.toString(),
+      limit: USER_NEARBY_FETCH_LIMIT.toString()
+    });
+
+    if (process.env.NODE_ENV !== "production") {
+      console.debug("[Poopin] Fetching nearby restrooms from live user location.", {
+        location: {
+          lat: Number(activeUserLocation.lat.toFixed(5)),
+          lng: Number(activeUserLocation.lng.toFixed(5))
+        },
+        referenceSource: "user",
+        limit: USER_NEARBY_FETCH_LIMIT
+      });
+    }
+
+    void fetch(`/api/restrooms/nearby?${params.toString()}`, {
+      signal: controller.signal
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Failed to fetch nearby restrooms for live location.");
+        }
+
+        return (await response.json()) as NearbyApiResponse;
+      })
+      .then((payload) => {
+        if (requestId !== activeNearbyRequestIdRef.current || !Array.isArray(payload.restrooms)) {
+          return;
+        }
+
+        setMapRestrooms(payload.restrooms);
+
+        if (process.env.NODE_ENV !== "production") {
+          console.debug("[Poopin] Applied nearby restrooms from live user location.", {
+            locationKey: nextLocationKey,
+            restroomCount: payload.restrooms.length,
+            featuredCandidateId: payload.restrooms[0]?.id ?? null
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        if ((error as { name?: string })?.name === "AbortError") {
+          return;
+        }
+
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[Poopin] Nearby user-location refresh failed. Keeping current viewport dataset.", {
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [activeUserLocation, isLocationFollowing]);
 
   useEffect(() => {
     if (!isLocationTrackingEnabled) {

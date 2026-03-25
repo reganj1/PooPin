@@ -17,6 +17,7 @@ const DEFAULT_ORIGIN = { lat: 37.7749, lng: -122.4194 };
 const DEFAULT_LIMIT = 12;
 const ACTIVE_STATUS = "active";
 const REVIEW_QUERY_BATHROOM_ID_BATCH_SIZE = 100;
+const NEARBY_SEARCH_RADIUS_STEPS_MILES = [1.5, 4, 10, 25, 60] as const;
 const moderationStatusOptions = ["active", "pending", "flagged", "removed"] as const;
 const sourceOptions = ["user", "google_places", "city_open_data", "openstreetmap", "partner", "la_controller", "other"] as const;
 const allowedPlaceTypes = new Set<(typeof bathroomPlaceTypeOptions)[number]>(bathroomPlaceTypeOptions);
@@ -94,6 +95,19 @@ const haversineDistanceMiles = (origin: { lat: number; lng: number }, point: { l
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
   return earthRadiusMiles * c;
+};
+
+const toNearbyBounds = (origin: { lat: number; lng: number }, radiusMiles: number): BathroomBounds => {
+  const safeCosLatitude = Math.max(Math.cos(toRadians(origin.lat)), 0.2);
+  const latDelta = radiusMiles / 69;
+  const lngDelta = radiusMiles / (69 * safeCosLatitude);
+
+  return {
+    minLat: Math.max(origin.lat - latDelta, -90),
+    maxLat: Math.min(origin.lat + latDelta, 90),
+    minLng: Math.max(origin.lng - lngDelta, -180),
+    maxLng: Math.min(origin.lng + lngDelta, 180)
+  };
 };
 
 const toBathroom = (row: BathroomRow): Bathroom | null => {
@@ -331,6 +345,28 @@ const fetchActiveReviewRowsByBathroomIds = async (
   return collectedRows;
 };
 
+const fetchBathroomsWithRatings = async (
+  supabase: NonNullable<ReturnType<typeof getSupabaseServerClient>>,
+  bathroomRows: BathroomRow[],
+  origin: { lat: number; lng: number },
+  reviewQueryContext: string
+) => {
+  const bathrooms = bathroomRows.map(toBathroom).filter((row): row is Bathroom => row !== null);
+
+  if (bathrooms.length === 0) {
+    return [] as NearbyBathroom[];
+  }
+
+  const bathroomIds = bathrooms.map((bathroom) => bathroom.id);
+  const reviewRows = await fetchActiveReviewRowsByBathroomIds(supabase, bathroomIds, reviewQueryContext);
+  const reviews = reviewRows.map(toReview).filter((row): row is Review => row !== null);
+  const ratingsMap = buildRatingMap(reviews);
+
+  return bathrooms
+    .map((bathroom) => toNearbyBathroom(bathroom, ratingsMap, origin))
+    .sort((a, b) => a.distanceMiles - b.distanceMiles);
+};
+
 export async function getNearbyBathroomsData(
   origin: { lat: number; lng: number } = DEFAULT_ORIGIN,
   limit = DEFAULT_LIMIT
@@ -341,36 +377,56 @@ export async function getNearbyBathroomsData(
     return getMockNearbyBathrooms(origin, limit);
   }
 
-  const { data: bathroomRows, error: bathroomError } = await supabase
-    .from("bathrooms")
-    .select("*")
-    .eq("status", ACTIVE_STATUS)
-    .limit(500);
-
-  if (bathroomError || !bathroomRows) {
-    logSupabaseFallback("Supabase bathroom query", bathroomError ?? new Error("Bathroom rows missing."));
-    return getMockNearbyBathrooms(origin, limit);
-  }
-
-  const bathrooms = (bathroomRows as BathroomRow[]).map(toBathroom).filter((row): row is Bathroom => row !== null);
-
-  if (bathrooms.length === 0) {
-    return [];
-  }
-
-  const bathroomIds = bathrooms.map((bathroom) => bathroom.id);
-
   try {
-    const reviewRows = await fetchActiveReviewRowsByBathroomIds(supabase, bathroomIds, "Supabase review query");
-    const reviews = reviewRows.map(toReview).filter((row): row is Review => row !== null);
-    const ratingsMap = buildRatingMap(reviews);
+    const candidateLimit = Math.min(Math.max(limit * 6, 80), 320);
+    const candidateRowById = new Map<string, BathroomRow>();
 
-    return bathrooms
-      .map((bathroom) => toNearbyBathroom(bathroom, ratingsMap, origin))
-      .sort((a, b) => a.distanceMiles - b.distanceMiles)
-      .slice(0, limit);
+    for (const radiusMiles of NEARBY_SEARCH_RADIUS_STEPS_MILES) {
+      const bounds = toNearbyBounds(origin, radiusMiles);
+      const { data: bathroomRows, error: bathroomError } = await supabase
+        .from("bathrooms")
+        .select("*")
+        .eq("status", ACTIVE_STATUS)
+        .gte("lat", bounds.minLat)
+        .lte("lat", bounds.maxLat)
+        .gte("lng", bounds.minLng)
+        .lte("lng", bounds.maxLng)
+        .limit(candidateLimit);
+
+      if (bathroomError || !bathroomRows) {
+        logSupabaseFallback("Supabase nearby bathroom query", bathroomError ?? new Error("Bathroom rows missing."));
+        return getMockNearbyBathrooms(origin, limit);
+      }
+
+      for (const bathroomRow of bathroomRows as BathroomRow[]) {
+        candidateRowById.set(bathroomRow.id, bathroomRow);
+      }
+
+      if (candidateRowById.size >= limit) {
+        break;
+      }
+    }
+
+    if (process.env.NODE_ENV !== "production") {
+      console.debug("[Poopin] Nearby bathroom query resolved.", {
+        origin: {
+          lat: Number(origin.lat.toFixed(5)),
+          lng: Number(origin.lng.toFixed(5))
+        },
+        candidateCount: candidateRowById.size,
+        limit
+      });
+    }
+
+    const nearbyBathrooms = await fetchBathroomsWithRatings(
+      supabase,
+      [...candidateRowById.values()],
+      origin,
+      "Supabase nearby review query"
+    );
+    return nearbyBathrooms.slice(0, limit);
   } catch (error) {
-    logSupabaseFallback("Supabase review query", error);
+    logSupabaseFallback("Supabase nearby review query", error);
     return getMockNearbyBathrooms(origin, limit);
   }
 }
@@ -480,22 +536,8 @@ export async function getBathroomsInBoundsData(
     return getMockBathroomsInBounds(bounds, limit, origin);
   }
 
-  const bathrooms = (bathroomRows as BathroomRow[]).map(toBathroom).filter((row): row is Bathroom => row !== null);
-
-  if (bathrooms.length === 0) {
-    return [];
-  }
-
-  const bathroomIds = bathrooms.map((bathroom) => bathroom.id);
-
   try {
-    const reviewRows = await fetchActiveReviewRowsByBathroomIds(supabase, bathroomIds, "Supabase bounds review query");
-    const reviews = reviewRows.map(toReview).filter((row): row is Review => row !== null);
-    const ratingsMap = buildRatingMap(reviews);
-
-    return bathrooms
-      .map((bathroom) => toNearbyBathroom(bathroom, ratingsMap, origin))
-      .sort((a, b) => a.distanceMiles - b.distanceMiles);
+    return await fetchBathroomsWithRatings(supabase, bathroomRows as BathroomRow[], origin, "Supabase bounds review query");
   } catch (error) {
     logSupabaseFallback("Supabase bounds review query", error);
     return getMockBathroomsInBounds(bounds, limit, origin);
