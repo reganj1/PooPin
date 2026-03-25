@@ -1,5 +1,6 @@
 import { Bathroom, NearbyBathroom, Review } from "@/types";
 import { getUserProfilesByIds } from "@/lib/auth/userProfiles";
+import { getCollectibleIdentitiesByProfileIds } from "@/lib/collectibles/identity";
 import { attachReviewEngagement } from "@/lib/data/reviewEngagement";
 import { getSupabaseServerClient, getSupabaseServerClientConfigIssue } from "@/lib/supabase/server";
 import {
@@ -157,9 +158,12 @@ const attachReviewAuthors = async (reviews: Review[]): Promise<Review[]> => {
 
   try {
     const profilesById = await getUserProfilesByIds(profileIds);
+    const collectibleIdentities = await getCollectibleIdentitiesByProfileIds(profileIds);
     return reviews.map((review) => ({
       ...review,
-      author_display_name: review.profile_id ? profilesById.get(review.profile_id)?.display_name ?? null : null
+      author_display_name: review.profile_id ? profilesById.get(review.profile_id)?.display_name ?? null : null,
+      author_collectible_title: review.profile_id ? collectibleIdentities.get(review.profile_id)?.activeCardTitle ?? null : null,
+      author_collectible_rarity: review.profile_id ? collectibleIdentities.get(review.profile_id)?.activeCardRarity ?? null : null
     }));
   } catch (error) {
     console.warn("[Poopin] Could not load review author profiles, falling back to anonymous labels.", getErrorMessage(error));

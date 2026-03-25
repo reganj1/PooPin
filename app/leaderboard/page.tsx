@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { CollectibleTitlePill } from "@/components/profile/CollectibleTitlePill";
 import { getAuthenticatedProfile } from "@/lib/auth/server";
+import { getCollectibleIdentitiesByProfileIds } from "@/lib/collectibles/identity";
 import { POINT_VALUES, getLeaderboardSnapshot, type LeaderboardEntry } from "@/lib/points/pointEvents";
 
 export const dynamic = "force-dynamic";
@@ -97,7 +99,12 @@ function ScoreLegendPill({ label }: { label: string }) {
   );
 }
 
-function TopContributorCard({ entry }: { entry: LeaderboardEntry }) {
+type LeaderboardDisplayEntry = LeaderboardEntry & {
+  collectibleTitle?: string | null;
+  collectibleRarity?: string | null;
+};
+
+function TopContributorCard({ entry }: { entry: LeaderboardDisplayEntry }) {
   const topLabel = TOP_RANK_LABELS[entry.rank as 1 | 2 | 3] ?? "Top contributor";
   const cardTone =
     entry.rank === 1
@@ -114,7 +121,14 @@ function TopContributorCard({ entry }: { entry: LeaderboardEntry }) {
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-600">
                 #{entry.rank} {topLabel}
               </p>
-              <h2 className="mt-1 break-words text-xl font-semibold tracking-tight text-slate-900">{entry.displayName}</h2>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <Link href={`/u/${entry.profileId}`} className="break-words text-xl font-semibold tracking-tight text-slate-900 transition hover:text-brand-700">
+                  {entry.displayName}
+                </Link>
+                {entry.collectibleTitle && entry.collectibleRarity ? (
+                  <CollectibleTitlePill title={entry.collectibleTitle} rarity={entry.collectibleRarity} />
+                ) : null}
+              </div>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white/90 px-3 py-2 text-right shadow-sm">
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Points</p>
@@ -138,7 +152,7 @@ function TopContributorCard({ entry }: { entry: LeaderboardEntry }) {
   );
 }
 
-function LeaderboardRow({ entry, isCurrentViewer = false }: { entry: LeaderboardEntry; isCurrentViewer?: boolean }) {
+function LeaderboardRow({ entry, isCurrentViewer = false }: { entry: LeaderboardDisplayEntry; isCurrentViewer?: boolean }) {
   return (
     <article
       className={`rounded-[24px] border px-4 py-3.5 transition sm:px-5 ${
@@ -157,7 +171,12 @@ function LeaderboardRow({ entry, isCurrentViewer = false }: { entry: Leaderboard
 
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="break-words text-base font-semibold tracking-tight text-slate-900 sm:text-lg">{entry.displayName}</h3>
+            <Link href={`/u/${entry.profileId}`} className="break-words text-base font-semibold tracking-tight text-slate-900 transition hover:text-brand-700 sm:text-lg">
+              {entry.displayName}
+            </Link>
+            {entry.collectibleTitle && entry.collectibleRarity ? (
+              <CollectibleTitlePill title={entry.collectibleTitle} rarity={entry.collectibleRarity} />
+            ) : null}
             {isCurrentViewer ? (
               <span className="rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-[11px] font-semibold text-brand-700">
                 You
@@ -253,9 +272,22 @@ export default async function LeaderboardPage() {
     leaderboardError = "The leaderboard is taking a quick breather right now. Please try again in a moment.";
   }
 
-  const topThree = entries.slice(0, Math.min(3, entries.length));
-  const remainingEntries = entries.slice(topThree.length);
-  const showCurrentViewerCard = Boolean(currentViewerEntry && currentViewerEntry.rank > LEADERBOARD_LIMIT);
+  const collectibleIdentities = entries.length > 0 ? await getCollectibleIdentitiesByProfileIds(entries.map((entry) => entry.profileId)) : new Map();
+  const toDisplayEntry = (entry: LeaderboardEntry): LeaderboardDisplayEntry => {
+    const identity = collectibleIdentities.get(entry.profileId);
+    return {
+      ...entry,
+      collectibleTitle: identity?.activeCardTitle ?? null,
+      collectibleRarity: identity?.activeCardRarity ?? null
+    };
+  };
+
+  const displayEntries = entries.map(toDisplayEntry);
+  const displayCurrentViewerEntry = currentViewerEntry ? toDisplayEntry(currentViewerEntry) : null;
+
+  const topThree = displayEntries.slice(0, Math.min(3, displayEntries.length));
+  const remainingEntries = displayEntries.slice(topThree.length);
+  const showCurrentViewerCard = Boolean(displayCurrentViewerEntry && displayCurrentViewerEntry.rank > LEADERBOARD_LIMIT);
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-5 sm:px-6 sm:py-7">
@@ -305,9 +337,9 @@ export default async function LeaderboardPage() {
         </section>
       ) : null}
 
-      {showCurrentViewerCard && currentViewerEntry ? (
+      {showCurrentViewerCard && displayCurrentViewerEntry ? (
         <div className="mt-5">
-          <CurrentViewerStandingCard entry={currentViewerEntry} />
+          <CurrentViewerStandingCard entry={displayCurrentViewerEntry} />
         </div>
       ) : null}
 

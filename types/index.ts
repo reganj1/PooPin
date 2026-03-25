@@ -42,6 +42,8 @@ export interface Review {
   bathroom_id: string;
   profile_id: string | null;
   author_display_name?: string | null;
+  author_collectible_title?: string | null;
+  author_collectible_rarity?: string | null;
   overall_rating: number;
   smell_rating: number;
   cleanliness_rating: number;

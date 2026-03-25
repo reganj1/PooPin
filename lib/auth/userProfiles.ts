@@ -5,6 +5,7 @@ export interface UserProfile {
   id: string;
   supabase_auth_user_id: string | null;
   display_name: string;
+  active_card_key: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -13,11 +14,12 @@ interface UserProfileRow {
   id: string;
   supabase_auth_user_id: string | null;
   display_name: string;
+  active_card_key: string | null;
   created_at: string;
   updated_at: string;
 }
 
-const userProfileSelect = "id, supabase_auth_user_id, display_name, created_at, updated_at";
+const userProfileSelect = "id, supabase_auth_user_id, display_name, active_card_key, created_at, updated_at";
 const getSupabaseProfileClient = (supabaseClient?: SupabaseClient | null) => supabaseClient ?? getSupabaseAdminClient();
 
 const toUserProfile = (row: UserProfileRow | null | undefined): UserProfile | null => {
@@ -29,6 +31,7 @@ const toUserProfile = (row: UserProfileRow | null | undefined): UserProfile | nu
     id: row.id,
     supabase_auth_user_id: row.supabase_auth_user_id,
     display_name: row.display_name,
+    active_card_key: row.active_card_key,
     created_at: row.created_at,
     updated_at: row.updated_at
   };
@@ -139,6 +142,11 @@ interface UpdateUserDisplayNameOptions {
   supabaseAuthUserId?: string | null;
 }
 
+interface UpdateUserActiveCardOptions {
+  supabaseClient?: SupabaseClient | null;
+  supabaseAuthUserId?: string | null;
+}
+
 export const updateUserDisplayName = async (
   profileId: string,
   displayName: string,
@@ -160,6 +168,38 @@ export const updateUserDisplayName = async (
 
   const { data, error } = await query.select(userProfileSelect).maybeSingle();
 
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const profile = toUserProfile(data as UserProfileRow | null);
+  if (!profile) {
+    throw new Error("Could not load the updated profile.");
+  }
+
+  return profile;
+};
+
+export const updateUserActiveCardKey = async (
+  profileId: string,
+  activeCardKey: string | null,
+  options?: UpdateUserActiveCardOptions
+): Promise<UserProfile> => {
+  const supabase = getSupabaseProfileClient(options?.supabaseClient);
+  if (!supabase) {
+    throw new Error("Profile updates are temporarily unavailable.");
+  }
+
+  let query = supabase
+    .from("profiles")
+    .update({ active_card_key: activeCardKey, updated_at: new Date().toISOString() })
+    .eq("id", profileId);
+
+  if (options?.supabaseAuthUserId) {
+    query = query.eq("supabase_auth_user_id", options.supabaseAuthUserId);
+  }
+
+  const { data, error } = await query.select(userProfileSelect).maybeSingle();
   if (error) {
     throw new Error(error.message);
   }

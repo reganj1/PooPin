@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { type FormEvent, useEffect, useState } from "react";
 import { buildLoginHref } from "@/lib/auth/login";
+import { CollectibleTitlePill } from "@/components/profile/CollectibleTitlePill";
 import { cn } from "@/lib/utils/cn";
 import { toReviewQuickTagChips } from "@/lib/utils/reviewPresentation";
 import { getReviewQuickTagDescriptor, reviewQuickTagToneClassName } from "@/lib/utils/reviewSignals";
@@ -307,7 +308,16 @@ function ReviewCard({ review, isAuthConfigured, viewerProfileId, isHighlighted, 
       )}
     >
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 sm:gap-2">
-        <span className="font-medium text-slate-600">{review.author_display_name?.trim() || "Anonymous"}</span>
+        {review.profile_id ? (
+          <Link href={`/u/${review.profile_id}`} className="font-medium text-slate-600 transition hover:text-slate-900">
+            {review.author_display_name?.trim() || "Anonymous"}
+          </Link>
+        ) : (
+          <span className="font-medium text-slate-600">{review.author_display_name?.trim() || "Anonymous"}</span>
+        )}
+        {review.author_collectible_title && review.author_collectible_rarity ? (
+          <CollectibleTitlePill title={review.author_collectible_title} rarity={review.author_collectible_rarity} />
+        ) : null}
         <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 font-semibold text-slate-700">
           Overall {review.overall_rating.toFixed(1)}
         </span>

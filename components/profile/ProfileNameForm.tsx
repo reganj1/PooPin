@@ -56,10 +56,10 @@ export function ProfileNameForm({ initialDisplayName }: ProfileNameFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-brand-600">Profile</p>
-      <h2 className="mt-1 text-xl font-semibold text-slate-900">Rename your handle</h2>
+      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-brand-600">Public name</p>
+      <h2 className="mt-1 text-xl font-semibold text-slate-900">Update your display name</h2>
       <p className="mt-1 text-sm leading-6 text-slate-600">
-        New accounts start with a simple handle like <span className="font-medium text-slate-700">poopin1234</span>. You can rename it any time.
+        This is what other visitors see on your reviews and public profile.
       </p>
 
       <div className="mt-4 space-y-2">
@@ -72,6 +72,7 @@ export function ProfileNameForm({ initialDisplayName }: ProfileNameFormProps) {
           value={displayName}
           onChange={(event) => setDisplayName(event.target.value)}
           maxLength={40}
+          autoComplete="nickname"
           className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-base outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100 sm:text-sm"
           placeholder="poopin1234"
         />
