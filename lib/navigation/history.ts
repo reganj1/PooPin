@@ -46,7 +46,7 @@ const writeRouteHistory = (routes: string[]) => {
 
 export const rememberNavigationRoute = (route: string) => {
   const normalizedRoute = normalizeRoute(route);
-  if (typeof window === "undefined" || isSkippableBackRoute(normalizedRoute)) {
+  if (typeof window === "undefined") {
     return;
   }
 
@@ -56,6 +56,22 @@ export const rememberNavigationRoute = (route: string) => {
   }
 
   writeRouteHistory([...existingHistory, normalizedRoute]);
+};
+
+export const getPreviousRoute = (currentRoute: string) => {
+  const normalizedCurrentRoute = normalizeRoute(currentRoute);
+  const existingHistory = readRouteHistory();
+
+  for (let index = existingHistory.length - 1; index >= 0; index -= 1) {
+    const candidate = existingHistory[index];
+    if (!candidate || candidate === normalizedCurrentRoute) {
+      continue;
+    }
+
+    return candidate;
+  }
+
+  return null;
 };
 
 export const getPreviousMeaningfulRoute = (currentRoute: string) => {

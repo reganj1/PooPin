@@ -53,7 +53,7 @@ export default async function ProfilePage() {
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-brand-600">Profile</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900 sm:text-[2.35rem]">Your Poopin identity</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-              Signed in as <span className="break-all font-medium text-slate-700">{accountLabel}</span>. Browsing stays public, and this account only appears when you post reviews, photos, or restroom listings.
+              Signed in as <span className="break-all font-medium text-slate-700">{accountLabel}</span>. This account appears when you post reviews, photos, or restroom listings.
             </p>
           </div>
 
@@ -122,7 +122,7 @@ export default async function ProfilePage() {
 
         <aside className="space-y-5">
           <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-brand-600">Account snapshot</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-brand-600">Account</p>
             <div className="mt-4 space-y-4">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Display name</p>
@@ -143,7 +143,7 @@ export default async function ProfilePage() {
                 </div>
               </div>
               <p className="text-xs leading-5 text-slate-500">
-                Leaderboard points reward weighted contribution value. Unlock progress is a separate collectible track based on contribution count.
+                Leaderboard points and collectible unlock progress are tracked separately.
               </p>
             </div>
           </section>

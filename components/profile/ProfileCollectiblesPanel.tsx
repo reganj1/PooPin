@@ -135,7 +135,7 @@ export function ProfileCollectiblesPanel({ progress, profileId, displayName }: P
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-brand-600">Collectibles</p>
           <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 sm:text-[2rem]">Your showcase card</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            Collectible unlocks use contribution progress. Reviews and photos count for one, while restroom adds count for three. This is separate from leaderboard points.
+            Unlocks use contribution progress: reviews and photos count for one, restroom adds count for three. Separate from leaderboard points.
           </p>
         </div>
 
@@ -213,7 +213,7 @@ export function ProfileCollectiblesPanel({ progress, profileId, displayName }: P
             <div className="flex items-center justify-between gap-2">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Progress breakdown</p>
-                <p className="mt-1 text-sm text-slate-600">How collectible unlock progress is counted.</p>
+                <p className="mt-1 text-sm text-slate-600">What counts toward unlock progress.</p>
               </div>
               <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
                 {progress.contributionScore} progress
@@ -252,7 +252,7 @@ export function ProfileCollectiblesPanel({ progress, profileId, displayName }: P
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Unlocked cards</p>
-            <p className="mt-1 text-sm text-slate-600">Choose which unlocked card appears on your public profile.</p>
+            <p className="mt-1 text-sm text-slate-600">Choose what appears on your public profile.</p>
           </div>
           <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
             {progress.unlockedCards.length} unlocked

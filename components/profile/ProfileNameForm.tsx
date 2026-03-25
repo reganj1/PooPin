@@ -58,9 +58,7 @@ export function ProfileNameForm({ initialDisplayName }: ProfileNameFormProps) {
     <form onSubmit={handleSubmit} className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
       <p className="text-xs font-semibold uppercase tracking-[0.12em] text-brand-600">Public name</p>
       <h2 className="mt-1 text-xl font-semibold text-slate-900">Update your display name</h2>
-      <p className="mt-1 text-sm leading-6 text-slate-600">
-        This is what other visitors see on your reviews and public profile.
-      </p>
+      <p className="mt-1 text-sm leading-6 text-slate-600">Shown on your reviews and public profile.</p>
 
       <div className="mt-4 space-y-2">
         <label htmlFor="display-name" className="block text-sm font-medium text-slate-700">

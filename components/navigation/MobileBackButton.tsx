@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { MouseEvent } from "react";
-import { getPreviousMeaningfulRoute } from "@/lib/navigation/history";
+import { getPreviousMeaningfulRoute, getPreviousRoute, isSkippableBackRoute } from "@/lib/navigation/history";
 import { cn } from "@/lib/utils/cn";
 
 interface MobileBackButtonProps {
@@ -28,8 +28,20 @@ export function MobileBackButton({
 
     const currentQueryString = searchParams.toString();
     const currentRoute = `${pathname}${currentQueryString ? `?${currentQueryString}` : ""}`;
+    const immediatePreviousRoute = getPreviousRoute(currentRoute);
     const previousRoute = getPreviousMeaningfulRoute(currentRoute);
     const destination = previousRoute ?? preferredHref ?? fallbackHref;
+
+    if (
+      typeof window !== "undefined" &&
+      window.history.length > 1 &&
+      immediatePreviousRoute &&
+      immediatePreviousRoute !== currentRoute &&
+      !isSkippableBackRoute(immediatePreviousRoute)
+    ) {
+      window.history.back();
+      return;
+    }
 
     if (destination === currentRoute) {
       router.replace(fallbackHref);

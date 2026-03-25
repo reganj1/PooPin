@@ -121,7 +121,7 @@ export default async function PublicProfilePage({ params, searchParams }: Public
               <CollectibleTitlePill title={identity.activeCardTitle} rarity={identity.activeCardRarity} />
             </div>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-              Community contributor with collectible unlock progress of <span className="font-semibold text-slate-900">{identity.contributionScore}</span>.
+              Collectible unlock progress <span className="font-semibold text-slate-900">{identity.contributionScore}</span>.
             </p>
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
