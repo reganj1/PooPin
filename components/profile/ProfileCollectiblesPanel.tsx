@@ -164,12 +164,12 @@ export function ProfileCollectiblesPanel({ progress, profileId, displayName }: P
           footer={
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/70">Showcased on profile</p>
-                <p className="mt-1 text-sm font-semibold text-white">{displayName}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Showcased on profile</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">{displayName}</p>
               </div>
               <div className="sm:text-right">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/70">Unlock progress</p>
-                <p className="mt-1 text-lg font-semibold text-white">{progress.contributionScore}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Unlock progress</p>
+                <p className="mt-1 text-lg font-semibold text-slate-900">{progress.contributionScore}</p>
               </div>
             </div>
           }
@@ -271,8 +271,12 @@ export function ProfileCollectiblesPanel({ progress, profileId, displayName }: P
                   isActive={isCurrent}
                   footer={
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-medium text-white/75">Unlocked at {card.threshold}</span>
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${isCurrent ? "bg-white text-slate-900" : "bg-white/18 text-white ring-1 ring-white/25 backdrop-blur-sm"}`}>
+                      <span className="text-xs font-medium text-slate-500">Unlocked at {card.threshold}</span>
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                          isCurrent ? "bg-slate-900 text-white" : "border border-slate-200 bg-slate-50 text-slate-700"
+                        }`}
+                      >
                         {isCurrent ? "Active" : card.rarity}
                       </span>
                     </div>

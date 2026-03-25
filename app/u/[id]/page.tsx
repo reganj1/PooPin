@@ -154,12 +154,12 @@ export default async function PublicProfilePage({ params, searchParams }: Public
               footer={
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/70">Showcased collectible</p>
-                    <p className="mt-1 text-sm font-semibold text-white">{activeCard.rarity}</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Showcased collectible</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900">{activeCard.rarity}</p>
                   </div>
                   <div className="sm:text-right">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/70">Current tier</p>
-                    <span className="mt-1 inline-flex rounded-full bg-white/18 px-2.5 py-1 text-xs font-semibold text-white ring-1 ring-white/25 backdrop-blur-sm">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Current tier</p>
+                    <span className="mt-1 inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">
                       Tier {activeCard.tier}
                     </span>
                   </div>
