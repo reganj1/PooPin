@@ -135,13 +135,13 @@ export function ProfileCollectiblesPanel({ progress, profileId, displayName }: P
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-brand-600">Collectibles</p>
           <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 sm:text-[2rem]">Your showcase card</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            Built from real contributions. Reviews and photos count for one point, while restroom adds count for three.
+            Collectible unlocks use contribution progress. Reviews and photos count for one, while restroom adds count for three. This is separate from leaderboard points.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">
-            Score {progress.contributionScore}
+            Unlock progress {progress.contributionScore}
           </span>
           <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">
             Tier {progress.currentTierCard.tier}
@@ -168,7 +168,7 @@ export function ProfileCollectiblesPanel({ progress, profileId, displayName }: P
                 <p className="mt-1 text-sm font-semibold text-slate-950">{displayName}</p>
               </div>
               <div className="sm:text-right">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Contribution score</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Unlock progress</p>
                 <p className="mt-1 text-lg font-semibold text-slate-950">{progress.contributionScore}</p>
               </div>
             </div>
@@ -204,7 +204,7 @@ export function ProfileCollectiblesPanel({ progress, profileId, displayName }: P
 
             <p className="mt-3 text-sm text-slate-600">
               {progress.nextCard
-                ? `${progress.remainingToNext} more contribution point${progress.remainingToNext === 1 ? "" : "s"} to unlock ${progress.nextCard.title}.`
+                ? `${progress.remainingToNext} more progress point${progress.remainingToNext === 1 ? "" : "s"} to unlock ${progress.nextCard.title}.`
                 : "You’ve unlocked every MVP collectible card. More variants can land later without resetting your progress."}
             </p>
           </div>
@@ -212,11 +212,11 @@ export function ProfileCollectiblesPanel({ progress, profileId, displayName }: P
           <div className="rounded-[26px] border border-slate-200 bg-slate-50/80 p-4">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Contribution breakdown</p>
-                <p className="mt-1 text-sm text-slate-600">What counts toward collectible progress right now.</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Progress breakdown</p>
+                <p className="mt-1 text-sm text-slate-600">How collectible unlock progress is counted.</p>
               </div>
               <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-                {progress.contributionScore} total
+                {progress.contributionScore} progress
               </span>
             </div>
 

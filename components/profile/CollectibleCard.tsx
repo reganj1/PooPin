@@ -50,17 +50,18 @@ export function CollectibleCard({ card, className, compact = false, isActive = f
 
         <div
           className={cn(
-            "relative mt-5 overflow-hidden rounded-[24px] border border-white/70 bg-white/65 shadow-sm",
-            compact ? "aspect-[1.18/1] w-full max-w-[13.5rem]" : "aspect-[1.16/1] w-full max-w-[16rem]"
+            "relative mt-5 w-full overflow-hidden rounded-[24px] border border-white/70 bg-white/65 shadow-sm",
+            compact ? "aspect-[4/3] max-w-full" : "aspect-[4/3] max-w-[18rem]"
           )}
         >
           <div className={cn("absolute inset-0 bg-gradient-to-br opacity-90", card.theme.orb)} />
+          <div className="absolute inset-[10px] rounded-[18px] border border-white/70 bg-white/45 sm:inset-3 sm:rounded-[20px]" />
           <Image
             src={card.imageSrc}
             alt={`${card.title} collectible artwork`}
             fill
-            sizes={compact ? "160px" : "(max-width: 640px) 220px, 280px"}
-            className="object-cover"
+            sizes={compact ? "(max-width: 640px) 280px, 320px" : "(max-width: 640px) 300px, 380px"}
+            className="object-contain object-center p-3 sm:p-4"
           />
           <div className="absolute bottom-3 right-3 inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/85 text-lg shadow-sm ring-1 ring-white/80">
             <span aria-hidden="true">{card.mascot}</span>

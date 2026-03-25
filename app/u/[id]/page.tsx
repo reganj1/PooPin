@@ -121,12 +121,12 @@ export default async function PublicProfilePage({ params, searchParams }: Public
               <CollectibleTitlePill title={identity.activeCardTitle} rarity={identity.activeCardRarity} />
             </div>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-              Community contributor with a current collectible score of <span className="font-semibold text-slate-900">{identity.contributionScore}</span>.
+              Community contributor with collectible unlock progress of <span className="font-semibold text-slate-900">{identity.contributionScore}</span>.
             </p>
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Contribution score</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Unlock progress</p>
                 <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">{identity.contributionScore}</p>
                 <p className="mt-1 text-xs text-slate-500">{identity.activeCardTitle}</p>
               </div>
@@ -160,7 +160,7 @@ export default async function PublicProfilePage({ params, searchParams }: Public
                   <div className="sm:text-right">
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Current tier</p>
                     <span className="mt-1 inline-flex rounded-full bg-white/80 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200/80">
-                    Tier {activeCard.tier}
+                      Tier {activeCard.tier}
                     </span>
                   </div>
                 </div>

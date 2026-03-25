@@ -59,7 +59,7 @@ export default async function ProfilePage() {
 
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">
-              {pointsSummary.totalPoints} points
+              Leaderboard {pointsSummary.totalPoints} pts
             </span>
             <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">
               {collectibleProgress.activeCard.title}
@@ -115,7 +115,7 @@ export default async function ProfilePage() {
             </div>
           ) : (
             <p className="mt-4 text-sm leading-6 text-slate-600">
-              No contribution points yet. Post a review, upload a photo, or add a restroom to start building your Poopin history.
+              No leaderboard points yet. Post a review, upload a photo, or add a restroom to start building your Poopin history.
             </p>
           )}
         </section>
@@ -138,10 +138,13 @@ export default async function ProfilePage() {
                   <p className="mt-1 text-sm font-semibold text-slate-900">{collectibleProgress.activeCard.title}</p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Contribution score</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Unlock progress</p>
                   <p className="mt-1 text-sm font-semibold text-slate-900">{collectibleProgress.contributionScore}</p>
                 </div>
               </div>
+              <p className="text-xs leading-5 text-slate-500">
+                Leaderboard points reward weighted contribution value. Unlock progress is a separate collectible track based on contribution count.
+              </p>
             </div>
           </section>
 
