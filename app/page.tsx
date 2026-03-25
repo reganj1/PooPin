@@ -11,7 +11,7 @@ export default async function HomePage() {
       <section className="mb-4 rounded-3xl border border-slate-200/80 bg-white px-5 py-4 shadow-sm sm:px-6 lg:mb-5 lg:px-7 lg:py-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.15em] text-brand-600">Bay Area Restroom Map</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.15em] text-brand-600">California Restroom Map</p>
             <h1 className="mt-1 text-[1.9rem] font-semibold tracking-tight text-slate-900 sm:text-[2.1rem] sm:leading-tight">
               Find clean, reliable restrooms fast.
             </h1>
@@ -22,10 +22,10 @@ export default async function HomePage() {
 
           <div className="flex flex-wrap items-center gap-2">
             <span className="hidden rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 sm:inline-flex">
-              1,400+ mapped restrooms
+              2000+ restrooms mapped
             </span>
             <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700">
-              Bay Area public beta
+              California beta
             </span>
           </div>
         </div>

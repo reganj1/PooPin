@@ -552,7 +552,7 @@ export function AddRestroomForm({ viewerDisplayName }: AddRestroomFormProps) {
   return (
     <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-card sm:p-7">
       <div className="mb-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-600">Bay Area Beta</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-600">California beta</p>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 sm:text-[2.05rem]">Submit a restroom</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
           Drop a pin, fill in a few details, and send it in. We review submissions before they appear publicly.

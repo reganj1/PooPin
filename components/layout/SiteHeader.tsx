@@ -83,7 +83,7 @@ export function SiteHeader({ isAuthConfigured, viewerDisplayName }: SiteHeaderPr
                     </span>
                     <div className="min-w-0">
                       <span className="block truncate text-base font-semibold tracking-tight">Poopin</span>
-                      <span className="block text-[11px] font-medium text-slate-500">Bay Area beta</span>
+                      <span className="block text-[11px] font-medium text-slate-500">California beta</span>
                     </div>
                   </Link>
 
@@ -119,7 +119,7 @@ export function SiteHeader({ isAuthConfigured, viewerDisplayName }: SiteHeaderPr
                   </span>
                   <div className="min-w-0">
                     <span className="block truncate text-lg font-semibold tracking-tight">Poopin</span>
-                    <span className="block text-[11px] font-medium text-slate-500">Bay Area beta</span>
+                    <span className="block text-[11px] font-medium text-slate-500">California beta</span>
                   </div>
                 </Link>
 
