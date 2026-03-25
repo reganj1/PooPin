@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Manrope } from "next/font/google";
+import { NavigationHistoryTracker } from "@/components/navigation/NavigationHistoryTracker";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { LocationTrackingProvider } from "@/components/providers/LocationTrackingProvider";
 import { PostHogProvider } from "@/components/providers/PostHogProvider";
@@ -35,6 +36,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <PostHogProvider posthogKey={posthogKey} posthogHost={posthogHost}>
           <LocationTrackingProvider>
             <div className="min-h-screen">
+              <NavigationHistoryTracker />
               <SiteHeader isAuthConfigured={isAuthConfigured} viewerDisplayName={viewerDisplayName} />
               {children}
             </div>

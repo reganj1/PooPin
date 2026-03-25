@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { MobileBackButton } from "@/components/navigation/MobileBackButton";
 import { CollectibleTitlePill } from "@/components/profile/CollectibleTitlePill";
 import { getAuthenticatedProfile } from "@/lib/auth/server";
 import { getCollectibleIdentitiesByProfileIds } from "@/lib/collectibles/identity";
@@ -13,6 +14,7 @@ export const metadata: Metadata = {
 };
 
 const LEADERBOARD_LIMIT = 50;
+const LEADERBOARD_RETURN_TO = "/leaderboard";
 
 const TOP_RANK_LABELS = {
   1: "Bathroom Royalty",
@@ -104,6 +106,9 @@ type LeaderboardDisplayEntry = LeaderboardEntry & {
   collectibleRarity?: string | null;
 };
 
+const getLeaderboardProfileHref = (profileId: string) =>
+  `/u/${profileId}?returnTo=${encodeURIComponent(LEADERBOARD_RETURN_TO)}`;
+
 function TopContributorCard({ entry }: { entry: LeaderboardDisplayEntry }) {
   const topLabel = TOP_RANK_LABELS[entry.rank as 1 | 2 | 3] ?? "Top contributor";
   const cardTone =
@@ -122,7 +127,7 @@ function TopContributorCard({ entry }: { entry: LeaderboardDisplayEntry }) {
                 #{entry.rank} {topLabel}
               </p>
               <div className="mt-1 flex flex-wrap items-center gap-2">
-                <Link href={`/u/${entry.profileId}`} className="break-words text-xl font-semibold tracking-tight text-slate-900 transition hover:text-brand-700">
+                <Link href={getLeaderboardProfileHref(entry.profileId)} className="break-words text-xl font-semibold tracking-tight text-slate-900 transition hover:text-brand-700">
                   {entry.displayName}
                 </Link>
                 {entry.collectibleTitle && entry.collectibleRarity ? (
@@ -171,7 +176,7 @@ function LeaderboardRow({ entry, isCurrentViewer = false }: { entry: Leaderboard
 
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <Link href={`/u/${entry.profileId}`} className="break-words text-base font-semibold tracking-tight text-slate-900 transition hover:text-brand-700 sm:text-lg">
+            <Link href={getLeaderboardProfileHref(entry.profileId)} className="break-words text-base font-semibold tracking-tight text-slate-900 transition hover:text-brand-700 sm:text-lg">
               {entry.displayName}
             </Link>
             {entry.collectibleTitle && entry.collectibleRarity ? (
@@ -291,6 +296,8 @@ export default async function LeaderboardPage() {
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-5 sm:px-6 sm:py-7">
+      <MobileBackButton fallbackHref="/" className="mb-4" />
+
       <section className="rounded-[28px] border border-slate-200/80 bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] px-5 py-5 shadow-sm sm:px-6 sm:py-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl">

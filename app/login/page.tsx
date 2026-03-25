@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { SupabaseLoginForm } from "@/components/auth/SupabaseLoginForm";
+import { MobileBackButton } from "@/components/navigation/MobileBackButton";
 import { getAuthConfigIssue, isAuthConfigured } from "@/lib/auth/config";
 import { getContributionIntent, sanitizeReturnTo } from "@/lib/auth/login";
 import { getAuthenticatedProfile } from "@/lib/auth/server";
@@ -55,7 +56,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   return (
     <main className="mx-auto flex min-h-[calc(100dvh-4.5rem)] w-full max-w-xl items-start justify-center px-4 py-5 sm:px-6 sm:py-8 lg:items-center">
-      <section className="w-full rounded-[30px] border border-slate-200/80 bg-[radial-gradient(circle_at_top,#eef6ff_0%,#ffffff_38%,#ffffff_100%)] p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] sm:rounded-[34px] sm:p-7">
+      <div className="w-full">
+        <MobileBackButton fallbackHref={returnTo} preferredHref={returnTo} className="mb-4" />
+
+        <section className="w-full rounded-[30px] border border-slate-200/80 bg-[radial-gradient(circle_at_top,#eef6ff_0%,#ffffff_38%,#ffffff_100%)] p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] sm:rounded-[34px] sm:p-7">
         <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-600 shadow-sm">
           <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold tracking-wide text-white">
             WC
@@ -74,7 +78,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             accountSetupIssue={accountSetupIssue}
           />
         </div>
-      </section>
+        </section>
+      </div>
     </main>
   );
 }

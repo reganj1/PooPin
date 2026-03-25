@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { type FormEvent, useEffect, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { buildLoginHref } from "@/lib/auth/login";
 import { CollectibleTitlePill } from "@/components/profile/CollectibleTitlePill";
 import { cn } from "@/lib/utils/cn";
@@ -144,10 +145,11 @@ interface ReviewCardProps {
   isAuthConfigured: boolean;
   viewerProfileId: string | null;
   isHighlighted: boolean;
+  buildPublicProfileHref: (profileId: string) => string;
   onReviewChange: (reviewId: string, updater: (review: ReviewWithEngagement) => ReviewWithEngagement) => void;
 }
 
-function ReviewCard({ review, isAuthConfigured, viewerProfileId, isHighlighted, onReviewChange }: ReviewCardProps) {
+function ReviewCard({ review, isAuthConfigured, viewerProfileId, isHighlighted, buildPublicProfileHref, onReviewChange }: ReviewCardProps) {
   const [isCommentsExpanded, setIsCommentsExpanded] = useState(false);
   const [isLikePending, setIsLikePending] = useState(false);
   const [isCommentPending, setIsCommentPending] = useState(false);
@@ -309,7 +311,7 @@ function ReviewCard({ review, isAuthConfigured, viewerProfileId, isHighlighted, 
     >
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 sm:gap-2">
         {review.profile_id ? (
-          <Link href={`/u/${review.profile_id}`} className="font-medium text-slate-600 transition hover:text-slate-900">
+          <Link href={buildPublicProfileHref(review.profile_id)} className="font-medium text-slate-600 transition hover:text-slate-900">
             {review.author_display_name?.trim() || "Anonymous"}
           </Link>
         ) : (
@@ -489,8 +491,15 @@ function ReviewCard({ review, isAuthConfigured, viewerProfileId, isHighlighted, 
 }
 
 export function ReviewList({ reviews, isAuthConfigured, viewerProfileId }: ReviewListProps) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [reviewItems, setReviewItems] = useState<ReviewWithEngagement[]>(() => reviews.map(normalizeReview));
   const [highlightedReviewId, setHighlightedReviewId] = useState<string | null>(null);
+  const reviewContextReturnTo = useMemo(() => {
+    const queryString = searchParams.toString();
+    return `${pathname}${queryString ? `?${queryString}` : ""}`;
+  }, [pathname, searchParams]);
+  const buildPublicProfileHref = (profileId: string) => `/u/${profileId}?returnTo=${encodeURIComponent(reviewContextReturnTo)}`;
 
   useEffect(() => {
     setReviewItems(reviews.map(normalizeReview));
@@ -534,6 +543,7 @@ export function ReviewList({ reviews, isAuthConfigured, viewerProfileId }: Revie
           isAuthConfigured={isAuthConfigured}
           viewerProfileId={viewerProfileId}
           isHighlighted={highlightedReviewId === review.id}
+          buildPublicProfileHref={buildPublicProfileHref}
           onReviewChange={updateReview}
         />
       ))}

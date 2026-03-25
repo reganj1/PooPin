@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { MobileBackButton } from "@/components/navigation/MobileBackButton";
 import { CollectibleCard } from "@/components/profile/CollectibleCard";
 import { CollectibleTitlePill } from "@/components/profile/CollectibleTitlePill";
+import { sanitizeReturnTo } from "@/lib/auth/login";
 import { getCollectibleCardByKey } from "@/lib/collectibles/cards";
 import { getCollectibleIdentitiesByProfileIds } from "@/lib/collectibles/identity";
 import { getReviewQuickTagDescriptor, normalizeReviewQuickTags } from "@/lib/utils/reviewSignals";
@@ -12,6 +14,7 @@ interface PublicProfilePageProps {
   params: Promise<{
     id: string;
   }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
 interface PublicReviewRow {
@@ -71,8 +74,11 @@ const getBathroomSummary = (bathrooms: PublicReviewRow["bathrooms"]) => {
   return value.name ?? "Restroom listing";
 };
 
-export default async function PublicProfilePage({ params }: PublicProfilePageProps) {
+export default async function PublicProfilePage({ params, searchParams }: PublicProfilePageProps) {
   const { id } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : {};
+  const rawReturnTo = Array.isArray(resolvedSearchParams.returnTo) ? resolvedSearchParams.returnTo[0] : resolvedSearchParams.returnTo;
+  const returnTo = rawReturnTo ? sanitizeReturnTo(rawReturnTo) : "/leaderboard";
   const identity = (await getCollectibleIdentitiesByProfileIds([id])).get(id);
 
   if (!identity) {
@@ -95,9 +101,11 @@ export default async function PublicProfilePage({ params }: PublicProfilePagePro
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <Link href="/leaderboard" className="text-sm font-medium text-brand-600 transition hover:text-brand-700">
-          ← Back to leaderboard
+      <MobileBackButton fallbackHref={returnTo} preferredHref={returnTo} className="mb-4" />
+
+      <div className="mb-4 hidden flex-wrap items-center justify-between gap-3 md:flex">
+        <Link href={returnTo} className="text-sm font-medium text-brand-600 transition hover:text-brand-700">
+          ← Back
         </Link>
         <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
           Public profile

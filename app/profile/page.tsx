@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { MobileBackButton } from "@/components/navigation/MobileBackButton";
 import { ProfileCollectiblesPanel } from "@/components/profile/ProfileCollectiblesPanel";
 import { ProfileNameForm } from "@/components/profile/ProfileNameForm";
 import { isAuthConfigured } from "@/lib/auth/config";
@@ -44,6 +45,8 @@ export default async function ProfilePage() {
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+      <MobileBackButton fallbackHref="/" className="mb-4" />
+
       <section className="rounded-[30px] border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] p-5 shadow-sm sm:p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
