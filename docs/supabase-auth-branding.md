@@ -11,8 +11,9 @@
 ## Email Auth
 - Supabase Dashboard -> Authentication -> Providers -> Email
 - Enable email sign-in.
-- Poopin uses Supabase `signInWithOtp()` for email OTP codes.
-- Supabase uses the same method for magic links and codes, so the email template decides which experience users receive.
+- Disable `Confirm email` for Poopin's passwordless email flow.
+- Poopin uses a unified OTP-code flow for both new and returning users.
+- Supabase uses the same `signInWithOtp()` method for magic links and codes, so the email template decides which experience users receive.
 
 ## Email Sender
 - Supabase Dashboard -> Settings -> Auth -> SMTP Settings
@@ -21,10 +22,11 @@
 
 ## Email Template
 - Supabase Dashboard -> Authentication -> Email Templates
-- Update the email subject line to match Poopin.
+- Update the Magic Link / OTP email subject line to match Poopin.
 - Rewrite the body copy so it sounds like the product and tells users to enter the 6-digit code in the app.
 - Use `{{ .Token }}` in the template body.
 - Do not use `{{ .ConfirmationURL }}` for Poopin's login flow, or Supabase will send a magic link instead of a code.
+- Poopin should not rely on the Confirm Signup template for login. If users are seeing “Confirm your signup”, `Confirm email` is still enabled or a different auth path is being used.
 - Add Poopin branding/logo if your current email setup supports it.
 
 ## App-Side Scope

@@ -129,22 +129,34 @@ export function SupabaseLoginForm({
       return false;
     }
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email: normalizedEmail,
-      options: {
-        shouldCreateUser: true
-      }
+    const response = await fetch("/api/auth/email-otp", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ email: normalizedEmail })
     });
 
-    if (error) {
-      console.error("[Poopin] Supabase OTP send failed.", { error });
-      const retryAfterSeconds = getRetryAfterSeconds(error.message || "");
+    const payload = (await response.json().catch(() => null)) as
+      | {
+          error?: string;
+        }
+      | null;
+
+    const errorMessage = payload?.error ?? "";
+
+    if (!response.ok) {
+      console.error("[Poopin] Supabase OTP send failed.", {
+        status: response.status,
+        error: errorMessage || "Unknown send error."
+      });
+      const retryAfterSeconds = getRetryAfterSeconds(errorMessage);
       if (retryAfterSeconds !== null) {
         startCooldown(retryAfterSeconds + RESEND_COOLDOWN_BUFFER_SECONDS);
         setErrorMessage(
           `Please wait ${retryAfterSeconds} more second${retryAfterSeconds === 1 ? "" : "s"} before requesting another code.`
         );
-        setRawErrorMessage(formatRawAuthError(error));
+        setRawErrorMessage(errorMessage || `HTTP ${response.status}`);
         return false;
       }
 
@@ -152,8 +164,8 @@ export function SupabaseLoginForm({
         startCooldown();
       }
 
-      setErrorMessage(formatAuthErrorMessage(error.message || "", "send"));
-      setRawErrorMessage(formatRawAuthError(error));
+      setErrorMessage(formatAuthErrorMessage(errorMessage, "send"));
+      setRawErrorMessage(errorMessage || `HTTP ${response.status}`);
       return false;
     }
 
@@ -213,39 +225,21 @@ export function SupabaseLoginForm({
     setIsVerifying(true);
 
     try {
-      // Supabase's current docs use type "email" for user-entered email OTPs.
-      // We keep that as the primary path, but first-time/unconfirmed users can still
-      // receive signup-classified codes, so we fall back to "signup" if "email" fails.
-      const verifyTypes: EmailOtpType[] = ["email", "signup"];
-      let verified = false;
-      let lastError: AuthErrorLike | null = null;
+      // Poopin provisions new users before sending a code, so verification always
+      // uses the standard email OTP path for both new and returning users.
+      const { error } = await supabase.auth.verifyOtp({
+        email: normalizedEmail,
+        token: normalizedCode,
+        type: "email" satisfies EmailOtpType
+      });
 
-      for (const verifyType of verifyTypes) {
-        const { error } = await supabase.auth.verifyOtp({
-          email: normalizedEmail,
-          token: normalizedCode,
-          type: verifyType
-        });
-
-        if (!error) {
-          verified = true;
-          break;
-        }
-
+      if (error) {
         console.error("[Poopin] Supabase OTP verify failed.", {
-          verifyType,
+          verifyType: "email",
           error
         });
-        lastError = error;
-
-        if (verifyType === "email") {
-          continue;
-        }
-      }
-
-      if (!verified) {
-        setErrorMessage(formatAuthErrorMessage(lastError?.message || "", "verify"));
-        setRawErrorMessage(formatRawAuthError(lastError));
+        setErrorMessage(formatAuthErrorMessage(error.message || "", "verify"));
+        setRawErrorMessage(formatRawAuthError(error));
         return;
       }
 

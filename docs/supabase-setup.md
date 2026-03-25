@@ -54,8 +54,11 @@ npm run dev
 
 ## 5) Supabase auth dashboard
 - Enable Email auth in Supabase Auth.
-- Poopin uses `signInWithOtp()` for email OTP codes, not magic-link clicking.
-- Update the email template to use `{{ .Token }}` instead of `{{ .ConfirmationURL }}` so Supabase sends a code.
+- Poopin uses one email-code flow for both new and returning users.
+- Keep `Confirm email` disabled for Poopin's passwordless auth flow. If it stays enabled, Supabase can send first-time users into a separate confirm-signup email path.
+- Poopin provisions missing users server-side, then calls `signInWithOtp()` with `shouldCreateUser: false` so every user gets the same OTP-code experience.
+- Update the Magic Link / OTP email template to use `{{ .Token }}` instead of `{{ .ConfirmationURL }}` so Supabase sends a code.
+- The Confirm Signup template should not be part of Poopin's normal login UX.
 - Set `Site URL` and redirect URLs to include:
   - `http://localhost:3000/auth/callback`
   - your production callback URL
