@@ -167,17 +167,26 @@ const buildDesktopHoverPreviewContent = (
   const media = document.createElement("div");
   media.className = "relative h-20 w-full border-b border-slate-100 bg-slate-100";
   if (photoUrl) {
+    const loadingState = document.createElement("div");
+    loadingState.className = "absolute inset-0 animate-pulse bg-gradient-to-br from-slate-200 via-slate-100 to-slate-200";
+    media.appendChild(loadingState);
+
     const image = document.createElement("img");
-    image.src = photoUrl;
     image.alt = `${getRestroomDisplayName(restroom)} preview`;
-    image.className = "h-full w-full object-cover";
+    image.className = "absolute inset-0 h-full w-full object-cover opacity-0 transition-opacity duration-150";
     image.loading = "eager";
     image.decoding = "async";
     image.setAttribute("fetchpriority", "high");
+    image.onload = () => {
+      image.classList.remove("opacity-0");
+      loadingState.remove();
+    };
     image.onerror = () => {
       image.remove();
+      loadingState.remove();
       media.appendChild(buildPhotoFallback("Photo unavailable"));
     };
+    image.src = photoUrl;
     media.appendChild(image);
   } else if (isPhotoLoading) {
     const loadingState = document.createElement("div");

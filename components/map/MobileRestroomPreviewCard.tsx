@@ -54,6 +54,7 @@ export function MobileRestroomPreviewCard({
 }: MobileRestroomPreviewCardProps) {
   const router = useRouter();
   const [didPhotoFail, setDidPhotoFail] = useState(false);
+  const [isPhotoLoaded, setIsPhotoLoaded] = useState(false);
   const detailHref = `/restroom/${restroom.id}`;
   const displayName = getRestroomDisplayName(restroom);
   const subtitle = getRestroomCardSubtitle(restroom);
@@ -83,6 +84,7 @@ export function MobileRestroomPreviewCard({
 
   useEffect(() => {
     setDidPhotoFail(false);
+    setIsPhotoLoaded(false);
   }, [photoUrl, restroom.id]);
 
   return (
@@ -96,15 +98,25 @@ export function MobileRestroomPreviewCard({
       <div className="flex items-start gap-3">
         <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
           {photoUrl && !didPhotoFail ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={photoUrl}
-              alt={`${displayName} photo`}
-              className="h-full w-full object-cover"
-              loading="eager"
-              decoding="async"
-              onError={() => setDidPhotoFail(true)}
-            />
+            <>
+              {!isPhotoLoaded ? (
+                <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-slate-200 via-slate-100 to-slate-200" />
+              ) : null}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={photoUrl}
+                alt={`${displayName} photo`}
+                className={`h-full w-full object-cover transition-opacity duration-150 ${isPhotoLoaded ? "opacity-100" : "opacity-0"}`}
+                loading="eager"
+                decoding="async"
+                fetchPriority="high"
+                onLoad={() => setIsPhotoLoaded(true)}
+                onError={() => {
+                  setDidPhotoFail(true);
+                  setIsPhotoLoaded(false);
+                }}
+              />
+            </>
           ) : (
             <div className="flex h-full w-full items-center justify-center bg-slate-900 text-xs font-semibold tracking-wide text-white">
               WC

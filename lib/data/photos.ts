@@ -21,10 +21,10 @@ export interface ApprovedBathroomPhoto {
 const ACTIVE_STATUS: Photo["status"] = "active";
 const allowedPhotoStatuses = new Set<Photo["status"]>(["active", "pending", "flagged", "removed"]);
 const PREVIEW_PHOTO_TRANSFORM = {
-  width: 320,
-  height: 192,
+  width: 280,
+  height: 168,
   resize: "cover",
-  quality: 60
+  quality: 52
 } as const;
 const DETAIL_THUMBNAIL_TRANSFORM = {
   width: 720,

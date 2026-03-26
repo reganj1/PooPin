@@ -34,7 +34,9 @@ const warmPreviewImage = (photoUrl: string | null) => {
   warmedPreviewImageUrls.add(photoUrl);
   const image = new window.Image();
   image.decoding = "async";
+  image.fetchPriority = "low";
   image.src = photoUrl;
+  void image.decode().catch(() => undefined);
 };
 
 export const getCachedRestroomPreviewPhoto = (restroomId: string): string | null | undefined => {

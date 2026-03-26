@@ -1734,6 +1734,34 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
   }, []);
 
   useEffect(() => {
+    const likelyPreviewRestrooms = [
+      selectedMapRestroom,
+      featuredRestroom,
+      topPickRestroom,
+      ...listRestrooms.slice(0, 2)
+    ].filter((restroom): restroom is NearbyBathroom => restroom !== null);
+
+    const warmedRestroomIds = new Set<string>();
+    let warmedCount = 0;
+    for (const restroom of likelyPreviewRestrooms) {
+      if (warmedRestroomIds.has(restroom.id)) {
+        continue;
+      }
+
+      warmedRestroomIds.add(restroom.id);
+      if (restroom.previewPhotoUrl === undefined) {
+        continue;
+      }
+
+      primeRestroomPreviewPhoto(restroom.id, restroom.previewPhotoUrl);
+      warmedCount += 1;
+      if (warmedCount >= 3) {
+        break;
+      }
+    }
+  }, [featuredRestroom, listRestrooms, selectedMapRestroom, topPickRestroom]);
+
+  useEffect(() => {
     const prioritizedPreviewRestroomIds = [
       selectedMapRestroomId,
       mapFocusedRestroomId,
