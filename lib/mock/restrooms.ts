@@ -474,7 +474,8 @@ export const getNearbyBathrooms = (
     .map((bathroom) => ({
       ...bathroom,
       distanceMiles: roundToOne(haversineDistanceMiles(origin, { lat: bathroom.lat, lng: bathroom.lng })),
-      ratings: getRatingsForBathroom(bathroom.id)
+      ratings: getRatingsForBathroom(bathroom.id),
+      previewPhotoUrl: null
     }))
     .sort((a, b) => a.distanceMiles - b.distanceMiles)
     .slice(0, limit);
@@ -497,7 +498,8 @@ export const getBathroomsInBounds = (
     .map((bathroom) => ({
       ...bathroom,
       distanceMiles: roundToOne(haversineDistanceMiles(origin, { lat: bathroom.lat, lng: bathroom.lng })),
-      ratings: getRatingsForBathroom(bathroom.id)
+      ratings: getRatingsForBathroom(bathroom.id),
+      previewPhotoUrl: null
     }))
     .sort((a, b) => a.distanceMiles - b.distanceMiles)
     .slice(0, limit);
@@ -512,7 +514,8 @@ export const getBathroomById = (id: string): NearbyBathroom | undefined => {
   return {
     ...bathroom,
     distanceMiles: roundToOne(haversineDistanceMiles(DEFAULT_ORIGIN, { lat: bathroom.lat, lng: bathroom.lng })),
-    ratings: getRatingsForBathroom(bathroom.id)
+    ratings: getRatingsForBathroom(bathroom.id),
+    previewPhotoUrl: null
   };
 };
 

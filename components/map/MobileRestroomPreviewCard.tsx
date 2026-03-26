@@ -1,6 +1,6 @@
 "use client";
 
-import { KeyboardEvent } from "react";
+import { KeyboardEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { NearbyBathroom } from "@/types";
 import { TrackedNavigateLink } from "@/components/analytics/TrackedNavigateLink";
@@ -53,6 +53,7 @@ export function MobileRestroomPreviewCard({
   onNavigateToDetail
 }: MobileRestroomPreviewCardProps) {
   const router = useRouter();
+  const [didPhotoFail, setDidPhotoFail] = useState(false);
   const detailHref = `/restroom/${restroom.id}`;
   const displayName = getRestroomDisplayName(restroom);
   const subtitle = getRestroomCardSubtitle(restroom);
@@ -80,6 +81,10 @@ export function MobileRestroomPreviewCard({
     openRestroomDetails();
   };
 
+  useEffect(() => {
+    setDidPhotoFail(false);
+  }, [photoUrl, restroom.id]);
+
   return (
     <article
       role="link"
@@ -90,9 +95,16 @@ export function MobileRestroomPreviewCard({
     >
       <div className="flex items-start gap-3">
         <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
-          {photoUrl ? (
+          {photoUrl && !didPhotoFail ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={photoUrl} alt={`${displayName} photo`} className="h-full w-full object-cover" loading="eager" decoding="async" />
+            <img
+              src={photoUrl}
+              alt={`${displayName} photo`}
+              className="h-full w-full object-cover"
+              loading="eager"
+              decoding="async"
+              onError={() => setDidPhotoFail(true)}
+            />
           ) : (
             <div className="flex h-full w-full items-center justify-center bg-slate-900 text-xs font-semibold tracking-wide text-white">
               WC

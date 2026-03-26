@@ -2,6 +2,7 @@ import { Bathroom, NearbyBathroom, Review } from "@/types";
 import { getUserProfilesByIds } from "@/lib/auth/userProfiles";
 import { getCollectibleIdentitiesByProfileIds } from "@/lib/collectibles/identity";
 import { attachReviewEngagement } from "@/lib/data/reviewEngagement";
+import { getApprovedBathroomPreviewPhotoUrlsData } from "@/lib/data/photos";
 import { getSupabaseServerClient, getSupabaseServerClientConfigIssue } from "@/lib/supabase/server";
 import {
   getBathroomById as getMockBathroomById,
@@ -217,12 +218,14 @@ const emptyRatings = () => ({
 const toNearbyBathroom = (
   bathroom: Bathroom,
   ratingsMap: Map<string, NearbyBathroom["ratings"]>,
-  origin: { lat: number; lng: number }
+  origin: { lat: number; lng: number },
+  previewPhotoUrlByBathroomId?: Map<string, string | null>
 ): NearbyBathroom => {
   return {
     ...bathroom,
     distanceMiles: roundToOne(haversineDistanceMiles(origin, { lat: bathroom.lat, lng: bathroom.lng })),
-    ratings: ratingsMap.get(bathroom.id) ?? emptyRatings()
+    ratings: ratingsMap.get(bathroom.id) ?? emptyRatings(),
+    previewPhotoUrl: previewPhotoUrlByBathroomId?.get(bathroom.id) ?? null
   };
 };
 
@@ -361,9 +364,10 @@ const fetchBathroomsWithRatings = async (
   const reviewRows = await fetchActiveReviewRowsByBathroomIds(supabase, bathroomIds, reviewQueryContext);
   const reviews = reviewRows.map(toReview).filter((row): row is Review => row !== null);
   const ratingsMap = buildRatingMap(reviews);
+  const previewPhotoUrlByBathroomId = await getApprovedBathroomPreviewPhotoUrlsData(bathroomIds, supabase);
 
   return bathrooms
-    .map((bathroom) => toNearbyBathroom(bathroom, ratingsMap, origin))
+    .map((bathroom) => toNearbyBathroom(bathroom, ratingsMap, origin, previewPhotoUrlByBathroomId))
     .sort((a, b) => a.distanceMiles - b.distanceMiles);
 };
 

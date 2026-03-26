@@ -21,6 +21,8 @@ const formatDate = (value: string) =>
 export function RestroomPhotoGallery({ photos }: RestroomPhotoGalleryProps) {
   const [activePhotoIndex, setActivePhotoIndex] = useState<number | null>(null);
   const [loadedInlinePhotoIds, setLoadedInlinePhotoIds] = useState<Set<string>>(() => new Set());
+  const [failedInlinePhotoIds, setFailedInlinePhotoIds] = useState<Set<string>>(() => new Set());
+  const [failedLightboxPhotoIds, setFailedLightboxPhotoIds] = useState<Set<string>>(() => new Set());
   const touchStartXRef = useRef<number | null>(null);
   const touchStartYRef = useRef<number | null>(null);
   const isLightboxOpen = activePhotoIndex !== null;
@@ -35,6 +37,30 @@ export function RestroomPhotoGallery({ photos }: RestroomPhotoGalleryProps) {
 
   const markInlinePhotoLoaded = useCallback((photoId: string) => {
     setLoadedInlinePhotoIds((current) => {
+      if (current.has(photoId)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.add(photoId);
+      return next;
+    });
+  }, []);
+
+  const markInlinePhotoFailed = useCallback((photoId: string) => {
+    setFailedInlinePhotoIds((current) => {
+      if (current.has(photoId)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.add(photoId);
+      return next;
+    });
+  }, []);
+
+  const markLightboxPhotoFailed = useCallback((photoId: string) => {
+    setFailedLightboxPhotoIds((current) => {
       if (current.has(photoId)) {
         return current;
       }
@@ -175,6 +201,7 @@ export function RestroomPhotoGallery({ photos }: RestroomPhotoGalleryProps) {
         {inlinePhotos.map((photo, index) => {
           const isOverflowTile = hiddenPhotoCount > 0 && index === inlinePhotos.length - 1;
           const isInlinePhotoLoaded = loadedInlinePhotoIds.has(photo.id);
+          const didInlinePhotoFail = failedInlinePhotoIds.has(photo.id);
           return (
             <button
               key={photo.id}
@@ -183,22 +210,30 @@ export function RestroomPhotoGallery({ photos }: RestroomPhotoGalleryProps) {
               className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-100 text-left shadow-sm transition hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
             >
               <div className="relative h-32 w-full sm:h-36">
-                {!isInlinePhotoLoaded ? (
+                {!isInlinePhotoLoaded && !didInlinePhotoFail ? (
                   <span
                     aria-hidden="true"
                     className="absolute inset-0 animate-pulse bg-gradient-to-br from-slate-200 via-slate-100 to-slate-200"
                   />
                 ) : null}
-                <Image
-                  src={photo.url}
-                  alt="Restroom photo"
-                  fill
-                  sizes={inlinePhotoSizes}
-                  loading={index === 0 ? "eager" : "lazy"}
-                  priority={index === 0}
-                  onLoad={() => markInlinePhotoLoaded(photo.id)}
-                  className={`object-cover transition-opacity duration-200 ${isInlinePhotoLoaded ? "opacity-100" : "opacity-0"}`}
-                />
+                {didInlinePhotoFail ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-slate-200 text-xs font-semibold text-slate-600">
+                    Photo unavailable
+                  </div>
+                ) : (
+                  <Image
+                    src={photo.thumbnailUrl}
+                    alt="Restroom photo"
+                    fill
+                    sizes={inlinePhotoSizes}
+                    loading={index === 0 ? "eager" : "lazy"}
+                    priority={index === 0}
+                    unoptimized
+                    onLoad={() => markInlinePhotoLoaded(photo.id)}
+                    onError={() => markInlinePhotoFailed(photo.id)}
+                    className={`object-cover transition-opacity duration-200 ${isInlinePhotoLoaded ? "opacity-100" : "opacity-0"}`}
+                  />
+                )}
               </div>
               {isOverflowTile ? (
                 <span className="absolute inset-0 flex items-center justify-center bg-slate-900/60 text-sm font-semibold text-white">
@@ -242,8 +277,21 @@ export function RestroomPhotoGallery({ photos }: RestroomPhotoGalleryProps) {
               onTouchEnd={handleLightboxTouchEnd}
             >
               <div className="relative h-[min(72vh,560px)] w-full overflow-hidden rounded-2xl bg-black">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={activePhoto.url} alt="Expanded restroom photo" className="h-full w-full object-contain" />
+                {failedLightboxPhotoIds.has(activePhoto.id) ? (
+                  <div className="flex h-full w-full items-center justify-center bg-slate-900 text-sm font-semibold text-slate-200">
+                    Photo unavailable
+                  </div>
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={activePhoto.url}
+                    alt="Expanded restroom photo"
+                    className="h-full w-full object-contain"
+                    loading="eager"
+                    decoding="async"
+                    onError={() => markLightboxPhotoFailed(activePhoto.id)}
+                  />
+                )}
 
                 {photos.length > 1 ? (
                   <>

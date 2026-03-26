@@ -51,6 +51,11 @@ export const getCachedRestroomPreviewPhoto = (restroomId: string): string | null
   return cachedEntry.photoUrl;
 };
 
+export const primeRestroomPreviewPhoto = (restroomId: string, photoUrl: string | null) => {
+  setCachedPreviewPhoto(restroomId, photoUrl);
+  warmPreviewImage(photoUrl);
+};
+
 export const fetchRestroomPreviewPhoto = async (restroomId: string): Promise<string | null> => {
   const cachedPhotoUrl = getCachedRestroomPreviewPhoto(restroomId);
   if (cachedPhotoUrl !== undefined) {
@@ -63,7 +68,8 @@ export const fetchRestroomPreviewPhoto = async (restroomId: string): Promise<str
   }
 
   const request = fetch(`/api/restrooms/${encodeURIComponent(restroomId)}/preview`, {
-    method: "GET"
+    method: "GET",
+    cache: "force-cache"
   })
     .then(async (response) => {
       if (!response.ok) {

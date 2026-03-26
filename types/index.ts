@@ -107,4 +107,5 @@ export interface BathroomRatingSummary {
 export interface NearbyBathroom extends Bathroom {
   distanceMiles: number;
   ratings: BathroomRatingSummary;
+  previewPhotoUrl?: string | null;
 }

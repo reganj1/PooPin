@@ -29,6 +29,7 @@ import { formatDistanceLabel, type DistanceReferenceKind } from "@/lib/utils/dis
 import {
   fetchRestroomPreviewPhoto,
   getCachedRestroomPreviewPhoto,
+  primeRestroomPreviewPhoto,
   prefetchRestroomPreviewPhotos
 } from "@/lib/utils/restroomPreviewClient";
 import { NearbyBathroom } from "@/types";
@@ -938,7 +939,12 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     [mapDisplayRestrooms, selectedRestroomId]
   );
   const selectedMapRestroomId = selectedMapRestroom?.id ?? null;
-  const selectedMapRestroomPreviewPhotoUrl = selectedMapRestroomId ? mobilePreviewPhotoByRestroomId[selectedMapRestroomId] ?? null : null;
+  const selectedMapRestroomPreviewPhotoUrl =
+    selectedMapRestroom?.previewPhotoUrl !== undefined
+      ? selectedMapRestroom.previewPhotoUrl
+      : selectedMapRestroomId
+        ? mobilePreviewPhotoByRestroomId[selectedMapRestroomId] ?? null
+        : null;
 
   useEffect(() => {
     if (process.env.NODE_ENV === "production") {
@@ -1733,13 +1739,28 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       mapFocusedRestroomId,
       listHoveredRestroomId
     ].filter((value): value is string => Boolean(value));
-    const candidatePreviewRestroomIds = [
-      ...prioritizedPreviewRestroomIds,
-      ...listRestrooms.map((restroom) => restroom.id),
-      ...mapDisplayRestrooms.map((restroom) => restroom.id)
-    ];
-    prefetchRestroomPreviewPhotos(candidatePreviewRestroomIds, isMobilePreviewLayout ? 10 : 16);
-  }, [isMobilePreviewLayout, listHoveredRestroomId, listRestrooms, mapDisplayRestrooms, mapFocusedRestroomId, selectedMapRestroomId]);
+    if (prioritizedPreviewRestroomIds.length === 0) {
+      return;
+    }
+
+    const previewFetchFallbackIds: string[] = [];
+    for (const restroomId of prioritizedPreviewRestroomIds) {
+      const restroom = restroomLookup.get(restroomId);
+      if (restroom?.previewPhotoUrl !== undefined) {
+        primeRestroomPreviewPhoto(restroomId, restroom.previewPhotoUrl);
+        continue;
+      }
+
+      previewFetchFallbackIds.push(restroomId);
+    }
+
+    // Mobile has a dedicated selected-preview fetch, and desktop hover already lazy-loads
+    // on intent. Restricting prefetch to active interaction targets keeps the UX intact
+    // while avoiding a large fan-out across every visible restroom in the list/map.
+    if (previewFetchFallbackIds.length > 0) {
+      prefetchRestroomPreviewPhotos(previewFetchFallbackIds, previewFetchFallbackIds.length);
+    }
+  }, [listHoveredRestroomId, mapFocusedRestroomId, restroomLookup, selectedMapRestroomId]);
 
   useEffect(() => {
     if (!isMobilePreviewLayout) {
@@ -1751,6 +1772,11 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     }
 
     const restroomId = selectedMapRestroomId;
+    if (selectedMapRestroom?.previewPhotoUrl !== undefined) {
+      primeRestroomPreviewPhoto(restroomId, selectedMapRestroom.previewPhotoUrl);
+      return;
+    }
+
     const cachedPhotoUrl = getCachedRestroomPreviewPhoto(restroomId);
     if (cachedPhotoUrl !== undefined) {
       setMobilePreviewPhotoByRestroomId((current) => {
@@ -1787,7 +1813,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
     return () => {
       cancelled = true;
     };
-  }, [isMobilePreviewLayout, selectedMapRestroomId]);
+  }, [isMobilePreviewLayout, selectedMapRestroom, selectedMapRestroomId]);
 
   useEffect(() => {
     if (!isMapExpanded || !isMobilePreviewLayout) {

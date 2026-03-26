@@ -9,6 +9,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "seed:normalize:la-controller": "tsx scripts/normalize-la-controller.ts",
+    "seed:normalize:county-osm": "tsx scripts/normalize-county-osm.ts",
     "seed:import:restrooms": "tsx scripts/import-restrooms.ts",
     "seed:fetch:osm": "tsx scripts/fetch-osm-restrooms.ts",
     "seed:fetch:bay-area": "tsx scripts/fetch-osm-restrooms.ts --all-bay-area --output-dir supabase/seeds/bay-area",

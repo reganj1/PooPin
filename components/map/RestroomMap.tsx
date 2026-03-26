@@ -10,6 +10,7 @@ import type { AnalyticsViewportMode } from "@/lib/analytics/posthog";
 import {
   fetchRestroomPreviewPhoto,
   getCachedRestroomPreviewPhoto,
+  primeRestroomPreviewPhoto,
   prefetchRestroomPreviewPhotos
 } from "@/lib/utils/restroomPreviewClient";
 import { formatDistanceLabel, type DistanceReferenceKind } from "@/lib/utils/distancePresentation";
@@ -148,16 +149,23 @@ const buildDesktopHoverPreviewContent = (
   options: {
     showDistance: boolean;
     photoUrl: string | null;
+    isPhotoLoading: boolean;
     distanceReferenceKind: DistanceReferenceKind | null;
     distanceReferenceLabel: string | null;
   }
 ) => {
-  const { showDistance, photoUrl, distanceReferenceKind, distanceReferenceLabel } = options;
+  const { showDistance, photoUrl, isPhotoLoading, distanceReferenceKind, distanceReferenceLabel } = options;
+  const buildPhotoFallback = (label: string) => {
+    const placeholder = document.createElement("div");
+    placeholder.className = "flex h-full w-full items-center justify-center bg-slate-100 text-[11px] font-semibold text-slate-500";
+    placeholder.textContent = label;
+    return placeholder;
+  };
   const container = document.createElement("div");
-  container.className = "w-[246px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl";
+  container.className = "w-[236px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl";
 
   const media = document.createElement("div");
-  media.className = "relative h-24 w-full border-b border-slate-100 bg-slate-100";
+  media.className = "relative h-20 w-full border-b border-slate-100 bg-slate-100";
   if (photoUrl) {
     const image = document.createElement("img");
     image.src = photoUrl;
@@ -166,12 +174,17 @@ const buildDesktopHoverPreviewContent = (
     image.loading = "eager";
     image.decoding = "async";
     image.setAttribute("fetchpriority", "high");
+    image.onerror = () => {
+      image.remove();
+      media.appendChild(buildPhotoFallback("Photo unavailable"));
+    };
     media.appendChild(image);
+  } else if (isPhotoLoading) {
+    const loadingState = document.createElement("div");
+    loadingState.className = "absolute inset-0 animate-pulse bg-gradient-to-br from-slate-200 via-slate-100 to-slate-200";
+    media.appendChild(loadingState);
   } else {
-    const placeholder = document.createElement("div");
-    placeholder.className = "flex h-full w-full items-center justify-center text-[11px] font-semibold text-slate-500";
-    placeholder.textContent = "No photo yet";
-    media.appendChild(placeholder);
+    media.appendChild(buildPhotoFallback("No photo yet"));
   }
 
   container.appendChild(media);
@@ -330,12 +343,31 @@ export function RestroomMap({
   }, [onNavigateToDetail]);
 
   useEffect(() => {
-    const prioritizedRestroomIds = [selectedRestroomId, focusedRestroomId, hoveredRestroomId].filter(
+    const interactionTargetIds = [selectedRestroomId, focusedRestroomId, hoveredRestroomId].filter(
       (value): value is string => Boolean(value)
     );
-    const candidateRestroomIds = [...prioritizedRestroomIds, ...restrooms.map((restroom) => restroom.id)];
-    prefetchRestroomPreviewPhotos(candidateRestroomIds, 14);
-  }, [focusedRestroomId, hoveredRestroomId, restrooms, selectedRestroomId]);
+    if (interactionTargetIds.length === 0) {
+      return;
+    }
+
+    const previewFetchFallbackIds: string[] = [];
+    for (const restroomId of interactionTargetIds) {
+      const restroom = restroomById.get(restroomId);
+      if (restroom?.previewPhotoUrl !== undefined) {
+        primeRestroomPreviewPhoto(restroomId, restroom.previewPhotoUrl);
+        continue;
+      }
+
+      previewFetchFallbackIds.push(restroomId);
+    }
+
+    // Keep preview warming tied to the restroom the user is actively exploring.
+    // Broad visible-marker prefetching created a lot of first-time preview requests
+    // without improving direct hover/tap behavior enough to justify the traffic.
+    if (previewFetchFallbackIds.length > 0) {
+      prefetchRestroomPreviewPhotos(previewFetchFallbackIds, previewFetchFallbackIds.length);
+    }
+  }, [focusedRestroomId, hoveredRestroomId, restroomById, selectedRestroomId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -578,20 +610,7 @@ export function RestroomMap({
       desktopPopupRestroomIdRef.current = null;
     };
 
-    const requestDesktopPreviewPhoto = (restroomId: string) => {
-      const cachedPhotoUrl = getCachedRestroomPreviewPhoto(restroomId);
-      if (cachedPhotoUrl !== undefined) {
-        return;
-      }
-
-      void fetchRestroomPreviewPhoto(restroomId).finally(() => {
-        if (desktopPopupRestroomIdRef.current === restroomId) {
-          showDesktopHoverPopup(restroomId);
-        }
-      });
-    };
-
-    const showDesktopHoverPopup = (restroomId: string) => {
+    const showDesktopHoverPopup = (restroomId: string, previewPhotoOverride?: string | null | undefined) => {
       if (isCoarsePointerRef.current) {
         return;
       }
@@ -603,11 +622,19 @@ export function RestroomMap({
       }
 
       const cachedPhotoUrl = getCachedRestroomPreviewPhoto(restroomId);
-      const hasPreviewPhoto = cachedPhotoUrl !== undefined;
-      const photoUrl = hasPreviewPhoto ? cachedPhotoUrl : null;
+      const payloadPhotoUrl = restroom.previewPhotoUrl;
+      const hasResolvedPreviewPhoto =
+        previewPhotoOverride !== undefined || payloadPhotoUrl !== undefined || cachedPhotoUrl !== undefined;
+      const photoUrl =
+        previewPhotoOverride !== undefined
+          ? previewPhotoOverride
+          : payloadPhotoUrl !== undefined
+            ? payloadPhotoUrl
+            : cachedPhotoUrl ?? null;
       const popupContent = buildDesktopHoverPreviewContent(restroom, {
         showDistance,
         photoUrl,
+        isPhotoLoading: !hasResolvedPreviewPhoto,
         distanceReferenceKind,
         distanceReferenceLabel
       });
@@ -638,7 +665,7 @@ export function RestroomMap({
       }
       desktopPopupRestroomIdRef.current = restroomId;
 
-      if (hasPreviewPhoto) {
+      if (hasResolvedPreviewPhoto) {
         if (desktopPreviewFetchIntentTimeoutRef.current !== null && typeof window !== "undefined") {
           window.clearTimeout(desktopPreviewFetchIntentTimeoutRef.current);
         }
@@ -670,6 +697,27 @@ export function RestroomMap({
 
         requestDesktopPreviewPhoto(restroomId);
       }, DESKTOP_PREVIEW_FETCH_INTENT_DELAY_MS);
+    };
+
+    const requestDesktopPreviewPhoto = (restroomId: string) => {
+      const payloadPhotoUrl = restroomById.get(restroomId)?.previewPhotoUrl;
+      if (payloadPhotoUrl !== undefined) {
+        primeRestroomPreviewPhoto(restroomId, payloadPhotoUrl);
+        showDesktopHoverPopup(restroomId, payloadPhotoUrl);
+        return;
+      }
+
+      const cachedPhotoUrl = getCachedRestroomPreviewPhoto(restroomId);
+      if (cachedPhotoUrl !== undefined) {
+        showDesktopHoverPopup(restroomId, cachedPhotoUrl);
+        return;
+      }
+
+      void fetchRestroomPreviewPhoto(restroomId).then((photoUrl) => {
+        if (desktopPopupRestroomIdRef.current === restroomId) {
+          showDesktopHoverPopup(restroomId, photoUrl);
+        }
+      });
     };
 
     const syncDesktopHoverPopup = () => {
