@@ -26,6 +26,7 @@ import { getRestroomCardSubtitle, getRestroomDisplayName, getRestroomSourceLabel
 import { getReviewQuickTagDescriptor, reviewQuickTagToneClassName } from "@/lib/utils/reviewSignals";
 import { cn } from "@/lib/utils/cn";
 import { formatDistanceLabel, type DistanceReferenceKind } from "@/lib/utils/distancePresentation";
+import { buildLoginHref } from "@/lib/auth/login";
 import {
   fetchRestroomPreviewPhoto,
   getCachedRestroomPreviewPhoto,
@@ -36,6 +37,7 @@ import { NearbyBathroom } from "@/types";
 
 interface NearbyExplorerProps {
   initialRestrooms: NearbyBathroom[];
+  showSignupValue?: boolean;
 }
 
 interface Coordinate {
@@ -387,7 +389,7 @@ const resolveClosestInAreaRecommendation = (candidates: NearbyBathroom[], origin
   );
 };
 
-export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
+export function NearbyExplorer({ initialRestrooms, showSignupValue = false }: NearbyExplorerProps) {
   const router = useRouter();
   const {
     currentLocation: userLocation,
@@ -2823,10 +2825,10 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
       <div className={cn(shouldShowStickyMobilePrimaryAction && "pb-24 sm:pb-0")}>
         <section
           ref={primaryLocationActionRef}
-          className="mb-3 rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-sm sm:mb-4 sm:p-5 lg:mb-5"
+          className="mb-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm sm:mb-5 sm:p-6 lg:mx-auto lg:max-w-[880px] xl:max-w-[920px]"
         >
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
               {!isLocationTrackingEnabled ? (
                 <button
                   type="button"
@@ -2834,7 +2836,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                   disabled={isLocating}
                   className="inline-flex min-h-[44px] w-full items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
-                  {isLocating ? "Finding bathrooms..." : "Find bathroom now"}
+                  {isLocating ? "Finding bathrooms..." : "Find a bathroom near you"}
                 </button>
               ) : null}
 
@@ -2866,12 +2868,30 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
             </div>
 
             <div className="min-w-0">
-              {!isLocationTrackingEnabled ? <p className="text-xs font-medium text-slate-500">Uses your location</p> : null}
+              {!isLocationTrackingEnabled ? (
+                <p className="text-[13px] font-medium leading-5 text-slate-500 sm:text-right">Finds the closest clean restroom instantly</p>
+              ) : null}
               {geoError ? (
-                <p className="mt-1 text-xs font-medium text-amber-700">{geoError}</p>
+                <p className="mt-1 text-[13px] font-medium text-amber-700 sm:text-right">{geoError}</p>
               ) : null}
             </div>
           </div>
+
+          {showSignupValue && !isLocationTrackingEnabled ? (
+            <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <div className="min-w-0">
+                <p className="text-[13px] leading-5 text-slate-600">
+                  <span className="font-medium text-slate-800">Free account:</span> Save restrooms, earn points, collect cards.
+                </p>
+              </div>
+              <Link
+                href={buildLoginHref("/")}
+                className="inline-flex min-h-[40px] w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 sm:w-auto"
+              >
+                Create free account
+              </Link>
+            </div>
+          ) : null}
         </section>
 
         <div className="mb-3 sm:mb-4">
@@ -3088,7 +3108,7 @@ export function NearbyExplorer({ initialRestrooms }: NearbyExplorerProps) {
                 onClick={handleUseMyLocation}
                 className="inline-flex min-h-[52px] w-full items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
               >
-                Find bathroom now
+                Find a bathroom near you
               </button>
             </div>
           </div>

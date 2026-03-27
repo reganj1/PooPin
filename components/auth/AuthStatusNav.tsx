@@ -75,7 +75,7 @@ export function AuthStatusNav({ isAuthConfigured, viewerDisplayName, variant = "
         href={buildLoginHref("/")}
         className={
           isMobileVariant
-            ? "inline-flex h-9 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-2.5 text-[13px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+            ? "inline-flex h-9 w-full items-center justify-center rounded-xl bg-slate-50 px-3 text-[13px] font-semibold text-slate-700 transition hover:bg-slate-100"
             : "inline-flex h-9 items-center rounded-lg border border-slate-200 px-2.5 text-[13px] font-semibold text-slate-700 transition hover:bg-slate-100"
         }
       >
@@ -94,7 +94,7 @@ export function AuthStatusNav({ isAuthConfigured, viewerDisplayName, variant = "
         aria-controls={menuId}
         className={
           isMobileVariant
-            ? "inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 text-[13px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+            ? "inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl bg-slate-50 px-3 text-[13px] font-semibold text-slate-700 transition hover:bg-slate-100"
             : "inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 text-[13px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
         }
         title={viewerDisplayName}
