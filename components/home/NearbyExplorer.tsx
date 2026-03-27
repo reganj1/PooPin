@@ -442,6 +442,7 @@ export function NearbyExplorer({ initialRestrooms, showSignupValue = false }: Ne
   const hasCapturedExpandScrollRef = useRef(false);
   const mobileSheetRef = useRef<HTMLDivElement | null>(null);
   const primaryLocationActionRef = useRef<HTMLDivElement | null>(null);
+  const mapSectionRef = useRef<HTMLElement | null>(null);
   const mobileSheetAnimationFrameRef = useRef<number | null>(null);
   const mobileSheetPendingOffsetRef = useRef<number | null>(null);
   const mobileSheetCurrentOffsetRef = useRef(0);
@@ -2825,105 +2826,97 @@ export function NearbyExplorer({ initialRestrooms, showSignupValue = false }: Ne
       <div className={cn(shouldShowStickyMobilePrimaryAction && "pb-24 sm:pb-0")}>
         <section
           ref={primaryLocationActionRef}
-          className="mb-4 rounded-[32px] border border-slate-200/80 bg-white px-5 py-5 shadow-[0_18px_44px_rgba(15,23,42,0.06)] sm:mb-5 sm:px-6 sm:py-6 lg:px-7 lg:py-7"
+          className="mb-4 rounded-2xl border border-slate-200/80 bg-white px-5 py-4 shadow-sm sm:rounded-3xl sm:px-6 sm:py-5 lg:px-7"
         >
-          <div className="mx-auto grid max-w-[1120px] gap-6 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-center lg:gap-8">
-            <div className="min-w-0 lg:max-w-[31rem]">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-600 sm:text-xs">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+            {/* Title block */}
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-brand-600 sm:text-[11px]">
                 California Restroom Map
               </p>
-              <h1 className="mt-2 max-w-[11ch] text-[1.95rem] font-semibold leading-[1.01] tracking-tight text-slate-900 sm:max-w-[12ch] sm:text-[2.45rem] sm:leading-[1.01] lg:text-[2.7rem]">
+              <h1 className="mt-1 text-[1.25rem] font-semibold leading-tight tracking-tight text-slate-900 sm:text-[1.45rem] lg:text-[1.65rem]">
                 Never get stuck without a bathroom again
               </h1>
-              <p className="mt-2.5 max-w-[30rem] text-[15px] leading-6 text-slate-600 sm:text-base">
+              <p className="mt-0.5 hidden text-[13px] leading-5 text-slate-500 sm:flex sm:flex-wrap sm:items-center sm:gap-1.5">
                 Find clean, nearby restrooms in seconds
+                <span className="text-slate-300">·</span>
+                <span className="inline-flex h-5 items-center rounded-full border border-brand-200 bg-brand-50 px-2 text-[11px] font-semibold text-brand-700">2,000+</span>
+                <span>mapped across California</span>
               </p>
-              <div className="mt-3.5 flex flex-wrap items-center gap-2.5 text-[13px] font-medium text-slate-500 sm:text-sm">
-                <span className="inline-flex h-6 items-center rounded-full border border-brand-200 bg-brand-50 px-2.5 text-[12px] font-semibold text-brand-700 sm:text-[13px]">
-                  2,000+
-                </span>
-                <span>restrooms mapped across California</span>
-              </div>
             </div>
 
-            <div className="min-w-0 lg:justify-self-end">
-              <div className="rounded-[28px] border border-slate-200/80 bg-gradient-to-b from-slate-50/95 to-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.04)] sm:p-5">
-                <div className="flex flex-col gap-4">
-                  <div className="space-y-3">
-                    {!isLocationTrackingEnabled ? (
-                      <button
-                        type="button"
-                        onClick={handleUseMyLocation}
-                        disabled={isLocating}
-                        className="inline-flex min-h-[48px] w-full items-center justify-center rounded-2xl bg-slate-900 px-4 text-sm font-semibold text-white shadow-[0_12px_24px_rgba(15,23,42,0.16)] transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {isLocating ? "Finding bathrooms..." : "Find a bathroom near you"}
-                      </button>
-                    ) : null}
+            {/* CTA block */}
+            <div className="flex shrink-0 flex-col gap-1.5">
+              {!isLocationTrackingEnabled ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleUseMyLocation();
+                    mapSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                  disabled={isLocating}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center rounded-xl bg-slate-900 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                >
+                  {isLocating ? "Finding bathrooms..." : "Find a bathroom near you"}
+                </button>
+              ) : null}
 
-                    {!isLocationTrackingEnabled ? (
-                      <p className="text-[13px] font-medium leading-5 text-slate-500">
-                        Finds the closest clean restroom instantly
-                      </p>
-                    ) : null}
-
-                    {(isLocationFollowing || isLocationTrackingPaused || isLocationTrackingEnabled) ? (
-                      <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200/80 bg-white/90 p-2">
-                        {isLocationFollowing ? (
-                          <span className="inline-flex min-h-[42px] items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700">
-                            📍 Following you
-                          </span>
-                        ) : null}
-
-                        {isLocationTrackingPaused ? (
-                          <button
-                            type="button"
-                            onClick={handleUseMyLocation}
-                            className="inline-flex min-h-[42px] items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
-                          >
-                            Return to me
-                          </button>
-                        ) : null}
-
-                        {isLocationTrackingEnabled ? (
-                          <button
-                            type="button"
-                            onClick={handleStopLocationTracking}
-                            className="inline-flex min-h-[42px] items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
-                          >
-                            Stop
-                          </button>
-                        ) : null}
-                      </div>
-                    ) : null}
-
-                    {geoError ? (
-                      <div className="rounded-2xl border border-amber-200/80 bg-amber-50/90 px-3.5 py-3 text-[13px] font-medium leading-5 text-amber-800">
-                        {geoError}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  {showSignupValue && !isLocationTrackingEnabled ? (
-                    <div className="border-t border-slate-100 pt-3 space-y-1">
-                      <p className="text-[13px] leading-[1.45] text-slate-500">
-                        Earn points, collect profile cards &amp; unlock titles.
-                      </p>
-                      <Link
-                        href={buildLoginHref("/")}
-                        className="block text-[13px] font-semibold text-slate-700 underline-offset-2 hover:underline"
-                      >
-                        Create a free account →
-                      </Link>
-                    </div>
+              {(isLocationFollowing || isLocationTrackingPaused || isLocationTrackingEnabled) ? (
+                <div className="flex flex-wrap gap-2">
+                  {isLocationFollowing ? (
+                    <span className="inline-flex min-h-[40px] items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700">
+                      📍 Following you
+                    </span>
+                  ) : null}
+                  {isLocationTrackingPaused ? (
+                    <button
+                      type="button"
+                      onClick={handleUseMyLocation}
+                      className="inline-flex min-h-[40px] items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
+                    >
+                      Return to me
+                    </button>
+                  ) : null}
+                  {isLocationTrackingEnabled ? (
+                    <button
+                      type="button"
+                      onClick={handleStopLocationTracking}
+                      className="inline-flex min-h-[40px] items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+                    >
+                      Stop
+                    </button>
                   ) : null}
                 </div>
-              </div>
+              ) : null}
+
+              {geoError ? (
+                <p className="text-[12px] font-medium text-amber-700">{geoError}</p>
+              ) : null}
+
+              {showSignupValue && !isLocationTrackingEnabled ? (
+                <p className="text-[12px] text-slate-500">
+                  <Link
+                    href={buildLoginHref("/")}
+                    className="font-semibold text-slate-700 underline-offset-2 hover:underline"
+                  >
+                    Create a free account
+                  </Link>
+                  {" "}— earn points &amp; collect cards
+                </p>
+              ) : null}
             </div>
           </div>
+
+          {/* Mobile-only subtitle + badge */}
+          <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-slate-500 sm:hidden">
+            Find clean restrooms in seconds
+            <span className="text-slate-300">·</span>
+            <span className="inline-flex h-5 items-center rounded-full border border-brand-200 bg-brand-50 px-2 text-[11px] font-semibold text-brand-700">2,000+</span>
+            <span>across California</span>
+          </p>
         </section>
 
-        <section className="grid min-w-0 gap-5 overflow-x-clip lg:grid-cols-[minmax(0,1.45fr)_minmax(360px,1fr)] xl:grid-cols-[minmax(0,1.55fr)_420px]">
+        <section ref={mapSectionRef} className="grid min-w-0 gap-5 overflow-x-clip lg:grid-cols-[minmax(0,1.45fr)_minmax(360px,1fr)] xl:grid-cols-[minmax(0,1.55fr)_420px]">
         <div
           className={cn(
             "min-w-0",
