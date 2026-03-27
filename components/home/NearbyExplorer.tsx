@@ -2762,6 +2762,7 @@ export function NearbyExplorer({ initialRestrooms, showSignupValue = false }: Ne
           onPlaceSelect={handlePlaceSearchSelect}
           onClear={handlePlaceSearchClear}
           compact={isExpandedVariant}
+          mapCenter={mapCamera}
         />
         {!isExpandedVariant ? (
           <p className="mt-1.5 hidden px-1 text-xs text-slate-500 sm:block">Jump to a city, neighborhood, or street address to browse nearby restrooms.</p>

@@ -4,7 +4,9 @@ import { MapboxForwardFeature } from "@/lib/mapbox/forwardGeocodeParser";
 import { parseMapboxPlaceSearch, type PlaceSearchResult } from "@/lib/mapbox/placeSearch";
 
 const searchQuerySchema = z.object({
-  q: z.string().trim().min(2).max(200)
+  q: z.string().trim().min(2).max(200),
+  lat: z.coerce.number().min(-90).max(90).optional(),
+  lng: z.coerce.number().min(-180).max(180).optional()
 });
 
 interface MapboxPlaceSearchResponse {
@@ -26,7 +28,9 @@ const toJsonResponse = (payload: PlaceSearchApiResponse, status = 200) => NextRe
 
 export async function GET(request: NextRequest) {
   const parsed = searchQuerySchema.safeParse({
-    q: request.nextUrl.searchParams.get("q") ?? ""
+    q: request.nextUrl.searchParams.get("q") ?? "",
+    lat: request.nextUrl.searchParams.get("lat") ?? undefined,
+    lng: request.nextUrl.searchParams.get("lng") ?? undefined
   });
 
   if (!parsed.success) {
@@ -56,6 +60,9 @@ export async function GET(request: NextRequest) {
     limit: "6",
     types: "poi,address,neighborhood,locality,place"
   });
+  if (parsed.data.lat !== undefined && parsed.data.lng !== undefined) {
+    query.set("proximity", `${parsed.data.lng},${parsed.data.lat}`);
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => {

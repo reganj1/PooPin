@@ -12,6 +12,7 @@ interface PlaceSearchBarProps {
   onClear?: () => void;
   compact?: boolean;
   className?: string;
+  mapCenter?: { lat: number; lng: number } | null;
 }
 
 const SEARCH_DEBOUNCE_MS = 240;
@@ -48,11 +49,13 @@ export function PlaceSearchBar({
   onPlaceSelect,
   onClear,
   compact = false,
-  className
+  className,
+  mapCenter = null
 }: PlaceSearchBarProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const blurTimeoutRef = useRef<number | null>(null);
+  const mapCenterRef = useRef(mapCenter);
   const listboxId = useId();
   const [draftQuery, setDraftQuery] = useState(selectedPlace?.fullName ?? "");
   const [results, setResults] = useState<PlaceSearchResult[]>([]);
@@ -68,6 +71,10 @@ export function PlaceSearchBar({
     (results.length > 0 ||
       (trimmedDraftQuery.length >= 2 &&
         (searchStatus === "loading" || searchStatus === "empty" || searchStatus === "error")));
+
+  useEffect(() => {
+    mapCenterRef.current = mapCenter;
+  }, [mapCenter]);
 
   useEffect(() => {
     setDraftQuery(selectedPlace?.fullName ?? "");
@@ -107,7 +114,7 @@ export function PlaceSearchBar({
       setHoveredIndex(null);
       setKeyboardFocusedIndex(-1);
 
-      void searchPlaces(trimmedDraftQuery, controller.signal)
+      void searchPlaces(trimmedDraftQuery, controller.signal, mapCenterRef.current)
         .then((nextResults) => {
           if (controller?.signal.aborted) {
             return;

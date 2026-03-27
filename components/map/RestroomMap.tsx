@@ -1201,14 +1201,33 @@ export function RestroomMap({
       return;
     }
 
-    onLocationFollowChangeRef.current?.(false);
-    map.easeTo({
-      center: [searchCamera.lng, searchCamera.lat],
-      zoom: searchCamera.zoom,
-      duration: 800
-    });
-    hasInitializedCameraRef.current = true;
-    appliedSearchCameraRequestRef.current = searchCameraRequestKey;
+    const targetCenter: [number, number] = [searchCamera.lng, searchCamera.lat];
+    const targetZoom = searchCamera.zoom;
+    const appliedKey = searchCameraRequestKey;
+
+    const applyCamera = () => {
+      const currentMap = mapRef.current;
+      if (!currentMap) {
+        return;
+      }
+
+      onLocationFollowChangeRef.current?.(false);
+      currentMap.easeTo({ center: targetCenter, zoom: targetZoom, duration: 800 });
+      hasInitializedCameraRef.current = true;
+      appliedSearchCameraRequestRef.current = appliedKey;
+    };
+
+    // On touch devices (mobile), the virtual keyboard dismisses when the search
+    // input is blurred after selection. iOS fires touchstart events during the
+    // keyboard-dismiss viewport reflow, which Mapbox treats as a user gesture and
+    // cancels any in-progress easeTo animation. Delaying 300 ms lets the keyboard
+    // fully close and its synthetic touch events settle before we animate.
+    if (isCoarsePointerRef.current && typeof window !== "undefined") {
+      const id = window.setTimeout(applyCamera, 300);
+      return () => window.clearTimeout(id);
+    }
+
+    applyCamera();
   }, [isMapReady, searchCamera, searchCameraRequestKey]);
 
   useEffect(() => {

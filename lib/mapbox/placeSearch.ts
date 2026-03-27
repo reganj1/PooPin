@@ -161,13 +161,23 @@ export const parseMapboxPlaceSearch = (features: MapboxForwardFeature[]): PlaceS
   return results;
 };
 
-export const searchPlaces = async (query: string, signal?: AbortSignal): Promise<PlaceSearchResult[]> => {
+export const searchPlaces = async (
+  query: string,
+  signal?: AbortSignal,
+  proximity?: { lat: number; lng: number } | null
+): Promise<PlaceSearchResult[]> => {
   const trimmedQuery = normalizeWhitespace(query);
   if (trimmedQuery.length < 2) {
     return [];
   }
 
-  const response = await fetch(`/api/geocode/search?q=${encodeURIComponent(trimmedQuery)}`, {
+  const params = new URLSearchParams({ q: trimmedQuery });
+  if (proximity) {
+    params.set("lng", proximity.lng.toFixed(4));
+    params.set("lat", proximity.lat.toFixed(4));
+  }
+
+  const response = await fetch(`/api/geocode/search?${params.toString()}`, {
     signal,
     headers: {
       accept: "application/json"
