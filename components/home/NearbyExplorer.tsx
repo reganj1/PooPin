@@ -2755,7 +2755,7 @@ export function NearbyExplorer({ initialRestrooms, showSignupValue = false }: Ne
     const isExpandedVariant = variant === "expanded";
 
     return (
-      <div className={cn("w-full", isExpandedVariant ? "sm:max-w-[420px] lg:max-w-[460px]" : "lg:max-w-[430px]")}>
+      <div className={cn("w-full", isExpandedVariant ? "sm:max-w-[420px] lg:max-w-[460px]" : "")}>
         <PlaceSearchBar
           selectedPlace={selectedSearchPlace}
           onPlaceSelect={handlePlaceSearchSelect}
@@ -2825,78 +2825,103 @@ export function NearbyExplorer({ initialRestrooms, showSignupValue = false }: Ne
       <div className={cn(shouldShowStickyMobilePrimaryAction && "pb-24 sm:pb-0")}>
         <section
           ref={primaryLocationActionRef}
-          className="mb-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm sm:mb-5 sm:p-6 lg:mx-auto lg:max-w-[880px] xl:max-w-[920px]"
+          className="mb-4 rounded-[32px] border border-slate-200/80 bg-white px-5 py-5 shadow-[0_18px_44px_rgba(15,23,42,0.06)] sm:mb-5 sm:px-6 sm:py-6 lg:px-7 lg:py-7"
         >
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-              {!isLocationTrackingEnabled ? (
-                <button
-                  type="button"
-                  onClick={handleUseMyLocation}
-                  disabled={isLocating}
-                  className="inline-flex min-h-[44px] w-full items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-                >
-                  {isLocating ? "Finding bathrooms..." : "Find a bathroom near you"}
-                </button>
-              ) : null}
-
-              {isLocationFollowing ? (
-                <span className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700">
-                  📍 Following you
+          <div className="mx-auto grid max-w-[1120px] gap-6 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-center lg:gap-8">
+            <div className="min-w-0 lg:max-w-[31rem]">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-600 sm:text-xs">
+                California Restroom Map
+              </p>
+              <h1 className="mt-2 max-w-[11ch] text-[1.95rem] font-semibold leading-[1.01] tracking-tight text-slate-900 sm:max-w-[12ch] sm:text-[2.45rem] sm:leading-[1.01] lg:text-[2.7rem]">
+                Never get stuck without a bathroom again
+              </h1>
+              <p className="mt-2.5 max-w-[30rem] text-[15px] leading-6 text-slate-600 sm:text-base">
+                Find clean, nearby restrooms in seconds
+              </p>
+              <div className="mt-3.5 flex flex-wrap items-center gap-2.5 text-[13px] font-medium text-slate-500 sm:text-sm">
+                <span className="inline-flex h-6 items-center rounded-full border border-brand-200 bg-brand-50 px-2.5 text-[12px] font-semibold text-brand-700 sm:text-[13px]">
+                  2,000+
                 </span>
-              ) : null}
-
-              {isLocationTrackingPaused ? (
-                <button
-                  type="button"
-                  onClick={handleUseMyLocation}
-                  className="inline-flex min-h-[44px] w-full items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 sm:w-auto"
-                >
-                  Return to me
-                </button>
-              ) : null}
-
-              {isLocationTrackingEnabled ? (
-                <button
-                  type="button"
-                  onClick={handleStopLocationTracking}
-                  className="inline-flex min-h-[44px] w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 sm:w-auto"
-                >
-                  Stop
-                </button>
-              ) : null}
+                <span>restrooms mapped across California</span>
+              </div>
             </div>
 
-            <div className="min-w-0">
-              {!isLocationTrackingEnabled ? (
-                <p className="text-[13px] font-medium leading-5 text-slate-500 sm:text-right">Finds the closest clean restroom instantly</p>
-              ) : null}
-              {geoError ? (
-                <p className="mt-1 text-[13px] font-medium text-amber-700 sm:text-right">{geoError}</p>
-              ) : null}
+            <div className="min-w-0 lg:justify-self-end">
+              <div className="rounded-[28px] border border-slate-200/80 bg-gradient-to-b from-slate-50/95 to-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.04)] sm:p-5">
+                <div className="flex flex-col gap-4">
+                  <div className="space-y-3">
+                    {!isLocationTrackingEnabled ? (
+                      <button
+                        type="button"
+                        onClick={handleUseMyLocation}
+                        disabled={isLocating}
+                        className="inline-flex min-h-[48px] w-full items-center justify-center rounded-2xl bg-slate-900 px-4 text-sm font-semibold text-white shadow-[0_12px_24px_rgba(15,23,42,0.16)] transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isLocating ? "Finding bathrooms..." : "Find a bathroom near you"}
+                      </button>
+                    ) : null}
+
+                    {!isLocationTrackingEnabled ? (
+                      <p className="text-[13px] font-medium leading-5 text-slate-500">
+                        Finds the closest clean restroom instantly
+                      </p>
+                    ) : null}
+
+                    {(isLocationFollowing || isLocationTrackingPaused || isLocationTrackingEnabled) ? (
+                      <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200/80 bg-white/90 p-2">
+                        {isLocationFollowing ? (
+                          <span className="inline-flex min-h-[42px] items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700">
+                            📍 Following you
+                          </span>
+                        ) : null}
+
+                        {isLocationTrackingPaused ? (
+                          <button
+                            type="button"
+                            onClick={handleUseMyLocation}
+                            className="inline-flex min-h-[42px] items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
+                          >
+                            Return to me
+                          </button>
+                        ) : null}
+
+                        {isLocationTrackingEnabled ? (
+                          <button
+                            type="button"
+                            onClick={handleStopLocationTracking}
+                            className="inline-flex min-h-[42px] items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+                          >
+                            Stop
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {geoError ? (
+                      <div className="rounded-2xl border border-amber-200/80 bg-amber-50/90 px-3.5 py-3 text-[13px] font-medium leading-5 text-amber-800">
+                        {geoError}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {showSignupValue && !isLocationTrackingEnabled ? (
+                    <div className="border-t border-slate-100 pt-3 space-y-1">
+                      <p className="text-[13px] leading-[1.45] text-slate-500">
+                        Earn points, collect profile cards &amp; unlock titles.
+                      </p>
+                      <Link
+                        href={buildLoginHref("/")}
+                        className="block text-[13px] font-semibold text-slate-700 underline-offset-2 hover:underline"
+                      >
+                        Create a free account →
+                      </Link>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
             </div>
           </div>
-
-          {showSignupValue && !isLocationTrackingEnabled ? (
-            <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-              <div className="min-w-0">
-                <p className="text-[13px] leading-5 text-slate-600">
-                  <span className="font-medium text-slate-800">Free account:</span> Save restrooms, earn points, collect cards.
-                </p>
-              </div>
-              <Link
-                href={buildLoginHref("/")}
-                className="inline-flex min-h-[40px] w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 sm:w-auto"
-              >
-                Create free account
-              </Link>
-            </div>
-          ) : null}
         </section>
-
-        <div className="mb-3 sm:mb-4">
-          {renderPlaceSearchControls("default")}
-        </div>
 
         <section className="grid min-w-0 gap-5 overflow-x-clip lg:grid-cols-[minmax(0,1.45fr)_minmax(360px,1fr)] xl:grid-cols-[minmax(0,1.55fr)_420px]">
         <div
@@ -2905,6 +2930,12 @@ export function NearbyExplorer({ initialRestrooms, showSignupValue = false }: Ne
             isMapExpanded ? "fixed inset-0 z-[80]" : "relative lg:sticky lg:top-20 lg:self-start"
           )}
         >
+          {!isMapExpanded ? (
+            <div className="mb-3">
+              {renderPlaceSearchControls("default")}
+            </div>
+          ) : null}
+
           {isMapExpanded ? <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-[1.5px]" /> : null}
 
           <div className={cn("min-w-0", isMapExpanded && "absolute inset-0 max-w-full overflow-hidden")}>

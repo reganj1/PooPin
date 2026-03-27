@@ -122,21 +122,21 @@ export function SiteHeader({ isAuthConfigured, viewerDisplayName }: SiteHeaderPr
                   </div>
                 </Link>
 
-                <nav className="flex flex-wrap items-center justify-end gap-1.5">
+                <nav className="flex flex-wrap items-center justify-end gap-0.5">
                   <Link
                     href="/leaderboard"
-                    className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-900"
+                    className="inline-flex h-9 items-center rounded-xl px-3 text-[13px] font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
                   >
                     Leaderboard
                   </Link>
                   <Link
                     href="/contact"
-                    className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-900"
+                    className="inline-flex h-9 items-center rounded-xl px-3 text-[13px] font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
                   >
                     Contact
                   </Link>
 
-                  <div className="ml-1 flex items-center gap-2">
+                  <div className="ml-2 flex items-center gap-2">
                     <AuthStatusNav isAuthConfigured={isAuthConfigured} viewerDisplayName={viewerDisplayName} />
                     <Link
                       href="/add"
