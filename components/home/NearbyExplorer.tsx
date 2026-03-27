@@ -2837,6 +2837,12 @@ export function NearbyExplorer({ initialRestrooms, showSignupValue = false }: Ne
               <h1 className="mt-1 text-[1.25rem] font-semibold leading-tight tracking-tight text-slate-900 sm:text-[1.45rem] lg:text-[1.65rem]">
                 Never get stuck without a bathroom again
               </h1>
+              {/* Mobile: compact one-liner badge below heading */}
+              <p className="mt-1.5 flex items-center gap-1.5 text-[12px] text-slate-500 sm:hidden">
+                <span className="inline-flex h-5 items-center rounded-full border border-brand-200 bg-brand-50 px-2 text-[11px] font-semibold text-brand-700">2,000+</span>
+                restrooms across California
+              </p>
+              {/* Desktop: full subtitle with all details */}
               <p className="mt-0.5 hidden text-[13px] leading-5 text-slate-500 sm:flex sm:flex-wrap sm:items-center sm:gap-1.5">
                 Find clean, nearby restrooms in seconds
                 <span className="text-slate-300">·</span>
@@ -2907,13 +2913,6 @@ export function NearbyExplorer({ initialRestrooms, showSignupValue = false }: Ne
             </div>
           </div>
 
-          {/* Mobile-only subtitle + badge */}
-          <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-slate-500 sm:hidden">
-            Find clean restrooms in seconds
-            <span className="text-slate-300">·</span>
-            <span className="inline-flex h-5 items-center rounded-full border border-brand-200 bg-brand-50 px-2 text-[11px] font-semibold text-brand-700">2,000+</span>
-            <span>across California</span>
-          </p>
         </section>
 
         <section ref={mapSectionRef} className="grid min-w-0 gap-5 overflow-x-clip lg:grid-cols-[minmax(0,1.45fr)_minmax(360px,1fr)] xl:grid-cols-[minmax(0,1.55fr)_420px]">
