@@ -158,50 +158,52 @@ function TopContributorCard({ entry }: { entry: LeaderboardDisplayEntry }) {
 }
 
 function LeaderboardRow({ entry, isCurrentViewer = false }: { entry: LeaderboardDisplayEntry; isCurrentViewer?: boolean }) {
+  const cardTone = isCurrentViewer
+    ? "border-brand-200 bg-[linear-gradient(180deg,#f8fbff_0%,#ffffff_100%)] shadow-[0_8px_24px_rgba(37,99,235,0.07)]"
+    : "border-slate-200/90 bg-white shadow-sm";
+
   return (
-    <article
-      className={`rounded-[24px] border px-4 py-3.5 transition sm:px-5 ${
-        isCurrentViewer
-          ? "border-brand-200 bg-[linear-gradient(180deg,#f8fbff_0%,#ffffff_100%)] shadow-[0_16px_36px_rgba(37,99,235,0.09)]"
-          : "border-slate-200/90 bg-white shadow-sm"
-      }`}
-    >
-      <div className="grid gap-3 md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-center">
-        <div className="flex items-center gap-3">
-          <div className="inline-flex min-w-[2.75rem] items-center justify-center rounded-2xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">
-            #{entry.rank}
+    <article className={`rounded-[24px] border p-4 transition sm:p-5 ${cardTone}`}>
+      <div className="flex items-start gap-3">
+        <RankAvatar displayName={entry.displayName} rank={entry.rank} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                #{entry.rank}
+              </p>
+              <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                <Link
+                  href={getLeaderboardProfileHref(entry.profileId)}
+                  className="break-words text-base font-semibold tracking-tight text-slate-900 transition hover:text-brand-700"
+                >
+                  {entry.displayName}
+                </Link>
+                {entry.collectibleTitle && entry.collectibleRarity ? (
+                  <CollectibleTitlePill title={entry.collectibleTitle} rarity={entry.collectibleRarity} />
+                ) : null}
+                {isCurrentViewer ? (
+                  <span className="rounded-full border border-brand-200 bg-brand-50 px-2.5 py-0.5 text-[11px] font-semibold text-brand-700">
+                    You
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <div className="shrink-0 rounded-xl border border-slate-100 bg-slate-50 px-2.5 py-1.5 text-right">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">Points</p>
+              <p className="text-lg font-semibold tracking-tight text-slate-900">{formatNumber(entry.totalPoints)}</p>
+            </div>
           </div>
-          <RankAvatar displayName={entry.displayName} rank={entry.rank} />
-        </div>
 
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <Link href={getLeaderboardProfileHref(entry.profileId)} className="break-words text-base font-semibold tracking-tight text-slate-900 transition hover:text-brand-700 sm:text-lg">
-              {entry.displayName}
-            </Link>
-            {entry.collectibleTitle && entry.collectibleRarity ? (
-              <CollectibleTitlePill title={entry.collectibleTitle} rarity={entry.collectibleRarity} />
-            ) : null}
-            {isCurrentViewer ? (
-              <span className="rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-[11px] font-semibold text-brand-700">
-                You
-              </span>
-            ) : null}
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            <StatPill label="Reviews" count={entry.reviewCount} tone="bg-slate-50 text-slate-600 ring-slate-200" />
+            <StatPill label="Photos" count={entry.photoCount} tone="bg-slate-50 text-slate-600 ring-slate-200" />
+            <StatPill label="Adds" count={entry.restroomAddCount} tone="bg-slate-50 text-slate-600 ring-slate-200" />
           </div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <StatPill label="Reviews" count={entry.reviewCount} tone="bg-slate-50 text-slate-700 ring-slate-200" />
-            <StatPill label="Photos" count={entry.photoCount} tone="bg-slate-50 text-slate-700 ring-slate-200" />
-            <StatPill label="Adds" count={entry.restroomAddCount} tone="bg-slate-50 text-slate-700 ring-slate-200" />
-          </div>
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2 md:justify-end">
-          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600">
-            {formatNumber(entry.contributionCount)} total
-          </span>
-          <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-900">
-            {formatNumber(entry.totalPoints)} pts
-          </span>
+          <p className="mt-2.5 text-[11px] text-slate-400">
+            {formatNumber(entry.contributionCount)} counted contributions
+          </p>
         </div>
       </div>
     </article>
@@ -351,26 +353,14 @@ export default async function LeaderboardPage() {
       ) : null}
 
       {!leaderboardError && remainingEntries.length > 0 ? (
-        <section className="mt-5 rounded-[28px] border border-slate-200/90 bg-white p-4 shadow-sm sm:p-5">
-          <div className="flex flex-col gap-2 border-b border-slate-100 pb-4 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-600">Rankings</p>
-              <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">
-                Ranks {topThree.length + 1}-{Math.min(entries.length, LEADERBOARD_LIMIT)}
-              </h2>
-            </div>
-            <p className="text-sm text-slate-500">Scoring stays simple: +{POINT_VALUES.review} per review, +{POINT_VALUES.photo} per photo, +{POINT_VALUES.restroom} per restroom.</p>
-          </div>
-
-          <div className="mt-4 space-y-2.5">
-            {remainingEntries.map((entry) => (
-              <LeaderboardRow
-                key={entry.profileId}
-                entry={entry}
-                isCurrentViewer={Boolean(currentViewerEntry && currentViewerEntry.profileId === entry.profileId)}
-              />
-            ))}
-          </div>
+        <section className="mt-3 space-y-2.5">
+          {remainingEntries.map((entry) => (
+            <LeaderboardRow
+              key={entry.profileId}
+              entry={entry}
+              isCurrentViewer={Boolean(currentViewerEntry && currentViewerEntry.profileId === entry.profileId)}
+            />
+          ))}
         </section>
       ) : null}
     </main>
