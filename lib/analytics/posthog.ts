@@ -198,7 +198,8 @@ export const initPostHog = (config?: Partial<PostHogRuntimeConfig>) => {
   posthog.init(runtimeConfig.apiKey, {
     api_host: runtimeConfig.apiHost,
     autocapture: false,
-    capture_pageview: false,
+    capture_pageview: "history_change",
+    capture_pageleave: false,
     disable_session_recording: false,
     session_recording: {
       maskAllInputs: true,
