@@ -26,7 +26,8 @@ export async function GET(request: NextRequest) {
 
   const nearbyRestrooms = await getNearbyBathroomsData(
     { lat, lng },
-    Math.min(Math.max(limit ?? 120, 20), 200)
+    Math.min(Math.max(limit ?? 120, 20), 200),
+    { includePreviewPhotoUrls: false }
   );
 
   return NextResponse.json({ restrooms: nearbyRestrooms });

@@ -139,6 +139,7 @@ const MOBILE_SHEET_EXPANDED_VISIBLE_RATIO = 0.84;
 const MOBILE_SHEET_MAX_HEIGHT_RATIO = 0.86;
 const MOBILE_SHEET_SWIPE_VELOCITY_THRESHOLD = 0.55;
 const MOBILE_SHEET_INTERACTION_COOLDOWN_MS = 320;
+const BOUNDS_FETCH_DEBOUNCE_MS = 80;
 const USER_NEARBY_FETCH_LIMIT = 120;
 const USER_NEARBY_LOCATION_KEY_PRECISION = 4;
 const topPickAccessScore: Record<NearbyBathroom["access_type"], number> = {
@@ -428,8 +429,11 @@ export function NearbyExplorer({ initialRestrooms, showSignupValue = false }: Ne
   const isLocationFollowing = isLocationTrackingEnabled && referenceMode === "user";
   const isLocationTrackingPaused = isLocationTrackingEnabled && !isLocationFollowing;
 
-  const latestBoundsKeyRef = useRef<string>("");
   const activeBoundsRequestIdRef = useRef(0);
+  const boundsRequestAbortControllerRef = useRef<AbortController | null>(null);
+  const boundsFetchDebounceTimeoutRef = useRef<number | null>(null);
+  const lastRequestedBoundsKeyRef = useRef<string>("");
+  const lastAppliedBoundsKeyRef = useRef<string>("");
   const activeNearbyRequestIdRef = useRef(0);
   const latestNearbyLocationKeyRef = useRef("");
   const invalidBoundsCoordinatesLogKeyRef = useRef<string>("");
@@ -556,6 +560,17 @@ export function NearbyExplorer({ initialRestrooms, showSignupValue = false }: Ne
       controller.abort();
     };
   }, [activeUserLocation, isLocationFollowing]);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== "undefined" && boundsFetchDebounceTimeoutRef.current !== null) {
+        window.clearTimeout(boundsFetchDebounceTimeoutRef.current);
+      }
+      boundsFetchDebounceTimeoutRef.current = null;
+      boundsRequestAbortControllerRef.current?.abort();
+      boundsRequestAbortControllerRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isLocationTrackingEnabled) {
@@ -2059,47 +2074,110 @@ export function NearbyExplorer({ initialRestrooms, showSignupValue = false }: Ne
   );
 
   const handleViewportBoundsChange = useCallback((bounds: MapBounds) => {
-    if (hasSeenInitialViewportBoundsRef.current) {
-      setHasStartedBrowsing(true);
-    } else {
+    const nextBoundsKey = toBoundsKey(bounds);
+    const isInitialViewportBounds = !hasSeenInitialViewportBoundsRef.current;
+
+    if (isInitialViewportBounds) {
       hasSeenInitialViewportBoundsRef.current = true;
+    } else {
+      setHasStartedBrowsing(true);
     }
 
-    const nextBoundsKey = toBoundsKey(bounds);
-    if (latestBoundsKeyRef.current === nextBoundsKey) {
+    const hasPendingDebounce = boundsFetchDebounceTimeoutRef.current !== null;
+    const hasInFlightRequest = boundsRequestAbortControllerRef.current !== null;
+    if (
+      !hasPendingDebounce &&
+      !hasInFlightRequest &&
+      lastAppliedBoundsKeyRef.current === nextBoundsKey
+    ) {
       return;
     }
 
-    latestBoundsKeyRef.current = nextBoundsKey;
-    const requestId = activeBoundsRequestIdRef.current + 1;
-    activeBoundsRequestIdRef.current = requestId;
+    if (lastRequestedBoundsKeyRef.current === nextBoundsKey) {
+      return;
+    }
 
-    const params = new URLSearchParams({
-      minLat: bounds.minLat.toString(),
-      maxLat: bounds.maxLat.toString(),
-      minLng: bounds.minLng.toString(),
-      maxLng: bounds.maxLng.toString(),
-      limit: "400"
-    });
+    const clearPendingBoundsDebounce = () => {
+      if (typeof window !== "undefined" && boundsFetchDebounceTimeoutRef.current !== null) {
+        window.clearTimeout(boundsFetchDebounceTimeoutRef.current);
+      }
+      boundsFetchDebounceTimeoutRef.current = null;
+    };
 
-    void fetch(`/api/restrooms/bounds?${params.toString()}`)
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("Failed to fetch map bounds restrooms.");
-        }
+    const startBoundsFetch = (requestBounds: MapBounds, requestBoundsKey: string) => {
+      const previousController = boundsRequestAbortControllerRef.current;
+      if (previousController) {
+        previousController.abort();
+      }
 
-        const payload = (await response.json()) as BoundsApiResponse;
-        if (!Array.isArray(payload.restrooms)) {
-          throw new Error("Invalid map bounds response.");
-        }
+      const requestId = activeBoundsRequestIdRef.current + 1;
+      activeBoundsRequestIdRef.current = requestId;
+      const controller = new AbortController();
+      boundsRequestAbortControllerRef.current = controller;
+      lastRequestedBoundsKeyRef.current = requestBoundsKey;
 
-        if (requestId === activeBoundsRequestIdRef.current) {
-          setMapRestrooms(payload.restrooms);
-        }
-      })
-      .catch(() => {
-        // Keep previous map dataset on bounds fetch failure.
+      const params = new URLSearchParams({
+        minLat: requestBounds.minLat.toString(),
+        maxLat: requestBounds.maxLat.toString(),
+        minLng: requestBounds.minLng.toString(),
+        maxLng: requestBounds.maxLng.toString(),
+        limit: "400"
       });
+
+      let didApplyBounds = false;
+
+      void fetch(`/api/restrooms/bounds?${params.toString()}`, {
+        signal: controller.signal
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error("Failed to fetch map bounds restrooms.");
+          }
+
+          const payload = (await response.json()) as BoundsApiResponse;
+          if (!Array.isArray(payload.restrooms)) {
+            throw new Error("Invalid map bounds response.");
+          }
+
+          if (controller.signal.aborted || requestId !== activeBoundsRequestIdRef.current) {
+            return;
+          }
+
+          setMapRestrooms(payload.restrooms);
+          lastAppliedBoundsKeyRef.current = requestBoundsKey;
+          didApplyBounds = true;
+        })
+        .catch((error: unknown) => {
+          if ((error as { name?: string })?.name === "AbortError") {
+            return;
+          }
+
+          // Keep previous map dataset on bounds fetch failure.
+        })
+        .finally(() => {
+          if (boundsRequestAbortControllerRef.current === controller) {
+            boundsRequestAbortControllerRef.current = null;
+          }
+
+          if (!didApplyBounds && requestId === activeBoundsRequestIdRef.current && lastRequestedBoundsKeyRef.current === requestBoundsKey) {
+            lastRequestedBoundsKeyRef.current = "";
+          }
+        });
+    };
+
+    clearPendingBoundsDebounce();
+    lastRequestedBoundsKeyRef.current = nextBoundsKey;
+
+    if (isInitialViewportBounds || typeof window === "undefined") {
+      startBoundsFetch(bounds, nextBoundsKey);
+      return;
+    }
+
+    boundsRequestAbortControllerRef.current?.abort();
+    boundsFetchDebounceTimeoutRef.current = window.setTimeout(() => {
+      boundsFetchDebounceTimeoutRef.current = null;
+      startBoundsFetch(bounds, nextBoundsKey);
+    }, BOUNDS_FETCH_DEBOUNCE_MS);
   }, []);
 
   const handleMapCameraChange = useCallback((camera: MapCamera) => {

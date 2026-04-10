@@ -152,14 +152,21 @@ const buildDesktopHoverPreviewContent = (
     isPhotoLoading: boolean;
     distanceReferenceKind: DistanceReferenceKind | null;
     distanceReferenceLabel: string | null;
+    onPhotoLoadError?: (() => void) | undefined;
   }
 ) => {
-  const { showDistance, photoUrl, isPhotoLoading, distanceReferenceKind, distanceReferenceLabel } = options;
+  const { showDistance, photoUrl, isPhotoLoading, distanceReferenceKind, distanceReferenceLabel, onPhotoLoadError } =
+    options;
   const buildPhotoFallback = (label: string) => {
     const placeholder = document.createElement("div");
     placeholder.className = "flex h-full w-full items-center justify-center bg-slate-100 text-[11px] font-semibold text-slate-500";
     placeholder.textContent = label;
     return placeholder;
+  };
+  const buildPhotoLoadingState = () => {
+    const loadingState = document.createElement("div");
+    loadingState.className = "absolute inset-0 animate-pulse bg-gradient-to-br from-slate-200 via-slate-100 to-slate-200";
+    return loadingState;
   };
   const container = document.createElement("div");
   container.className = "w-[236px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl";
@@ -167,8 +174,7 @@ const buildDesktopHoverPreviewContent = (
   const media = document.createElement("div");
   media.className = "relative h-20 w-full border-b border-slate-100 bg-slate-100";
   if (photoUrl) {
-    const loadingState = document.createElement("div");
-    loadingState.className = "absolute inset-0 animate-pulse bg-gradient-to-br from-slate-200 via-slate-100 to-slate-200";
+    const loadingState = buildPhotoLoadingState();
     media.appendChild(loadingState);
 
     const image = document.createElement("img");
@@ -184,14 +190,17 @@ const buildDesktopHoverPreviewContent = (
     image.onerror = () => {
       image.remove();
       loadingState.remove();
+      if (onPhotoLoadError) {
+        media.appendChild(buildPhotoLoadingState());
+        onPhotoLoadError();
+        return;
+      }
       media.appendChild(buildPhotoFallback("Photo unavailable"));
     };
     image.src = photoUrl;
     media.appendChild(image);
   } else if (isPhotoLoading) {
-    const loadingState = document.createElement("div");
-    loadingState.className = "absolute inset-0 animate-pulse bg-gradient-to-br from-slate-200 via-slate-100 to-slate-200";
-    media.appendChild(loadingState);
+    media.appendChild(buildPhotoLoadingState());
   } else {
     media.appendChild(buildPhotoFallback("No photo yet"));
   }
@@ -292,6 +301,7 @@ export function RestroomMap({
   const desktopPopupRestroomIdRef = useRef<string | null>(null);
   const desktopPreviewFetchIntentTimeoutRef = useRef<number | null>(null);
   const desktopPreviewFetchIntentRestroomIdRef = useRef<string | null>(null);
+  const desktopPreviewRetryRestroomIdsRef = useRef<Set<string>>(new Set());
   const hoverPreviewLogKeyRef = useRef("");
   const missingHoveredMarkerLogRef = useRef<Set<string>>(new Set());
   const invalidCoordinatesLogKeyRef = useRef<string>("");
@@ -462,6 +472,7 @@ export function RestroomMap({
       }
       desktopPreviewFetchIntentTimeoutRef.current = null;
       desktopPreviewFetchIntentRestroomIdRef.current = null;
+      desktopPreviewRetryRestroomIdsRef.current.clear();
       popupRef.current?.remove();
       popupRef.current = null;
 
@@ -613,6 +624,7 @@ export function RestroomMap({
       }
       desktopPreviewFetchIntentTimeoutRef.current = null;
       desktopPreviewFetchIntentRestroomIdRef.current = null;
+      desktopPreviewRetryRestroomIdsRef.current.clear();
 
       popupRef.current?.remove();
       popupRef.current = null;
@@ -640,12 +652,26 @@ export function RestroomMap({
           : payloadPhotoUrl !== undefined
             ? payloadPhotoUrl
             : cachedPhotoUrl ?? null;
+      const shouldRetryLazyPhotoLoad =
+        payloadPhotoUrl === undefined &&
+        typeof photoUrl === "string" &&
+        !desktopPreviewRetryRestroomIdsRef.current.has(restroomId);
       const popupContent = buildDesktopHoverPreviewContent(restroom, {
         showDistance,
         photoUrl,
         isPhotoLoading: !hasResolvedPreviewPhoto,
         distanceReferenceKind,
-        distanceReferenceLabel
+        distanceReferenceLabel,
+        onPhotoLoadError: shouldRetryLazyPhotoLoad
+          ? () => {
+              if (desktopPreviewRetryRestroomIdsRef.current.has(restroomId)) {
+                return;
+              }
+
+              desktopPreviewRetryRestroomIdsRef.current.add(restroomId);
+              void requestDesktopPreviewPhoto(restroomId, { forceRefresh: true });
+            }
+          : undefined
       });
 
       let popup = popupRef.current;
@@ -663,6 +689,9 @@ export function RestroomMap({
       popup.setLngLat([restroom.lng, restroom.lat]).setDOMContent(popupContent);
       if (!popup.isOpen()) {
         popup.addTo(map);
+      }
+      if (desktopPopupRestroomIdRef.current !== restroomId) {
+        desktopPreviewRetryRestroomIdsRef.current.clear();
       }
       if (desktopPopupRestroomIdRef.current !== restroomId) {
         captureAnalyticsEvent("restroom_popup_opened", {
@@ -708,21 +737,21 @@ export function RestroomMap({
       }, DESKTOP_PREVIEW_FETCH_INTENT_DELAY_MS);
     };
 
-    const requestDesktopPreviewPhoto = (restroomId: string) => {
+    const requestDesktopPreviewPhoto = (restroomId: string, options?: { forceRefresh?: boolean }) => {
       const payloadPhotoUrl = restroomById.get(restroomId)?.previewPhotoUrl;
-      if (payloadPhotoUrl !== undefined) {
+      if (payloadPhotoUrl !== undefined && !options?.forceRefresh) {
         primeRestroomPreviewPhoto(restroomId, payloadPhotoUrl);
         showDesktopHoverPopup(restroomId, payloadPhotoUrl);
         return;
       }
 
-      const cachedPhotoUrl = getCachedRestroomPreviewPhoto(restroomId);
+      const cachedPhotoUrl = options?.forceRefresh ? undefined : getCachedRestroomPreviewPhoto(restroomId);
       if (cachedPhotoUrl !== undefined) {
         showDesktopHoverPopup(restroomId, cachedPhotoUrl);
         return;
       }
 
-      void fetchRestroomPreviewPhoto(restroomId).then((photoUrl) => {
+      void fetchRestroomPreviewPhoto(restroomId, options).then((photoUrl) => {
         if (desktopPopupRestroomIdRef.current === restroomId) {
           showDesktopHoverPopup(restroomId, photoUrl);
         }

@@ -80,6 +80,10 @@ export interface BathroomBounds {
   maxLng: number;
 }
 
+interface NearbyBathroomFetchOptions {
+  includePreviewPhotoUrls?: boolean;
+}
+
 const roundToOne = (value: number) => Math.round(value * 10) / 10;
 const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
 
@@ -221,12 +225,17 @@ const toNearbyBathroom = (
   origin: { lat: number; lng: number },
   previewPhotoUrlByBathroomId?: Map<string, string | null>
 ): NearbyBathroom => {
-  return {
+  const nearbyBathroom: NearbyBathroom = {
     ...bathroom,
     distanceMiles: roundToOne(haversineDistanceMiles(origin, { lat: bathroom.lat, lng: bathroom.lng })),
-    ratings: ratingsMap.get(bathroom.id) ?? emptyRatings(),
-    previewPhotoUrl: previewPhotoUrlByBathroomId?.get(bathroom.id) ?? null
+    ratings: ratingsMap.get(bathroom.id) ?? emptyRatings()
   };
+
+  if (previewPhotoUrlByBathroomId) {
+    nearbyBathroom.previewPhotoUrl = previewPhotoUrlByBathroomId.get(bathroom.id) ?? null;
+  }
+
+  return nearbyBathroom;
 };
 
 const chunkItems = <T,>(items: T[], batchSize: number) => {
@@ -352,7 +361,8 @@ const fetchBathroomsWithRatings = async (
   supabase: NonNullable<ReturnType<typeof getSupabaseServerClient>>,
   bathroomRows: BathroomRow[],
   origin: { lat: number; lng: number },
-  reviewQueryContext: string
+  reviewQueryContext: string,
+  options: NearbyBathroomFetchOptions = {}
 ) => {
   const bathrooms = bathroomRows.map(toBathroom).filter((row): row is Bathroom => row !== null);
 
@@ -364,7 +374,10 @@ const fetchBathroomsWithRatings = async (
   const reviewRows = await fetchActiveReviewRowsByBathroomIds(supabase, bathroomIds, reviewQueryContext);
   const reviews = reviewRows.map(toReview).filter((row): row is Review => row !== null);
   const ratingsMap = buildRatingMap(reviews);
-  const previewPhotoUrlByBathroomId = await getApprovedBathroomPreviewPhotoUrlsData(bathroomIds, supabase);
+  const previewPhotoUrlByBathroomId =
+    options.includePreviewPhotoUrls !== false
+      ? await getApprovedBathroomPreviewPhotoUrlsData(bathroomIds, supabase)
+      : undefined;
 
   return bathrooms
     .map((bathroom) => toNearbyBathroom(bathroom, ratingsMap, origin, previewPhotoUrlByBathroomId))
@@ -373,7 +386,8 @@ const fetchBathroomsWithRatings = async (
 
 export async function getNearbyBathroomsData(
   origin: { lat: number; lng: number } = DEFAULT_ORIGIN,
-  limit = DEFAULT_LIMIT
+  limit = DEFAULT_LIMIT,
+  options: NearbyBathroomFetchOptions = {}
 ): Promise<NearbyBathroom[]> {
   const supabase = getSupabaseServerClient();
   if (!supabase) {
@@ -426,7 +440,8 @@ export async function getNearbyBathroomsData(
       supabase,
       [...candidateRowById.values()],
       origin,
-      "Supabase nearby review query"
+      "Supabase nearby review query",
+      options
     );
     return nearbyBathrooms.slice(0, limit);
   } catch (error) {
@@ -517,7 +532,8 @@ export async function getBathroomReviewsData(bathroomId: string, viewerProfileId
 export async function getBathroomsInBoundsData(
   bounds: BathroomBounds,
   limit = 300,
-  origin: { lat: number; lng: number } = DEFAULT_ORIGIN
+  origin: { lat: number; lng: number } = DEFAULT_ORIGIN,
+  options: NearbyBathroomFetchOptions = {}
 ): Promise<NearbyBathroom[]> {
   const supabase = getSupabaseServerClient();
   if (!supabase) {
@@ -541,7 +557,13 @@ export async function getBathroomsInBoundsData(
   }
 
   try {
-    return await fetchBathroomsWithRatings(supabase, bathroomRows as BathroomRow[], origin, "Supabase bounds review query");
+    return await fetchBathroomsWithRatings(
+      supabase,
+      bathroomRows as BathroomRow[],
+      origin,
+      "Supabase bounds review query",
+      options
+    );
   } catch (error) {
     logSupabaseFallback("Supabase bounds review query", error);
     return getMockBathroomsInBounds(bounds, limit, origin);

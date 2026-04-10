@@ -3,6 +3,10 @@ interface RestroomPreviewApiResponse {
   photoUrl?: string | null;
 }
 
+interface FetchRestroomPreviewPhotoOptions {
+  forceRefresh?: boolean;
+}
+
 interface PreviewCacheEntry {
   photoUrl: string | null;
   cachedAt: number;
@@ -24,6 +28,10 @@ const setCachedPreviewPhoto = (restroomId: string, photoUrl: string | null) => {
     photoUrl,
     cachedAt: Date.now()
   });
+};
+
+const clearCachedPreviewPhoto = (restroomId: string) => {
+  previewPhotoCache.delete(restroomId);
 };
 
 const warmPreviewImage = (photoUrl: string | null) => {
@@ -58,20 +66,27 @@ export const primeRestroomPreviewPhoto = (restroomId: string, photoUrl: string |
   warmPreviewImage(photoUrl);
 };
 
-export const fetchRestroomPreviewPhoto = async (restroomId: string): Promise<string | null> => {
-  const cachedPhotoUrl = getCachedRestroomPreviewPhoto(restroomId);
-  if (cachedPhotoUrl !== undefined) {
-    return cachedPhotoUrl;
-  }
+export const fetchRestroomPreviewPhoto = async (
+  restroomId: string,
+  options: FetchRestroomPreviewPhotoOptions = {}
+): Promise<string | null> => {
+  if (!options.forceRefresh) {
+    const cachedPhotoUrl = getCachedRestroomPreviewPhoto(restroomId);
+    if (cachedPhotoUrl !== undefined) {
+      return cachedPhotoUrl;
+    }
 
-  const existingRequest = previewPhotoRequests.get(restroomId);
-  if (existingRequest) {
-    return existingRequest;
+    const existingRequest = previewPhotoRequests.get(restroomId);
+    if (existingRequest) {
+      return existingRequest;
+    }
+  } else {
+    clearCachedPreviewPhoto(restroomId);
   }
 
   const request = fetch(`/api/restrooms/${encodeURIComponent(restroomId)}/preview`, {
     method: "GET",
-    cache: "force-cache"
+    cache: options.forceRefresh ? "no-store" : "force-cache"
   })
     .then(async (response) => {
       if (!response.ok) {

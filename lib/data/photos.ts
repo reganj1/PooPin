@@ -211,8 +211,37 @@ export async function getApprovedBathroomPhotosData(bathroomId: string): Promise
 
 export async function getApprovedBathroomPreviewPhotoData(bathroomId: string): Promise<string | null> {
   try {
-    const previewPhotoUrls = await getApprovedBathroomPreviewPhotoUrlsData([bathroomId]);
-    return previewPhotoUrls.get(bathroomId) ?? null;
+    const supabase = getSupabaseServerClient();
+    if (!supabase) {
+      return null;
+    }
+
+    const { data: photoRows, error } = await supabase
+      .from("photos")
+      .select("storage_path, status")
+      .eq("bathroom_id", bathroomId)
+      .eq("status", ACTIVE_STATUS)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const latestPhotoRow = (photoRows?.[0] ?? null) as Pick<PhotoRow, "storage_path" | "status"> | null;
+    if (!latestPhotoRow) {
+      return null;
+    }
+
+    if (!isPhotoStatus(latestPhotoRow.status) || latestPhotoRow.status !== ACTIVE_STATUS) {
+      return null;
+    }
+
+    if (!isNonEmptyPath(latestPhotoRow.storage_path)) {
+      return null;
+    }
+
+    return await resolvePreviewPhotoUrlForStoragePath(supabase, latestPhotoRow.storage_path);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.warn("[Poopin] Supabase preview photo query failed.", message);

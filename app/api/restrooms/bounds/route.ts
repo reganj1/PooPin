@@ -41,7 +41,8 @@ export async function GET(request: NextRequest) {
       maxLng
     },
     limit,
-    origin
+    origin,
+    { includePreviewPhotoUrls: false }
   );
 
   return NextResponse.json({ restrooms });
