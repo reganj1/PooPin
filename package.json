@@ -8,8 +8,8 @@
   "scripts": {
     "dev": "next dev",
     "dev:web": "next dev",
-    "dev:mobile": "npm --workspace apps/mobile run dev",
-    "ios:mobile": "npm --workspace apps/mobile run ios",
+    "dev:mobile": "npm --workspace apps/mobile exec -- expo start",
+    "ios:mobile": "npm --workspace apps/mobile exec -- expo start --ios",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
