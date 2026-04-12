@@ -1,0 +1,16 @@
+{
+  "name": "@poopin/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./contracts/common": "./src/contracts/common.ts",
+    "./contracts/auth": "./src/contracts/auth.ts",
+    "./contracts/restrooms": "./src/contracts/restrooms.ts"
+  },
+  "dependencies": {
+    "@poopin/domain": "0.1.0"
+  }
+}

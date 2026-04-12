@@ -43,6 +43,7 @@ const createSupabaseRemotePatterns = (): SupabaseRemotePattern[] => {
 };
 
 const nextConfig: NextConfig = {
+  transpilePackages: ["@poopin/domain", "@poopin/api-client"],
   images: {
     remotePatterns: createSupabaseRemotePatterns() as NonNullable<NextConfig["images"]>["remotePatterns"]
   }
