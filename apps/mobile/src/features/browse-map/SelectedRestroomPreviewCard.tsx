@@ -5,6 +5,7 @@ import { mobileTheme } from "../../ui/theme";
 interface SelectedRestroomPreviewCardProps {
   restroom: NearbyBathroom;
   onPress: () => void;
+  variant?: "standalone" | "sheet";
 }
 
 const toLocationLine = (restroom: NearbyBathroom) => [restroom.address, restroom.city, restroom.state].filter(Boolean).join(", ");
@@ -30,7 +31,11 @@ const formatRatingLabel = (restroom: NearbyBathroom) => {
   return `${restroom.ratings.overall.toFixed(1)} overall • ${restroom.ratings.reviewCount} review${restroom.ratings.reviewCount === 1 ? "" : "s"}`;
 };
 
-export function SelectedRestroomPreviewCard({ restroom, onPress }: SelectedRestroomPreviewCardProps) {
+export function SelectedRestroomPreviewCard({
+  restroom,
+  onPress,
+  variant = "standalone"
+}: SelectedRestroomPreviewCardProps) {
   const metadataChips = [getAccessLabel(restroom.access_type)];
 
   if (restroom.is_accessible) {
@@ -42,7 +47,14 @@ export function SelectedRestroomPreviewCard({ restroom, onPress }: SelectedRestr
   }
 
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed ? styles.cardPressed : null]}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.card,
+        variant === "sheet" ? styles.cardSheet : null,
+        pressed ? styles.cardPressed : null
+      ]}
+    >
       <View style={styles.headerRow}>
         <View style={styles.copyColumn}>
           <Text style={styles.eyebrow}>Selected restroom</Text>
@@ -87,6 +99,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 16,
     ...mobileTheme.shadows.hero
+  },
+  cardSheet: {
+    borderRadius: mobileTheme.radii.md,
+    padding: 14,
+    shadowRadius: 18
   },
   cardPressed: {
     opacity: 0.94

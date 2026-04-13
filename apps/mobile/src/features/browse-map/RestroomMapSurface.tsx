@@ -14,10 +14,12 @@ type PermissionStatus = "requesting" | "granted" | "denied" | "unavailable";
 interface RestroomMapSurfaceProps {
   restrooms: NearbyBathroom[];
   selectedRestroomId: string | null;
+  focusedRestroomId: string | null;
   coordinates: Coordinates | null;
   initialCenter: Coordinates;
   restoredRegion: Region | null;
   permissionStatus: PermissionStatus;
+  focusRequestKey: number;
   locationCenterRequestKey: number;
   onRegionSettled: (region: Region) => void;
   onSelectRestroom: (restroomId: string | null) => void;
@@ -35,15 +37,22 @@ const toLocationLine = (restroom: NearbyBathroom) => [restroom.address, restroom
 export function RestroomMapSurface({
   restrooms,
   selectedRestroomId,
+  focusedRestroomId,
   coordinates,
   initialCenter,
   restoredRegion,
   permissionStatus,
+  focusRequestKey,
   locationCenterRequestKey,
   onRegionSettled,
   onSelectRestroom
 }: RestroomMapSurfaceProps) {
   const mapRef = useRef<MapView | null>(null);
+  const currentRegionRef = useRef<Region>(restoredRegion ?? {
+    latitude: initialCenter.lat,
+    longitude: initialCenter.lng,
+    ...INITIAL_DELTA
+  });
   const lastMarkerPressAtRef = useRef(0);
   const hasHandledInitialRegionChangeRef = useRef(false);
   const ignoreNextRegionChangeRef = useRef(false);
@@ -71,6 +80,8 @@ export function RestroomMapSurface({
   };
 
   const handleRegionChangeComplete = (region: Region) => {
+    currentRegionRef.current = region;
+
     if (!hasHandledInitialRegionChangeRef.current) {
       hasHandledInitialRegionChangeRef.current = true;
       return;
@@ -115,6 +126,28 @@ export function RestroomMapSurface({
       700
     );
   }, [initialCenter, initialCenterKey, restoredRegion]);
+
+  useEffect(() => {
+    if (!focusedRestroomId || focusRequestKey === 0) {
+      return;
+    }
+
+    const restroom = restrooms.find((candidate) => candidate.id === focusedRestroomId);
+    if (!restroom || !isValidCoordinate(restroom.lat) || !isValidCoordinate(restroom.lng)) {
+      return;
+    }
+
+    const nextRegion: Region = {
+      latitude: restroom.lat - currentRegionRef.current.latitudeDelta * 0.18,
+      longitude: restroom.lng,
+      latitudeDelta: currentRegionRef.current.latitudeDelta,
+      longitudeDelta: currentRegionRef.current.longitudeDelta
+    };
+
+    currentRegionRef.current = nextRegion;
+    ignoreNextRegionChangeRef.current = true;
+    mapRef.current?.animateToRegion(nextRegion, 500);
+  }, [focusRequestKey, focusedRestroomId, restrooms]);
 
   return (
     <View style={styles.container}>
