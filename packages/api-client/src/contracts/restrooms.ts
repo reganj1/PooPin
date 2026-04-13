@@ -22,6 +22,10 @@ export interface BoundsRestroomsResponse {
   restrooms: NearbyBathroom[];
 }
 
+export interface RestroomDetailResponse {
+  restroom: NearbyBathroom;
+}
+
 export type RestroomPreviewResponse =
   | {
       success: true;

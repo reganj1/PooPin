@@ -9,13 +9,19 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@poopin/api-client": "0.1.0",
+    "@poopin/domain": "0.1.0",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@supabase/supabase-js": "^2.52.0",
     "expo": "^54.0.0",
     "expo-constants": "~18.0.13",
+    "expo-location": "~19.0.8",
     "expo-linking": "~8.0.11",
     "expo-router": "~6.0.23",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
     "react-native": "0.81.5",
+    "react-native-url-polyfill": "^2.0.0",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.16.0"
   },
