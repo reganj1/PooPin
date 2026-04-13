@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { NearbyBathroom } from "@poopin/domain";
 import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
 import { getRestroom } from "../../src/lib/api";
+import { mobileTheme } from "../../src/ui/theme";
 
 const getLocationLine = (restroom: NearbyBathroom) => [restroom.address, restroom.city, restroom.state].filter(Boolean).join(", ");
 
@@ -127,19 +128,25 @@ export default function RestroomDetailScreen() {
 
         {isLoading ? (
           <View style={styles.stateCard}>
-            <ActivityIndicator color="#38bdf8" />
+            <ActivityIndicator color={mobileTheme.colors.brandStrong} />
             <Text style={styles.stateText}>Loading restroom details…</Text>
           </View>
         ) : errorMessage ? (
-          <View style={styles.stateCard}>
+          <View style={styles.errorStateCard}>
             <Text style={styles.errorTitle}>Unable to load restroom</Text>
-            <Text style={styles.stateText}>{errorMessage}</Text>
+            <Text style={styles.errorStateText}>{errorMessage}</Text>
           </View>
         ) : restroom ? (
           <View style={styles.card}>
-            <Text style={styles.eyebrow}>Restroom detail</Text>
+            <Text style={styles.eyebrow}>Restroom listing</Text>
             <Text style={styles.title}>{restroom.name}</Text>
             <Text style={styles.location}>{getLocationLine(restroom)}</Text>
+
+            <View style={styles.metaRow}>
+              <View style={styles.sourcePill}>
+                <Text style={styles.sourcePillText}>{getSourceLabel(restroom.source)}</Text>
+              </View>
+            </View>
 
             <View style={styles.summaryCard}>
               <Text style={styles.summaryLabel}>Rating summary</Text>
@@ -158,7 +165,7 @@ export default function RestroomDetailScreen() {
               </View>
             </View>
 
-            <View style={styles.infoGroup}>
+            <View style={styles.infoCard}>
               <Text style={styles.sectionTitle}>Coordinates</Text>
               <Text style={styles.infoText}>
                 {restroom.lat.toFixed(5)}, {restroom.lng.toFixed(5)}
@@ -174,48 +181,66 @@ export default function RestroomDetailScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#020617"
+    backgroundColor: mobileTheme.colors.pageBackground
   },
   content: {
-    paddingHorizontal: 20,
+    paddingHorizontal: mobileTheme.spacing.screenX,
     paddingBottom: 32,
-    paddingTop: 16
+    paddingTop: mobileTheme.spacing.screenTop
   },
   backLink: {
-    color: "#7dd3fc",
+    color: mobileTheme.colors.brandStrong,
     fontSize: 14,
     fontWeight: "600",
     marginBottom: 18
   },
   stateCard: {
     alignItems: "center",
-    backgroundColor: "#0f172a",
-    borderColor: "#1e293b",
-    borderRadius: 20,
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.borderSubtle,
+    borderRadius: mobileTheme.radii.lg,
     borderWidth: 1,
     gap: 12,
-    padding: 24
+    padding: 24,
+    ...mobileTheme.shadows.card
+  },
+  errorStateCard: {
+    alignItems: "center",
+    backgroundColor: mobileTheme.colors.errorTint,
+    borderColor: mobileTheme.colors.errorBorder,
+    borderRadius: mobileTheme.radii.lg,
+    borderWidth: 1,
+    gap: 12,
+    padding: 24,
+    ...mobileTheme.shadows.card
   },
   errorTitle: {
-    color: "#fecaca",
+    color: mobileTheme.colors.errorText,
     fontSize: 18,
     fontWeight: "700"
   },
   stateText: {
-    color: "#cbd5e1",
+    color: mobileTheme.colors.textSecondary,
+    fontSize: 15,
+    lineHeight: 21,
+    textAlign: "center"
+  },
+  errorStateText: {
+    color: mobileTheme.colors.errorText,
     fontSize: 15,
     lineHeight: 21,
     textAlign: "center"
   },
   card: {
-    backgroundColor: "#0f172a",
-    borderColor: "#1e293b",
-    borderRadius: 22,
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.borderSubtle,
+    borderRadius: mobileTheme.radii.xl,
     borderWidth: 1,
-    padding: 20
+    padding: mobileTheme.spacing.heroPadding,
+    ...mobileTheme.shadows.hero
   },
   eyebrow: {
-    color: "#38bdf8",
+    color: mobileTheme.colors.brandStrong,
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 1.4,
@@ -223,26 +248,44 @@ const styles = StyleSheet.create({
     textTransform: "uppercase"
   },
   title: {
-    color: "#f8fafc",
+    color: mobileTheme.colors.textPrimary,
     fontSize: 28,
     fontWeight: "700",
     marginBottom: 10
   },
   location: {
-    color: "#cbd5e1",
+    color: mobileTheme.colors.textSecondary,
     fontSize: 15,
     lineHeight: 22
   },
+  metaRow: {
+    flexDirection: "row",
+    marginTop: 16
+  },
+  sourcePill: {
+    alignSelf: "flex-start",
+    backgroundColor: mobileTheme.colors.surfaceMuted,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.pill,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  sourcePillText: {
+    color: mobileTheme.colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "600"
+  },
   summaryCard: {
-    backgroundColor: "#082f49",
-    borderColor: "#0c4a6e",
-    borderRadius: 18,
+    backgroundColor: mobileTheme.colors.surfaceBrandTint,
+    borderColor: mobileTheme.colors.infoBorder,
+    borderRadius: mobileTheme.radii.md,
     borderWidth: 1,
     marginTop: 20,
     padding: 16
   },
   summaryLabel: {
-    color: "#bae6fd",
+    color: mobileTheme.colors.brandStrong,
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 1.1,
@@ -250,20 +293,20 @@ const styles = StyleSheet.create({
     textTransform: "uppercase"
   },
   summaryValue: {
-    color: "#f0f9ff",
+    color: mobileTheme.colors.textPrimary,
     fontSize: 18,
     fontWeight: "700",
     marginBottom: 6
   },
   summaryNote: {
-    color: "#bfdbfe",
+    color: mobileTheme.colors.textMuted,
     fontSize: 13
   },
   featureGroup: {
     marginTop: 22
   },
   sectionTitle: {
-    color: "#e2e8f0",
+    color: mobileTheme.colors.textPrimary,
     fontSize: 16,
     fontWeight: "700",
     marginBottom: 10
@@ -274,23 +317,28 @@ const styles = StyleSheet.create({
     gap: 10
   },
   tag: {
-    backgroundColor: "#111827",
-    borderColor: "#374151",
-    borderRadius: 999,
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.pill,
     borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 8
   },
   tagText: {
-    color: "#e5e7eb",
+    color: mobileTheme.colors.textSecondary,
     fontSize: 13,
     fontWeight: "600"
   },
-  infoGroup: {
-    marginTop: 22
+  infoCard: {
+    backgroundColor: mobileTheme.colors.surfaceMuted,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.md,
+    borderWidth: 1,
+    marginTop: 22,
+    padding: 16
   },
   infoText: {
-    color: "#94a3b8",
+    color: mobileTheme.colors.textMuted,
     fontSize: 14
   }
 });

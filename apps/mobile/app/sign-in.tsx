@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, SafeAreaView, StyleSheet, Text, TextInput
 import { sendEmailOtp } from "../src/lib/api";
 import { supabase } from "../src/lib/supabase";
 import { useSession } from "../src/providers/session-provider";
+import { mobileTheme } from "../src/ui/theme";
 
 type SignInStep = "email" | "code";
 
@@ -102,74 +103,94 @@ export default function SignInScreen() {
           ← Back to nearby restrooms
         </Link>
 
-        <Text style={styles.eyebrow}>Mobile sign-in</Text>
-        <Text style={styles.title}>Sign in with your email</Text>
-        <Text style={styles.copy}>
-          {step === "email"
-            ? "Enter your email and we’ll send a 6-digit code."
-            : `Enter the code we sent to ${normalizedEmail}.`}
-        </Text>
-
         <View style={styles.card}>
-          <Text style={styles.label}>{step === "email" ? "Email" : "Verification code"}</Text>
-          {step === "email" ? (
-            <TextInput
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              onChangeText={setEmail}
-              placeholder="you@example.com"
-              placeholderTextColor="#64748b"
-              style={styles.input}
-              value={email}
-            />
-          ) : (
-            <TextInput
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="number-pad"
-              maxLength={6}
-              onChangeText={setCode}
-              placeholder="123456"
-              placeholderTextColor="#64748b"
-              style={styles.input}
-              value={code}
-            />
-          )}
-
-          {statusMessage ? <Text style={styles.statusMessage}>{statusMessage}</Text> : null}
-          {errorMessage ? <Text style={styles.errorMessage}>{errorMessage}</Text> : null}
-
-          <Pressable onPress={action} disabled={isSubmitting} style={({ pressed }) => [styles.primaryButton, pressed ? styles.buttonPressed : null]}>
-            <Text style={styles.primaryButtonText}>
-              {isSubmitting ? (step === "email" ? "Sending…" : "Verifying…") : step === "email" ? "Send code" : "Verify code"}
-            </Text>
-          </Pressable>
-
-          {step === "code" ? (
-            <View style={styles.secondaryActions}>
-              <Pressable onPress={handleSendCode} disabled={isSubmitting} style={({ pressed }) => [styles.secondaryButton, pressed ? styles.buttonPressed : null]}>
-                <Text style={styles.secondaryButtonText}>Resend code</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  setStep("email");
-                  setCode("");
-                  setErrorMessage(null);
-                  setStatusMessage(null);
-                }}
-                disabled={isSubmitting}
-                style={({ pressed }) => [styles.secondaryButton, pressed ? styles.buttonPressed : null]}
-              >
-                <Text style={styles.secondaryButtonText}>Use another email</Text>
-              </Pressable>
+          <View style={styles.accountBadge}>
+            <View style={styles.accountBadgeIcon}>
+              <Text style={styles.accountBadgeIconText}>WC</Text>
             </View>
-          ) : null}
+            <Text style={styles.accountBadgeText}>Poopin account</Text>
+          </View>
+
+          <Text style={styles.title}>Sign in with your email</Text>
+          <Text style={styles.copy}>
+            {step === "email"
+              ? "Enter your email and we’ll send a 6-digit code."
+              : `Enter the code we sent to ${normalizedEmail}.`}
+          </Text>
+
+          <View style={styles.formSection}>
+            <Text style={styles.label}>{step === "email" ? "Email" : "Verification code"}</Text>
+            {step === "email" ? (
+              <TextInput
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                onChangeText={setEmail}
+                placeholder="you@example.com"
+                placeholderTextColor={mobileTheme.colors.textMuted}
+                style={styles.input}
+                value={email}
+              />
+            ) : (
+              <TextInput
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="number-pad"
+                maxLength={6}
+                onChangeText={setCode}
+                placeholder="123456"
+                placeholderTextColor={mobileTheme.colors.textMuted}
+                style={styles.input}
+                value={code}
+              />
+            )}
+
+            {statusMessage ? (
+              <View style={styles.statusCard}>
+                <Text style={styles.statusMessage}>{statusMessage}</Text>
+              </View>
+            ) : null}
+            {errorMessage ? (
+              <View style={styles.errorCard}>
+                <Text style={styles.errorMessage}>{errorMessage}</Text>
+              </View>
+            ) : null}
+
+            <Pressable onPress={action} disabled={isSubmitting} style={({ pressed }) => [styles.primaryButton, pressed ? styles.buttonPressed : null]}>
+              <Text style={styles.primaryButtonText}>
+                {isSubmitting ? (step === "email" ? "Sending…" : "Verifying…") : step === "email" ? "Send code" : "Verify code"}
+              </Text>
+            </Pressable>
+
+            {step === "code" ? (
+              <View style={styles.secondaryActions}>
+                <Pressable
+                  onPress={handleSendCode}
+                  disabled={isSubmitting}
+                  style={({ pressed }) => [styles.secondaryButton, pressed ? styles.buttonPressed : null]}
+                >
+                  <Text style={styles.secondaryButtonText}>Resend code</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setStep("email");
+                    setCode("");
+                    setErrorMessage(null);
+                    setStatusMessage(null);
+                  }}
+                  disabled={isSubmitting}
+                  style={({ pressed }) => [styles.secondaryButton, pressed ? styles.buttonPressed : null]}
+                >
+                  <Text style={styles.secondaryButtonText}>Use another email</Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </View>
         </View>
 
         {isLoading ? (
           <View style={styles.loadingRow}>
-            <ActivityIndicator color="#38bdf8" />
+            <ActivityIndicator color={mobileTheme.colors.brandStrong} />
             <Text style={styles.loadingText}>Checking your session…</Text>
           </View>
         ) : null}
@@ -181,7 +202,7 @@ export default function SignInScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#020617"
+    backgroundColor: mobileTheme.colors.pageBackground
   },
   container: {
     flex: 1,
@@ -189,75 +210,121 @@ const styles = StyleSheet.create({
     paddingTop: 18
   },
   backLink: {
-    color: "#7dd3fc",
+    color: mobileTheme.colors.brandStrong,
     fontSize: 14,
     fontWeight: "600",
     marginBottom: 20
   },
-  eyebrow: {
-    color: "#38bdf8",
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1.4,
-    marginBottom: 10,
-    textTransform: "uppercase"
-  },
   title: {
-    color: "#f8fafc",
+    color: mobileTheme.colors.textPrimary,
     fontSize: 30,
     fontWeight: "700",
-    marginBottom: 10
+    marginBottom: 10,
+    marginTop: 18
   },
   copy: {
-    color: "#cbd5e1",
+    color: mobileTheme.colors.textSecondary,
     fontSize: 15,
     lineHeight: 22,
     marginBottom: 20
   },
   card: {
-    backgroundColor: "#0f172a",
-    borderColor: "#1e293b",
-    borderRadius: 20,
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.borderSubtle,
+    borderRadius: mobileTheme.radii.xl,
     borderWidth: 1,
-    padding: 18
+    padding: 20,
+    ...mobileTheme.shadows.hero
+  },
+  accountBadge: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.pill,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  accountBadgeIcon: {
+    alignItems: "center",
+    backgroundColor: mobileTheme.colors.brandDeep,
+    borderRadius: mobileTheme.radii.pill,
+    height: 24,
+    justifyContent: "center",
+    width: 24
+  },
+  accountBadgeIconText: {
+    color: mobileTheme.colors.surface,
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.5
+  },
+  accountBadgeText: {
+    color: mobileTheme.colors.brandStrong,
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 1.1,
+    textTransform: "uppercase"
+  },
+  formSection: {
+    borderColor: mobileTheme.colors.borderSubtle,
+    borderTopWidth: 1,
+    paddingTop: 18
   },
   label: {
-    color: "#e2e8f0",
+    color: mobileTheme.colors.textSecondary,
     fontSize: 13,
     fontWeight: "700",
     marginBottom: 8
   },
   input: {
-    backgroundColor: "#020617",
-    borderColor: "#334155",
-    borderRadius: 12,
+    backgroundColor: mobileTheme.colors.surfaceMuted,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.sm,
     borderWidth: 1,
-    color: "#f8fafc",
+    color: mobileTheme.colors.textPrimary,
     fontSize: 16,
     paddingHorizontal: 14,
     paddingVertical: 14
   },
+  statusCard: {
+    backgroundColor: mobileTheme.colors.infoTint,
+    borderColor: mobileTheme.colors.infoBorder,
+    borderRadius: mobileTheme.radii.sm,
+    borderWidth: 1,
+    marginTop: 12,
+    padding: 12
+  },
   statusMessage: {
-    color: "#bfdbfe",
+    color: mobileTheme.colors.brandStrong,
     fontSize: 13,
-    lineHeight: 18,
-    marginTop: 12
+    lineHeight: 18
+  },
+  errorCard: {
+    backgroundColor: mobileTheme.colors.errorTint,
+    borderColor: mobileTheme.colors.errorBorder,
+    borderRadius: mobileTheme.radii.sm,
+    borderWidth: 1,
+    marginTop: 12,
+    padding: 12
   },
   errorMessage: {
-    color: "#fecaca",
+    color: mobileTheme.colors.errorText,
     fontSize: 13,
-    lineHeight: 18,
-    marginTop: 12
+    lineHeight: 18
   },
   primaryButton: {
     alignItems: "center",
-    backgroundColor: "#0ea5e9",
-    borderRadius: 12,
+    backgroundColor: mobileTheme.colors.brandDeep,
+    borderRadius: mobileTheme.radii.xs,
     marginTop: 16,
     paddingVertical: 14
   },
   primaryButtonText: {
-    color: "#e0f2fe",
+    color: mobileTheme.colors.surface,
     fontSize: 15,
     fontWeight: "700"
   },
@@ -268,14 +335,15 @@ const styles = StyleSheet.create({
     marginTop: 12
   },
   secondaryButton: {
-    borderColor: "#334155",
-    borderRadius: 12,
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.xs,
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 12
   },
   secondaryButtonText: {
-    color: "#cbd5e1",
+    color: mobileTheme.colors.textSecondary,
     fontSize: 14,
     fontWeight: "600"
   },
@@ -289,7 +357,7 @@ const styles = StyleSheet.create({
     marginTop: 18
   },
   loadingText: {
-    color: "#94a3b8",
+    color: mobileTheme.colors.textMuted,
     fontSize: 13
   }
 });

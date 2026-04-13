@@ -5,6 +5,7 @@ import { ActivityIndicator, FlatList, Pressable, SafeAreaView, StyleSheet, Text,
 import { getNearbyRestrooms } from "../src/lib/api";
 import { useCurrentLocation } from "../src/hooks/use-current-location";
 import { useSession } from "../src/providers/session-provider";
+import { mobileTheme } from "../src/ui/theme";
 
 const FALLBACK_QUERY = {
   lat: 37.7749,
@@ -140,16 +141,17 @@ export default function HomeScreen() {
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={
           <View style={styles.header}>
-            <Text style={styles.eyebrow}>Phase 3</Text>
-            <Text style={styles.title}>Nearby restrooms</Text>
-            <Text style={styles.copy}>
-              Browse current Poopin restroom data on iPhone. Sign in when you’re ready, but nearby browse stays public.
-            </Text>
+            <View style={styles.heroCard}>
+              <Text style={styles.eyebrow}>Nearby restrooms</Text>
+              <Text style={styles.title}>Find a restroom</Text>
+              <Text style={styles.copy}>
+                Browse trusted restroom listings nearby with the same clean Poopin experience you already have on the web.
+              </Text>
 
-            <View style={styles.headerActions}>
-              {user ? (
-                <>
-                  <Text style={styles.sessionLabel}>{user.email ?? "Signed in"}</Text>
+              {user ? <Text style={styles.sessionLabel}>{user.email ?? "Signed in"}</Text> : null}
+
+              <View style={styles.headerActions}>
+                {user ? (
                   <Pressable
                     onPress={handleSignOut}
                     disabled={isSigningOut}
@@ -157,15 +159,15 @@ export default function HomeScreen() {
                   >
                     <Text style={styles.secondaryButtonText}>{isSigningOut ? "Signing out…" : "Sign out"}</Text>
                   </Pressable>
-                </>
-              ) : (
-                <Pressable
-                  onPress={() => router.push("/sign-in?returnTo=%2F" as Href)}
-                  style={({ pressed }) => [styles.primaryButton, pressed ? styles.buttonPressed : null]}
-                >
-                  <Text style={styles.primaryButtonText}>Sign in</Text>
-                </Pressable>
-              )}
+                ) : (
+                  <Pressable
+                    onPress={() => router.push("/sign-in?returnTo=%2F" as Href)}
+                    style={({ pressed }) => [styles.primaryButton, pressed ? styles.buttonPressed : null]}
+                  >
+                    <Text style={styles.primaryButtonText}>Sign in</Text>
+                  </Pressable>
+                )}
+              </View>
             </View>
 
             {showFallbackBanner ? (
@@ -187,6 +189,7 @@ export default function HomeScreen() {
 
             {errorMessage ? (
               <View style={styles.errorCard}>
+                <Text style={styles.errorTitle}>Unable to load nearby restrooms</Text>
                 <Text style={styles.errorText}>{errorMessage}</Text>
               </View>
             ) : null}
@@ -195,7 +198,7 @@ export default function HomeScreen() {
         ListEmptyComponent={
           isLoading ? (
             <View style={styles.stateCard}>
-              <ActivityIndicator color="#38bdf8" />
+              <ActivityIndicator color={mobileTheme.colors.brandStrong} />
               <Text style={styles.stateText}>Loading nearby restrooms…</Text>
             </View>
           ) : (
@@ -211,9 +214,11 @@ export default function HomeScreen() {
           >
             <View style={styles.rowHeader}>
               <Text style={styles.rowTitle}>{item.name}</Text>
-              <Text style={styles.rowDistance}>
-                {typeof item.distanceMiles === "number" ? `${item.distanceMiles.toFixed(1)} mi` : "Nearby"}
-              </Text>
+              <View style={styles.distanceBadge}>
+                <Text style={styles.rowDistance}>
+                  {typeof item.distanceMiles === "number" ? `${item.distanceMiles.toFixed(1)} mi` : "Nearby"}
+                </Text>
+              </View>
             </View>
             <Text style={styles.rowLocation}>{toLocationLine(item)}</Text>
             <Text style={styles.rowRating}>{formatRatingLabel(item)}</Text>
@@ -227,18 +232,27 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#020617"
+    backgroundColor: mobileTheme.colors.pageBackground
   },
   listContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: mobileTheme.spacing.screenX,
     paddingBottom: 32,
-    paddingTop: 16
+    paddingTop: mobileTheme.spacing.screenTop
   },
   header: {
-    marginBottom: 20
+    marginBottom: mobileTheme.spacing.sectionGap
+  },
+  heroCard: {
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.borderSubtle,
+    borderRadius: mobileTheme.radii.xl,
+    borderWidth: 1,
+    marginBottom: 16,
+    padding: mobileTheme.spacing.heroPadding,
+    ...mobileTheme.shadows.hero
   },
   eyebrow: {
-    color: "#38bdf8",
+    color: mobileTheme.colors.brandStrong,
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 1.4,
@@ -246,13 +260,13 @@ const styles = StyleSheet.create({
     textTransform: "uppercase"
   },
   title: {
-    color: "#f8fafc",
-    fontSize: 30,
+    color: mobileTheme.colors.textPrimary,
+    fontSize: 32,
     fontWeight: "700",
     marginBottom: 10
   },
   copy: {
-    color: "#cbd5e1",
+    color: mobileTheme.colors.textSecondary,
     fontSize: 15,
     lineHeight: 22
   },
@@ -260,35 +274,43 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     flexDirection: "row",
     gap: 10,
-    marginTop: 18
+    marginTop: 16
   },
   sessionLabel: {
-    color: "#cbd5e1",
-    flex: 1,
+    alignSelf: "flex-start",
+    backgroundColor: mobileTheme.colors.surfaceMuted,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.pill,
+    borderWidth: 1,
+    color: mobileTheme.colors.textSecondary,
     fontSize: 13,
-    paddingTop: 10
+    marginTop: 16,
+    overflow: "hidden",
+    paddingHorizontal: 12,
+    paddingVertical: 8
   },
   primaryButton: {
-    backgroundColor: "#0ea5e9",
-    borderRadius: 12,
+    alignItems: "center",
+    backgroundColor: mobileTheme.colors.brandDeep,
+    borderRadius: mobileTheme.radii.xs,
     paddingHorizontal: 16,
-    paddingVertical: 12
+    paddingVertical: 13
   },
   primaryButtonText: {
-    color: "#e0f2fe",
+    color: mobileTheme.colors.surface,
     fontSize: 14,
     fontWeight: "700"
   },
   secondaryButton: {
-    backgroundColor: "#1e293b",
-    borderColor: "#334155",
-    borderRadius: 12,
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.xs,
     borderWidth: 1,
     paddingHorizontal: 16,
-    paddingVertical: 12
+    paddingVertical: 13
   },
   secondaryButtonText: {
-    color: "#e2e8f0",
+    color: mobileTheme.colors.textPrimary,
     fontSize: 14,
     fontWeight: "700"
   },
@@ -296,77 +318,84 @@ const styles = StyleSheet.create({
     opacity: 0.85
   },
   noticeCard: {
-    backgroundColor: "#172554",
-    borderColor: "#1d4ed8",
-    borderRadius: 16,
+    backgroundColor: mobileTheme.colors.surfaceBrandTint,
+    borderColor: mobileTheme.colors.infoBorder,
+    borderRadius: mobileTheme.radii.sm,
     borderWidth: 1,
     marginTop: 16,
     padding: 14
   },
   noticeTitle: {
-    color: "#bfdbfe",
+    color: mobileTheme.colors.brandDeep,
     fontSize: 14,
     fontWeight: "700",
     marginBottom: 6
   },
   noticeCopy: {
-    color: "#dbeafe",
+    color: mobileTheme.colors.textSecondary,
     fontSize: 13,
     lineHeight: 19
   },
   liveNotice: {
-    backgroundColor: "#082f49",
-    borderColor: "#0369a1",
-    borderRadius: 14,
+    backgroundColor: mobileTheme.colors.infoTint,
+    borderColor: mobileTheme.colors.infoBorder,
+    borderRadius: mobileTheme.radii.sm,
     borderWidth: 1,
     marginTop: 16,
     paddingHorizontal: 14,
     paddingVertical: 10
   },
   liveNoticeText: {
-    color: "#bae6fd",
+    color: mobileTheme.colors.brandStrong,
     fontSize: 13,
     fontWeight: "600"
   },
   errorCard: {
-    backgroundColor: "#450a0a",
-    borderColor: "#991b1b",
-    borderRadius: 14,
+    backgroundColor: mobileTheme.colors.errorTint,
+    borderColor: mobileTheme.colors.errorBorder,
+    borderRadius: mobileTheme.radii.sm,
     borderWidth: 1,
     marginTop: 16,
     padding: 14
   },
+  errorTitle: {
+    color: mobileTheme.colors.errorText,
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 4
+  },
   errorText: {
-    color: "#fecaca",
+    color: mobileTheme.colors.errorText,
     fontSize: 13,
     lineHeight: 19
   },
   stateCard: {
     alignItems: "center",
-    backgroundColor: "#0f172a",
-    borderColor: "#1e293b",
-    borderRadius: 18,
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.borderSubtle,
+    borderRadius: mobileTheme.radii.lg,
     borderWidth: 1,
     gap: 12,
-    padding: 24
+    padding: 24,
+    ...mobileTheme.shadows.card
   },
   stateText: {
-    color: "#cbd5e1",
+    color: mobileTheme.colors.textSecondary,
     fontSize: 15,
     lineHeight: 21,
     textAlign: "center"
   },
   rowCard: {
-    backgroundColor: "#0f172a",
-    borderColor: "#1e293b",
-    borderRadius: 18,
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.borderSubtle,
+    borderRadius: mobileTheme.radii.lg,
     borderWidth: 1,
     marginBottom: 12,
-    padding: 16
+    padding: 16,
+    ...mobileTheme.shadows.card
   },
   cardPressed: {
-    opacity: 0.9,
-    transform: [{ scale: 0.995 }]
+    opacity: 0.92
   },
   rowHeader: {
     alignItems: "flex-start",
@@ -375,25 +404,35 @@ const styles = StyleSheet.create({
     marginBottom: 8
   },
   rowTitle: {
-    color: "#f8fafc",
+    color: mobileTheme.colors.textPrimary,
     flex: 1,
     fontSize: 17,
     fontWeight: "700",
     paddingRight: 12
   },
+  distanceBadge: {
+    alignItems: "center",
+    backgroundColor: mobileTheme.colors.surfaceBrandTintStrong,
+    borderColor: mobileTheme.colors.infoBorder,
+    borderRadius: mobileTheme.radii.pill,
+    borderWidth: 1,
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 6
+  },
   rowDistance: {
-    color: "#7dd3fc",
+    color: mobileTheme.colors.brandStrong,
     fontSize: 13,
     fontWeight: "700"
   },
   rowLocation: {
-    color: "#cbd5e1",
+    color: mobileTheme.colors.textSecondary,
     fontSize: 13,
     lineHeight: 19,
     marginBottom: 6
   },
   rowRating: {
-    color: "#94a3b8",
+    color: mobileTheme.colors.textMuted,
     fontSize: 13,
     lineHeight: 19
   }
