@@ -39,6 +39,7 @@ export default function HomeScreen() {
   const [resultSource, setResultSource] = useState<"fallback" | "live">("fallback");
   const [browseMode, setBrowseMode] = useState<BrowseMode>("list");
   const [selectedRestroomId, setSelectedRestroomId] = useState<string | null>(null);
+  const [locationCenterRequestKey, setLocationCenterRequestKey] = useState(0);
   const appliedLiveLocationKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -151,6 +152,7 @@ export default function HomeScreen() {
   const showLiveRefreshNotice = permissionStatus === "granted" && (isRefreshingNearby || resultSource === "live");
   const selectedRestroom = selectedRestroomId ? restrooms.find((restroom) => restroom.id === selectedRestroomId) ?? null : null;
   const mapOrigin = coordinates ?? FALLBACK_QUERY;
+  const canRecenter = permissionStatus === "granted" && coordinates !== null;
   const headerContent = (
     <View style={styles.header}>
       <View style={styles.heroCard}>
@@ -253,10 +255,27 @@ export default function HomeScreen() {
                 <RestroomMapSurface
                   coordinates={coordinates}
                   initialCenter={mapOrigin}
+                  locationCenterRequestKey={locationCenterRequestKey}
                   onSelectRestroom={setSelectedRestroomId}
+                  permissionStatus={permissionStatus}
                   restrooms={restrooms}
                   selectedRestroomId={selectedRestroomId}
                 />
+                <View style={styles.mapControlOverlay}>
+                  <Pressable
+                    disabled={!canRecenter}
+                    onPress={() => setLocationCenterRequestKey((current) => current + 1)}
+                    style={({ pressed }) => [
+                      styles.mapControlButton,
+                      !canRecenter ? styles.mapControlButtonDisabled : null,
+                      pressed ? styles.buttonPressed : null
+                    ]}
+                  >
+                    <Text style={[styles.mapControlButtonText, !canRecenter ? styles.mapControlButtonTextDisabled : null]}>
+                      Recenter
+                    </Text>
+                  </Pressable>
+                </View>
                 {selectedRestroom ? (
                   <View style={styles.mapPreviewOverlay}>
                     <SelectedRestroomPreviewCard
@@ -343,6 +362,34 @@ const styles = StyleSheet.create({
     left: 12,
     position: "absolute",
     right: 12
+  },
+  mapControlOverlay: {
+    position: "absolute",
+    right: 12,
+    top: 12
+  },
+  mapControlButton: {
+    alignItems: "center",
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.borderSubtle,
+    borderRadius: mobileTheme.radii.pill,
+    borderWidth: 1,
+    justifyContent: "center",
+    minWidth: 92,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    ...mobileTheme.shadows.card
+  },
+  mapControlButtonDisabled: {
+    backgroundColor: mobileTheme.colors.surfaceMuted
+  },
+  mapControlButtonText: {
+    color: mobileTheme.colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "700"
+  },
+  mapControlButtonTextDisabled: {
+    color: mobileTheme.colors.textFaint
   },
   heroCard: {
     backgroundColor: mobileTheme.colors.surface,

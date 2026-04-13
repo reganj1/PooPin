@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { NearbyBathroom } from "@poopin/domain";
 import { StyleSheet, View } from "react-native";
 import MapView, { Marker, type MapPressEvent, type Region } from "react-native-maps";
@@ -8,11 +9,15 @@ interface Coordinates {
   lng: number;
 }
 
+type PermissionStatus = "requesting" | "granted" | "denied" | "unavailable";
+
 interface RestroomMapSurfaceProps {
   restrooms: NearbyBathroom[];
   selectedRestroomId: string | null;
   coordinates: Coordinates | null;
   initialCenter: Coordinates;
+  permissionStatus: PermissionStatus;
+  locationCenterRequestKey: number;
   onSelectRestroom: (restroomId: string | null) => void;
 }
 
@@ -30,8 +35,11 @@ export function RestroomMapSurface({
   selectedRestroomId,
   coordinates,
   initialCenter,
+  permissionStatus,
+  locationCenterRequestKey,
   onSelectRestroom
 }: RestroomMapSurfaceProps) {
+  const mapRef = useRef<MapView | null>(null);
   const mapKey = `${initialCenter.lat.toFixed(4)}:${initialCenter.lng.toFixed(4)}`;
   const initialRegion: Region = {
     latitude: initialCenter.lat,
@@ -48,9 +56,31 @@ export function RestroomMapSurface({
     onSelectRestroom(null);
   };
 
+  useEffect(() => {
+    if (locationCenterRequestKey === 0 || permissionStatus !== "granted" || !coordinates) {
+      return;
+    }
+
+    mapRef.current?.animateToRegion(
+      {
+        latitude: coordinates.lat,
+        longitude: coordinates.lng,
+        ...INITIAL_DELTA
+      },
+      700
+    );
+  }, [coordinates, locationCenterRequestKey, permissionStatus]);
+
   return (
     <View style={styles.container}>
-      <MapView key={mapKey} initialRegion={initialRegion} onPress={handleMapPress} style={styles.map} showsUserLocation={false}>
+      <MapView
+        key={mapKey}
+        initialRegion={initialRegion}
+        onPress={handleMapPress}
+        ref={mapRef}
+        showsUserLocation={permissionStatus === "granted"}
+        style={styles.map}
+      >
         {validRestrooms.map((restroom) => (
           <Marker
             key={restroom.id}
@@ -62,6 +92,7 @@ export function RestroomMapSurface({
             onSelect={() => onSelectRestroom(restroom.id)}
             pinColor={restroom.id === selectedRestroomId ? mobileTheme.colors.brandDeep : mobileTheme.colors.brand}
             title={restroom.name}
+            zIndex={restroom.id === selectedRestroomId ? 2 : 1}
           />
         ))}
       </MapView>

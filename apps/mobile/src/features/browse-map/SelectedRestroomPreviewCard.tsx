@@ -9,6 +9,19 @@ interface SelectedRestroomPreviewCardProps {
 
 const toLocationLine = (restroom: NearbyBathroom) => [restroom.address, restroom.city, restroom.state].filter(Boolean).join(", ");
 
+const getAccessLabel = (accessType: NearbyBathroom["access_type"]) => {
+  switch (accessType) {
+    case "customer_only":
+      return "Customer only";
+    case "code_required":
+      return "Code required";
+    case "staff_assisted":
+      return "Staff assisted";
+    default:
+      return "Public";
+  }
+};
+
 const formatRatingLabel = (restroom: NearbyBathroom) => {
   if (restroom.ratings.reviewCount <= 0 || restroom.ratings.overall <= 0) {
     return "No reviews yet";
@@ -18,6 +31,16 @@ const formatRatingLabel = (restroom: NearbyBathroom) => {
 };
 
 export function SelectedRestroomPreviewCard({ restroom, onPress }: SelectedRestroomPreviewCardProps) {
+  const metadataChips = [getAccessLabel(restroom.access_type)];
+
+  if (restroom.is_accessible) {
+    metadataChips.push("Accessible");
+  }
+
+  if (restroom.is_gender_neutral) {
+    metadataChips.push("Gender neutral");
+  }
+
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed ? styles.cardPressed : null]}>
       <View style={styles.headerRow}>
@@ -38,8 +61,20 @@ export function SelectedRestroomPreviewCard({ restroom, onPress }: SelectedRestr
         </View>
       </View>
 
+      <View style={styles.metadataRow}>
+        {metadataChips.map((chip) => (
+          <View key={chip} style={styles.metadataChip}>
+            <Text style={styles.metadataChipText}>{chip}</Text>
+          </View>
+        ))}
+      </View>
+
       <Text style={styles.rating}>{formatRatingLabel(restroom)}</Text>
-      <Text style={styles.detailHint}>Open restroom details</Text>
+
+      <View style={styles.ctaRow}>
+        <Text style={styles.detailHint}>View restroom details</Text>
+        <Text style={styles.ctaHint}>Public listing</Text>
+      </View>
     </Pressable>
   );
 }
@@ -84,6 +119,25 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 4
   },
+  metadataRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12
+  },
+  metadataChip: {
+    backgroundColor: mobileTheme.colors.surfaceBrandTint,
+    borderColor: mobileTheme.colors.infoBorder,
+    borderRadius: mobileTheme.radii.pill,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6
+  },
+  metadataChipText: {
+    color: mobileTheme.colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "600"
+  },
   distanceBadge: {
     alignItems: "center",
     backgroundColor: mobileTheme.colors.surfaceBrandTintStrong,
@@ -105,10 +159,23 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 10
   },
+  ctaRow: {
+    alignItems: "center",
+    borderColor: mobileTheme.colors.border,
+    borderTopWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 12,
+    paddingTop: 12
+  },
   detailHint: {
     color: mobileTheme.colors.brandStrong,
     fontSize: 13,
-    fontWeight: "700",
-    marginTop: 12
+    fontWeight: "700"
+  },
+  ctaHint: {
+    color: mobileTheme.colors.textFaint,
+    fontSize: 12,
+    fontWeight: "600"
   }
 });
