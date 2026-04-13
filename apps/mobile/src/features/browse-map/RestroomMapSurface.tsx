@@ -16,8 +16,10 @@ interface RestroomMapSurfaceProps {
   selectedRestroomId: string | null;
   coordinates: Coordinates | null;
   initialCenter: Coordinates;
+  restoredRegion: Region | null;
   permissionStatus: PermissionStatus;
   locationCenterRequestKey: number;
+  onRegionSettled: (region: Region) => void;
   onSelectRestroom: (restroomId: string | null) => void;
 }
 
@@ -35,19 +37,25 @@ export function RestroomMapSurface({
   selectedRestroomId,
   coordinates,
   initialCenter,
+  restoredRegion,
   permissionStatus,
   locationCenterRequestKey,
+  onRegionSettled,
   onSelectRestroom
 }: RestroomMapSurfaceProps) {
   const mapRef = useRef<MapView | null>(null);
   const lastMarkerPressAtRef = useRef(0);
-  const mapKey = `${initialCenter.lat.toFixed(4)}:${initialCenter.lng.toFixed(4)}`;
-  const initialRegion: Region = {
-    latitude: initialCenter.lat,
-    longitude: initialCenter.lng,
-    ...INITIAL_DELTA
-  };
+  const hasHandledInitialRegionChangeRef = useRef(false);
+  const ignoreNextRegionChangeRef = useRef(false);
+  const lastAutoCenteredOriginKeyRef = useRef(`${initialCenter.lat.toFixed(4)}:${initialCenter.lng.toFixed(4)}`);
+  const initialRegion: Region =
+    restoredRegion ?? {
+      latitude: initialCenter.lat,
+      longitude: initialCenter.lng,
+      ...INITIAL_DELTA
+    };
   const validRestrooms = restrooms.filter((restroom) => isValidCoordinate(restroom.lat) && isValidCoordinate(restroom.lng));
+  const initialCenterKey = `${initialCenter.lat.toFixed(4)}:${initialCenter.lng.toFixed(4)}`;
 
   const handleMapPress = (event: MapPressEvent) => {
     if (Date.now() - lastMarkerPressAtRef.current < 250) {
@@ -60,6 +68,20 @@ export function RestroomMapSurface({
   const handleMarkerPress = (restroomId: string) => {
     lastMarkerPressAtRef.current = Date.now();
     onSelectRestroom(restroomId);
+  };
+
+  const handleRegionChangeComplete = (region: Region) => {
+    if (!hasHandledInitialRegionChangeRef.current) {
+      hasHandledInitialRegionChangeRef.current = true;
+      return;
+    }
+
+    if (ignoreNextRegionChangeRef.current) {
+      ignoreNextRegionChangeRef.current = false;
+      return;
+    }
+
+    onRegionSettled(region);
   };
 
   useEffect(() => {
@@ -77,12 +99,29 @@ export function RestroomMapSurface({
     );
   }, [coordinates, locationCenterRequestKey, permissionStatus]);
 
+  useEffect(() => {
+    if (restoredRegion || lastAutoCenteredOriginKeyRef.current === initialCenterKey) {
+      return;
+    }
+
+    lastAutoCenteredOriginKeyRef.current = initialCenterKey;
+    ignoreNextRegionChangeRef.current = true;
+    mapRef.current?.animateToRegion(
+      {
+        latitude: initialCenter.lat,
+        longitude: initialCenter.lng,
+        ...INITIAL_DELTA
+      },
+      700
+    );
+  }, [initialCenter, initialCenterKey, restoredRegion]);
+
   return (
     <View style={styles.container}>
       <MapView
-        key={mapKey}
         initialRegion={initialRegion}
         onPress={handleMapPress}
+        onRegionChangeComplete={handleRegionChangeComplete}
         ref={mapRef}
         showsUserLocation={permissionStatus === "granted"}
         style={styles.map}

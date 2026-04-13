@@ -1,5 +1,7 @@
 import type {
   ApiErrorResponse,
+  BoundsRestroomsQuery,
+  BoundsRestroomsResponse,
   NearbyRestroomsQuery,
   NearbyRestroomsResponse,
   RestroomDetailResponse,
@@ -83,6 +85,21 @@ export const getNearbyRestrooms = async (query: NearbyRestroomsQuery): Promise<N
       limit: query.limit
     })
   );
+};
+
+export const getBoundsRestrooms = async (query: BoundsRestroomsQuery): Promise<BoundsRestroomsResponse> => {
+  const response = await fetchJson<BoundsRestroomsResponse>(
+    createUrl("/api/restrooms/bounds", {
+      minLat: query.minLat,
+      maxLat: query.maxLat,
+      minLng: query.minLng,
+      maxLng: query.maxLng,
+      limit: query.limit
+    })
+  );
+
+  primeRestroomCache(response.restrooms);
+  return response;
 };
 
 export const getRestroom = async (id: string): Promise<RestroomDetailResponse> => {

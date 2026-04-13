@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, type Href } from "expo-router";
 import type { NearbyBathroom } from "@poopin/domain";
 import { ActivityIndicator, FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
-import { getNearbyRestrooms, primeRestroomCache } from "../src/lib/api";
+import type { Region } from "react-native-maps";
+import { getBoundsRestrooms, getNearbyRestrooms, primeRestroomCache } from "../src/lib/api";
+import { regionToBounds, toBoundsKey } from "../src/features/browse-map/mapBounds";
 import { RestroomMapSurface } from "../src/features/browse-map/RestroomMapSurface";
 import { SelectedRestroomPreviewCard } from "../src/features/browse-map/SelectedRestroomPreviewCard";
 import { useCurrentLocation } from "../src/hooks/use-current-location";
@@ -14,8 +16,11 @@ const FALLBACK_QUERY = {
   lng: -122.4194,
   limit: 24
 } as const;
+const BOUNDS_FETCH_DEBOUNCE_MS = 80;
+const BOUNDS_FETCH_LIMIT = 300;
 
 type BrowseMode = "list" | "map";
+type BrowseDataMode = "nearby" | "bounds";
 
 const toLocationLine = (restroom: NearbyBathroom) => [restroom.address, restroom.city, restroom.state].filter(Boolean).join(", ");
 
@@ -38,9 +43,28 @@ export default function HomeScreen() {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [resultSource, setResultSource] = useState<"fallback" | "live">("fallback");
   const [browseMode, setBrowseMode] = useState<BrowseMode>("list");
+  const [browseDataMode, setBrowseDataMode] = useState<BrowseDataMode>("nearby");
+  const [mapRegion, setMapRegion] = useState<Region | null>(null);
   const [selectedRestroomId, setSelectedRestroomId] = useState<string | null>(null);
   const [locationCenterRequestKey, setLocationCenterRequestKey] = useState(0);
   const appliedLiveLocationKeyRef = useRef<string | null>(null);
+  const browseDataModeRef = useRef<BrowseDataMode>("nearby");
+  const boundsDebounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestBoundsRequestIdRef = useRef(0);
+  const lastQueuedBoundsKeyRef = useRef<string | null>(null);
+  const lastAppliedBoundsKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    browseDataModeRef.current = browseDataMode;
+  }, [browseDataMode]);
+
+  useEffect(() => {
+    return () => {
+      if (boundsDebounceTimeoutRef.current) {
+        clearTimeout(boundsDebounceTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,10 +80,14 @@ export default function HomeScreen() {
         }
 
         primeRestroomCache(response.restrooms);
+        if (browseDataModeRef.current !== "nearby") {
+          return;
+        }
+
         setRestrooms(response.restrooms);
         setResultSource("fallback");
       } catch (error) {
-        if (cancelled) {
+        if (cancelled || browseDataModeRef.current !== "nearby") {
           return;
         }
 
@@ -107,10 +135,14 @@ export default function HomeScreen() {
 
         appliedLiveLocationKeyRef.current = locationKey;
         primeRestroomCache(response.restrooms);
+        if (browseDataModeRef.current !== "nearby") {
+          return;
+        }
+
         setRestrooms(response.restrooms);
         setResultSource("live");
       } catch (error) {
-        if (cancelled) {
+        if (cancelled || browseDataModeRef.current !== "nearby") {
           return;
         }
 
@@ -140,6 +172,56 @@ export default function HomeScreen() {
     }
   }, [restrooms, selectedRestroomId]);
 
+  const handleMapRegionSettled = (region: Region) => {
+    setMapRegion(region);
+
+    const bounds = regionToBounds(region);
+    const boundsKey = toBoundsKey(bounds);
+    if (boundsKey === lastAppliedBoundsKeyRef.current || boundsKey === lastQueuedBoundsKeyRef.current) {
+      return;
+    }
+
+    if (boundsDebounceTimeoutRef.current) {
+      clearTimeout(boundsDebounceTimeoutRef.current);
+    }
+
+    lastQueuedBoundsKeyRef.current = boundsKey;
+    boundsDebounceTimeoutRef.current = setTimeout(() => {
+      const requestId = latestBoundsRequestIdRef.current + 1;
+      latestBoundsRequestIdRef.current = requestId;
+
+      void (async () => {
+        try {
+          const response = await getBoundsRestrooms({
+            ...bounds,
+            limit: BOUNDS_FETCH_LIMIT
+          });
+
+          if (requestId !== latestBoundsRequestIdRef.current) {
+            return;
+          }
+
+          lastAppliedBoundsKeyRef.current = boundsKey;
+          browseDataModeRef.current = "bounds";
+          setBrowseDataMode("bounds");
+          setErrorMessage(null);
+          setIsLoading(false);
+          setRestrooms(response.restrooms);
+        } catch (error) {
+          if (requestId !== latestBoundsRequestIdRef.current) {
+            return;
+          }
+
+          setErrorMessage(error instanceof Error ? error.message : "Could not load restrooms for this map area.");
+        } finally {
+          if (lastQueuedBoundsKeyRef.current === boundsKey) {
+            lastQueuedBoundsKeyRef.current = null;
+          }
+        }
+      })();
+    }, BOUNDS_FETCH_DEBOUNCE_MS);
+  };
+
   const handleSignOut = async () => {
     setIsSigningOut(true);
 
@@ -151,7 +233,8 @@ export default function HomeScreen() {
   };
 
   const showFallbackBanner = permissionStatus === "denied" || permissionStatus === "unavailable";
-  const showLiveRefreshNotice = permissionStatus === "granted" && (isRefreshingNearby || resultSource === "live");
+  const showLiveRefreshNotice =
+    browseDataMode === "nearby" && permissionStatus === "granted" && (isRefreshingNearby || resultSource === "live");
   const selectedRestroom = selectedRestroomId ? restrooms.find((restroom) => restroom.id === selectedRestroomId) ?? null : null;
   const mapOrigin = coordinates ?? FALLBACK_QUERY;
   const canRecenter = permissionStatus === "granted" && coordinates !== null;
@@ -228,7 +311,9 @@ export default function HomeScreen() {
 
       {errorMessage ? (
         <View style={styles.errorCard}>
-          <Text style={styles.errorTitle}>Unable to load nearby restrooms</Text>
+          <Text style={styles.errorTitle}>
+            {browseDataMode === "bounds" ? "Unable to load restrooms in this map area" : "Unable to load nearby restrooms"}
+          </Text>
           <Text style={styles.errorText}>{errorMessage}</Text>
         </View>
       ) : null}
@@ -237,11 +322,17 @@ export default function HomeScreen() {
   const stateCard = isLoading ? (
     <View style={styles.stateCard}>
       <ActivityIndicator color={mobileTheme.colors.brandStrong} />
-      <Text style={styles.stateText}>Loading nearby restrooms…</Text>
+      <Text style={styles.stateText}>
+        {browseDataMode === "bounds" ? "Loading restrooms in this map area…" : "Loading nearby restrooms…"}
+      </Text>
     </View>
   ) : (
     <View style={styles.stateCard}>
-      <Text style={styles.stateText}>No nearby restrooms are available right now.</Text>
+      <Text style={styles.stateText}>
+        {browseDataMode === "bounds"
+          ? "No restrooms are visible in this map area right now."
+          : "No nearby restrooms are available right now."}
+      </Text>
     </View>
   );
 
@@ -258,6 +349,8 @@ export default function HomeScreen() {
                   coordinates={coordinates}
                   initialCenter={mapOrigin}
                   locationCenterRequestKey={locationCenterRequestKey}
+                  onRegionSettled={handleMapRegionSettled}
+                  restoredRegion={mapRegion}
                   onSelectRestroom={setSelectedRestroomId}
                   permissionStatus={permissionStatus}
                   restrooms={restrooms}
