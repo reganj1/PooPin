@@ -19,7 +19,8 @@
       "bundleIdentifier": "com.poopin.app",
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Poopin uses your location to show nearby restrooms."
+        "NSLocationWhenInUseUsageDescription": "Poopin uses your location to show nearby restrooms.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "plugins": [
@@ -27,6 +28,15 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "d2ce0c91-0ea4-40ce-b3ad-f78de33b2222"
+      }
+    },
+    "android": {
+      "package": "com.poopin.app"
     }
   }
 }

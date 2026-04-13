@@ -5,8 +5,9 @@
   "main": "expo-router/entry",
   "scripts": {
     "dev": "expo start",
-    "ios": "expo start --ios",
-    "typecheck": "tsc --noEmit"
+    "ios": "expo run:ios",
+    "typecheck": "tsc --noEmit",
+    "android": "expo run:android"
   },
   "dependencies": {
     "@poopin/api-client": "0.1.0",
@@ -15,6 +16,7 @@
     "@supabase/supabase-js": "^2.52.0",
     "expo": "^54.0.0",
     "expo-constants": "~18.0.13",
+    "expo-dev-client": "~6.0.20",
     "expo-linking": "~8.0.11",
     "expo-location": "~19.0.8",
     "expo-router": "~6.0.23",

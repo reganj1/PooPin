@@ -1,8 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { NearbyBathroom } from "@poopin/domain";
 import { StyleSheet, View } from "react-native";
-import MapView, { Marker, type MapPressEvent, type Region } from "react-native-maps";
+import MapView, { type MapPressEvent, type Region } from "react-native-maps";
 import { mobileTheme } from "../../ui/theme";
+import { reconcileMarkers, selectMapMarkerRestrooms } from "./reconcileMarkers";
+import { StableRestroomMarker } from "./StableRestroomMarker";
 
 interface Coordinates {
   lat: number;
@@ -30,9 +32,11 @@ const INITIAL_DELTA = {
   longitudeDelta: 0.12
 } as const;
 
-const isValidCoordinate = (value: number) => Number.isFinite(value);
-
-const toLocationLine = (restroom: NearbyBathroom) => [restroom.address, restroom.city, restroom.state].filter(Boolean).join(", ");
+const logMapDebug = (event: string, meta?: Record<string, unknown>) => {
+  if (__DEV__) {
+    console.log(`[mobile-map] ${event}`, meta ?? {});
+  }
+};
 
 export function RestroomMapSurface({
   restrooms,
@@ -48,6 +52,7 @@ export function RestroomMapSurface({
   onSelectRestroom
 }: RestroomMapSurfaceProps) {
   const mapRef = useRef<MapView | null>(null);
+  const onSelectRestroomRef = useRef(onSelectRestroom);
   const currentRegionRef = useRef<Region>(restoredRegion ?? {
     latitude: initialCenter.lat,
     longitude: initialCenter.lng,
@@ -63,21 +68,38 @@ export function RestroomMapSurface({
       longitude: initialCenter.lng,
       ...INITIAL_DELTA
     };
-  const validRestrooms = restrooms.filter((restroom) => isValidCoordinate(restroom.lat) && isValidCoordinate(restroom.lng));
+  const [renderedMarkers, setRenderedMarkers] = useState(() =>
+    reconcileMarkers([], selectMapMarkerRestrooms([], restrooms, { pinnedRestroomId: focusedRestroomId ?? selectedRestroomId }))
+  );
   const initialCenterKey = `${initialCenter.lat.toFixed(4)}:${initialCenter.lng.toFixed(4)}`;
 
-  const handleMapPress = (event: MapPressEvent) => {
+  useEffect(() => {
+    onSelectRestroomRef.current = onSelectRestroom;
+  }, [onSelectRestroom]);
+
+  useEffect(() => {
+    setRenderedMarkers((currentMarkers) => {
+      const markerRestrooms = selectMapMarkerRestrooms(currentMarkers, restrooms, {
+        pinnedRestroomId: focusedRestroomId ?? selectedRestroomId
+      });
+
+      return reconcileMarkers(currentMarkers, markerRestrooms);
+    });
+  }, [focusedRestroomId, restrooms, selectedRestroomId]);
+
+  const handleMapPress = useCallback((event: MapPressEvent) => {
     if (Date.now() - lastMarkerPressAtRef.current < 250) {
       return;
     }
 
-    onSelectRestroom(null);
-  };
+    onSelectRestroomRef.current(null);
+  }, []);
 
-  const handleMarkerPress = (restroomId: string) => {
+  const handleMarkerPress = useCallback((restroomId: string) => {
+    logMapDebug("marker tap", { restroomId });
     lastMarkerPressAtRef.current = Date.now();
-    onSelectRestroom(restroomId);
-  };
+    onSelectRestroomRef.current(restroomId);
+  }, []);
 
   const handleRegionChangeComplete = (region: Region) => {
     currentRegionRef.current = region;
@@ -132,22 +154,35 @@ export function RestroomMapSurface({
       return;
     }
 
-    const restroom = restrooms.find((candidate) => candidate.id === focusedRestroomId);
-    if (!restroom || !isValidCoordinate(restroom.lat) || !isValidCoordinate(restroom.lng)) {
+    const marker = renderedMarkers.find((candidate) => candidate.id === focusedRestroomId);
+    if (!marker) {
       return;
     }
 
     const nextRegion: Region = {
-      latitude: restroom.lat - currentRegionRef.current.latitudeDelta * 0.18,
-      longitude: restroom.lng,
+      latitude: marker.coordinate.latitude - currentRegionRef.current.latitudeDelta * 0.18,
+      longitude: marker.coordinate.longitude,
       latitudeDelta: currentRegionRef.current.latitudeDelta,
       longitudeDelta: currentRegionRef.current.longitudeDelta
     };
 
+    logMapDebug("focus animation start", {
+      restroomId: focusedRestroomId,
+      latitude: nextRegion.latitude,
+      longitude: nextRegion.longitude
+    });
     currentRegionRef.current = nextRegion;
     ignoreNextRegionChangeRef.current = true;
     mapRef.current?.animateToRegion(nextRegion, 500);
-  }, [focusRequestKey, focusedRestroomId, restrooms]);
+
+    const timeout = setTimeout(() => {
+      logMapDebug("focus animation end", { restroomId: focusedRestroomId });
+    }, 520);
+
+    return () => {
+      clearTimeout(timeout);
+    };
+  }, [focusRequestKey, focusedRestroomId, renderedMarkers]);
 
   return (
     <View style={styles.container}>
@@ -159,19 +194,11 @@ export function RestroomMapSurface({
         showsUserLocation={permissionStatus === "granted"}
         style={styles.map}
       >
-        {validRestrooms.map((restroom) => (
-          <Marker
-            key={restroom.id}
-            coordinate={{
-              latitude: restroom.lat,
-              longitude: restroom.lng
-            }}
-            description={toLocationLine(restroom)}
-            identifier={restroom.id}
-            onPress={() => handleMarkerPress(restroom.id)}
-            pinColor={restroom.id === selectedRestroomId ? mobileTheme.colors.brandDeep : mobileTheme.colors.brand}
-            title={restroom.name}
-            zIndex={restroom.id === selectedRestroomId ? 2 : 1}
+        {renderedMarkers.map((marker) => (
+          <StableRestroomMarker
+            key={marker.id}
+            marker={marker}
+            onPressMarker={handleMarkerPress}
           />
         ))}
       </MapView>

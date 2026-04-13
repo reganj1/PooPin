@@ -41,6 +41,13 @@ export function MapResultsSheet({
   onSelectRestroom,
   onPressDetails
 }: MapResultsSheetProps) {
+  const hasResults = restrooms.length > 0;
+  const collapsedTitle = hasResults ? "Nearby results" : "No restrooms in this area";
+  const collapsedSubtitle = hasResults
+    ? `${restrooms.length} in current map area`
+    : "Move the map or recenter to keep browsing.";
+  const expandedSubtitle = hasResults ? `${restrooms.length} in current map area` : "No visible results in this map area";
+
   if (sheetState === "collapsed") {
     if (!selectedRestroom) {
       return (
@@ -48,12 +55,12 @@ export function MapResultsSheet({
           <Pressable onPress={onToggleSheet} style={({ pressed }) => [styles.collapsedSummary, pressed ? styles.cardPressed : null]}>
             <View style={styles.handle} />
             <View style={styles.collapsedSummaryRow}>
-              <View>
-                <Text style={styles.sheetTitle}>Nearby results</Text>
-                <Text style={styles.sheetSubtitle}>{restrooms.length} in current map area</Text>
+              <View style={styles.collapsedCopy}>
+                <Text style={styles.sheetTitle}>{collapsedTitle}</Text>
+                <Text style={styles.sheetSubtitle}>{collapsedSubtitle}</Text>
               </View>
               <View style={styles.headerActionPill}>
-                <Text style={styles.headerActionText}>Show</Text>
+                <Text style={styles.headerActionText}>{hasResults ? "Show" : "Browse"}</Text>
               </View>
             </View>
           </Pressable>
@@ -69,7 +76,7 @@ export function MapResultsSheet({
             <View style={styles.sheetHeaderRow}>
               <View>
                 <Text style={styles.sheetTitle}>Nearby results</Text>
-                <Text style={styles.sheetSubtitle}>{restrooms.length} in current map area</Text>
+                <Text style={styles.sheetSubtitle}>{expandedSubtitle}</Text>
               </View>
               <View style={styles.headerActionPill}>
                 <Text style={styles.headerActionText}>Show</Text>
@@ -77,7 +84,7 @@ export function MapResultsSheet({
             </View>
           </Pressable>
 
-          <SelectedRestroomPreviewCard onPress={() => onPressDetails(selectedRestroom.id)} restroom={selectedRestroom} variant="sheet" />
+          <SelectedRestroomPreviewCard onPress={() => onPressDetails(selectedRestroom.id)} restroom={selectedRestroom} variant="compact" />
         </View>
       </View>
     );
@@ -91,7 +98,7 @@ export function MapResultsSheet({
           <View style={styles.sheetHeaderRow}>
             <View>
               <Text style={styles.sheetTitle}>Nearby results</Text>
-              <Text style={styles.sheetSubtitle}>{restrooms.length} in current map area</Text>
+              <Text style={styles.sheetSubtitle}>{expandedSubtitle}</Text>
             </View>
             <View style={styles.headerActionPill}>
               <Text style={styles.headerActionText}>Hide</Text>
@@ -108,41 +115,50 @@ export function MapResultsSheet({
           </View>
         ) : null}
 
-        <FlatList
-          contentContainerStyle={styles.resultsListContent}
-          data={restrooms}
-          keyExtractor={(item) => item.id}
-          style={styles.resultsList}
-          renderItem={({ item }) => {
-            const isSelected = item.id === selectedRestroomId;
+        {hasResults ? (
+          <FlatList
+            contentContainerStyle={styles.resultsListContent}
+            data={restrooms}
+            keyExtractor={(item) => item.id}
+            style={styles.resultsList}
+            renderItem={({ item }) => {
+              const isSelected = item.id === selectedRestroomId;
 
-            return (
-              <View style={[styles.resultRow, isSelected ? styles.resultRowSelected : null]}>
-                <Pressable onPress={() => onSelectRestroom(item.id)} style={({ pressed }) => [styles.resultMainPressable, pressed ? styles.cardPressed : null]}>
-                  <View style={styles.resultHeader}>
-                    <Text numberOfLines={1} style={styles.resultTitle}>
-                      {item.name}
-                    </Text>
-                    <View style={styles.distanceBadge}>
-                      <Text style={styles.distanceText}>{formatDistanceLabel(item)}</Text>
+              return (
+                <View style={[styles.resultRow, isSelected ? styles.resultRowSelected : null]}>
+                  <Pressable onPress={() => onSelectRestroom(item.id)} style={({ pressed }) => [styles.resultMainPressable, pressed ? styles.cardPressed : null]}>
+                    <View style={styles.resultHeader}>
+                      <Text numberOfLines={1} style={styles.resultTitle}>
+                        {item.name}
+                      </Text>
+                      <View style={styles.distanceBadge}>
+                        <Text style={styles.distanceText}>{formatDistanceLabel(item)}</Text>
+                      </View>
                     </View>
-                  </View>
-                  <Text numberOfLines={1} style={styles.resultLocation}>
-                    {toLocationLine(item)}
-                  </Text>
-                  <Text style={styles.resultRating}>{formatRatingLabel(item)}</Text>
-                </Pressable>
-
-                <View style={styles.resultFooter}>
-                  <Text style={styles.resultFooterLabel}>{isSelected ? "Selected" : "Visible on map"}</Text>
-                  <Pressable onPress={() => onPressDetails(item.id)} style={({ pressed }) => [styles.detailsButton, pressed ? styles.cardPressed : null]}>
-                    <Text style={styles.detailsButtonText}>Details</Text>
+                    <Text numberOfLines={1} style={styles.resultLocation}>
+                      {toLocationLine(item)}
+                    </Text>
+                    <Text style={styles.resultRating}>{formatRatingLabel(item)}</Text>
                   </Pressable>
+
+                  <View style={styles.resultFooter}>
+                    <Text style={styles.resultFooterLabel}>{isSelected ? "Selected" : "Visible on map"}</Text>
+                    <Pressable onPress={() => onPressDetails(item.id)} style={({ pressed }) => [styles.detailsButton, pressed ? styles.cardPressed : null]}>
+                      <Text style={styles.detailsButtonText}>Details</Text>
+                    </Pressable>
+                  </View>
                 </View>
-              </View>
-            );
-          }}
-        />
+              );
+            }}
+          />
+        ) : (
+          <View style={styles.emptyStateWrap}>
+            <View style={styles.emptyStateCard}>
+              <Text style={styles.emptyStateTitle}>No restrooms are visible in this area right now.</Text>
+              <Text style={styles.emptyStateCopy}>Pan the map or tap recenter to keep exploring nearby options.</Text>
+            </View>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -160,10 +176,10 @@ const styles = StyleSheet.create({
     borderTopRightRadius: mobileTheme.radii.xl,
     borderWidth: 1,
     borderBottomWidth: 0,
-    minHeight: 78,
-    paddingBottom: 12,
-    paddingHorizontal: 18,
-    paddingTop: 10,
+    minHeight: 72,
+    paddingBottom: 10,
+    paddingHorizontal: 16,
+    paddingTop: 8,
     ...mobileTheme.shadows.hero
   },
   collapsedSelectionCard: {
@@ -173,10 +189,10 @@ const styles = StyleSheet.create({
     borderTopRightRadius: mobileTheme.radii.xl,
     borderWidth: 1,
     borderBottomWidth: 0,
-    maxHeight: 230,
-    paddingBottom: 12,
+    maxHeight: 204,
+    paddingBottom: 10,
     paddingHorizontal: 12,
-    paddingTop: 8,
+    paddingTop: 6,
     ...mobileTheme.shadows.hero
   },
   expandedSheet: {
@@ -195,14 +211,14 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     backgroundColor: mobileTheme.colors.border,
     borderRadius: mobileTheme.radii.pill,
-    height: 5,
-    marginBottom: 10,
-    width: 42
+    height: 4,
+    marginBottom: 8,
+    width: 40
   },
   sheetHeader: {
-    paddingBottom: 12,
-    paddingHorizontal: 18,
-    paddingTop: 10
+    paddingBottom: 10,
+    paddingHorizontal: 16,
+    paddingTop: 8
   },
   sheetHeaderRow: {
     alignItems: "center",
@@ -214,15 +230,19 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between"
   },
+  collapsedCopy: {
+    flex: 1,
+    paddingRight: 12
+  },
   sheetTitle: {
     color: mobileTheme.colors.textPrimary,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700"
   },
   sheetSubtitle: {
     color: mobileTheme.colors.textMuted,
     fontSize: 12,
-    marginTop: 3
+    marginTop: 2
   },
   headerActionPill: {
     alignItems: "center",
@@ -231,13 +251,13 @@ const styles = StyleSheet.create({
     borderRadius: mobileTheme.radii.pill,
     borderWidth: 1,
     justifyContent: "center",
-    minWidth: 62,
-    paddingHorizontal: 12,
-    paddingVertical: 8
+    minWidth: 58,
+    paddingHorizontal: 11,
+    paddingVertical: 7
   },
   headerActionText: {
     color: mobileTheme.colors.textSecondary,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "700"
   },
   selectedSummary: {
@@ -245,23 +265,23 @@ const styles = StyleSheet.create({
     borderColor: mobileTheme.colors.infoBorder,
     borderRadius: mobileTheme.radii.md,
     borderWidth: 1,
-    marginBottom: 10,
+    marginBottom: 8,
     marginHorizontal: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12
+    paddingHorizontal: 12,
+    paddingVertical: 10
   },
   selectedSummaryEyebrow: {
     color: mobileTheme.colors.brandStrong,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700",
-    letterSpacing: 1,
+    letterSpacing: 0.9,
     textTransform: "uppercase"
   },
   selectedSummaryTitle: {
     color: mobileTheme.colors.textPrimary,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700",
-    marginTop: 5
+    marginTop: 4
   },
   resultsList: {
     flex: 1
@@ -269,6 +289,32 @@ const styles = StyleSheet.create({
   resultsListContent: {
     paddingBottom: 18,
     paddingHorizontal: 14
+  },
+  emptyStateWrap: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    paddingBottom: 18
+  },
+  emptyStateCard: {
+    backgroundColor: mobileTheme.colors.surfaceBrandTint,
+    borderColor: mobileTheme.colors.infoBorder,
+    borderRadius: mobileTheme.radii.md,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 18
+  },
+  emptyStateTitle: {
+    color: mobileTheme.colors.brandDeep,
+    fontSize: 15,
+    fontWeight: "700",
+    lineHeight: 21
+  },
+  emptyStateCopy: {
+    color: mobileTheme.colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 8
   },
   resultRow: {
     backgroundColor: mobileTheme.colors.surface,

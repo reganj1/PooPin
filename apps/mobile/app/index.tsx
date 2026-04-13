@@ -4,9 +4,10 @@ import type { NearbyBathroom } from "@poopin/domain";
 import { ActivityIndicator, FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
 import type { Region } from "react-native-maps";
 import { getBoundsRestrooms, getNearbyRestrooms, primeRestroomCache } from "../src/lib/api";
-import { regionToBounds, toBoundsKey } from "../src/features/browse-map/mapBounds";
-import { MapResultsSheet } from "../src/features/browse-map/MapResultsSheet";
+import { ExpandedMapOverlay } from "../src/features/browse-map/ExpandedMapOverlay";
+import { getRegionChangeMetrics, regionToBounds, toBoundsKey } from "../src/features/browse-map/mapBounds";
 import { RestroomMapSurface } from "../src/features/browse-map/RestroomMapSurface";
+import { SelectedRestroomPreviewCard } from "../src/features/browse-map/SelectedRestroomPreviewCard";
 import { useCurrentLocation } from "../src/hooks/use-current-location";
 import { useSession } from "../src/providers/session-provider";
 import { mobileTheme } from "../src/ui/theme";
@@ -16,14 +17,28 @@ const FALLBACK_QUERY = {
   lng: -122.4194,
   limit: 24
 } as const;
-const BOUNDS_FETCH_DEBOUNCE_MS = 80;
+const BOUNDS_FETCH_DEBOUNCE_MS = 300;
 const BOUNDS_FETCH_LIMIT = 300;
+const MARKER_TAP_SUPPRESSION_MS = 1000;
+const SHEET_SELECTION_SUPPRESSION_MS = 600;
+const MARKER_EXPLORATION_IDLE_EXIT_MS = 1000;
 
 type BrowseMode = "list" | "map";
 type BrowseDataMode = "nearby" | "bounds";
 type MapSheetState = "collapsed" | "expanded";
+type PendingBoundsApply = {
+  requestId: number;
+  boundsKey: string;
+  restrooms: NearbyBathroom[];
+  region: Region;
+};
 
 const toLocationLine = (restroom: NearbyBathroom) => [restroom.address, restroom.city, restroom.state].filter(Boolean).join(", ");
+const logMapDebug = (event: string, meta?: Record<string, unknown>) => {
+  if (__DEV__) {
+    console.log(`[mobile-map] ${event}`, meta ?? {});
+  }
+};
 
 const formatRatingLabel = (restroom: NearbyBathroom) => {
   if (restroom.ratings.reviewCount <= 0 || restroom.ratings.overall <= 0) {
@@ -44,6 +59,7 @@ export default function HomeScreen() {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [resultSource, setResultSource] = useState<"fallback" | "live">("fallback");
   const [browseMode, setBrowseMode] = useState<BrowseMode>("list");
+  const [isExpandedMapOpen, setIsExpandedMapOpen] = useState(false);
   const [browseDataMode, setBrowseDataMode] = useState<BrowseDataMode>("nearby");
   const [mapRegion, setMapRegion] = useState<Region | null>(null);
   const [mapSheetState, setMapSheetState] = useState<MapSheetState>("collapsed");
@@ -57,6 +73,14 @@ export default function HomeScreen() {
   const latestBoundsRequestIdRef = useRef(0);
   const lastQueuedBoundsKeyRef = useRef<string | null>(null);
   const lastAppliedBoundsKeyRef = useRef<string | null>(null);
+  const lastAcceptedRegionRef = useRef<Region | null>(null);
+  const lastMeaningfulRegionRef = useRef<Region | null>(null);
+  const selectedRestroomIdRef = useRef<string | null>(null);
+  const boundsSuppressedUntilRef = useRef(0);
+  const markerExplorationActiveRef = useRef(false);
+  const pendingBoundsApplyRef = useRef<PendingBoundsApply | null>(null);
+  const pendingBoundsApplyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const markerExplorationIdleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     browseDataModeRef.current = browseDataMode;
@@ -66,6 +90,14 @@ export default function HomeScreen() {
     return () => {
       if (boundsDebounceTimeoutRef.current) {
         clearTimeout(boundsDebounceTimeoutRef.current);
+      }
+
+      if (pendingBoundsApplyTimeoutRef.current) {
+        clearTimeout(pendingBoundsApplyTimeoutRef.current);
+      }
+
+      if (markerExplorationIdleTimeoutRef.current) {
+        clearTimeout(markerExplorationIdleTimeoutRef.current);
       }
     };
   }, []);
@@ -166,16 +198,161 @@ export default function HomeScreen() {
   }, [coordinates]);
 
   useEffect(() => {
+    selectedRestroomIdRef.current = selectedRestroomId;
+
     if (!selectedRestroomId) {
       setMapFocusedRestroomId(null);
+    }
+  }, [selectedRestroomId]);
+
+  const clearPendingBoundsApplyTimeout = () => {
+    if (pendingBoundsApplyTimeoutRef.current) {
+      clearTimeout(pendingBoundsApplyTimeoutRef.current);
+      pendingBoundsApplyTimeoutRef.current = null;
+    }
+  };
+
+  const clearMarkerExplorationIdleTimeout = () => {
+    if (markerExplorationIdleTimeoutRef.current) {
+      clearTimeout(markerExplorationIdleTimeoutRef.current);
+      markerExplorationIdleTimeoutRef.current = null;
+    }
+  };
+
+  const applyBoundsResult = (nextRestrooms: NearbyBathroom[], boundsKey: string, requestId: number, region: Region) => {
+    if (requestId !== latestBoundsRequestIdRef.current) {
+      logMapDebug("bounds response ignored", {
+        requestId,
+        boundsKey,
+        reason: "stale apply"
+      });
       return;
     }
 
-    const hasSelectedRestroom = restrooms.some((restroom) => restroom.id === selectedRestroomId);
-    if (!hasSelectedRestroom) {
+    pendingBoundsApplyRef.current = null;
+    lastAppliedBoundsKeyRef.current = boundsKey;
+    lastAcceptedRegionRef.current = region;
+    lastMeaningfulRegionRef.current = region;
+    browseDataModeRef.current = "bounds";
+    setBrowseDataMode("bounds");
+    setErrorMessage(null);
+    setIsLoading(false);
+    setRestrooms(nextRestrooms);
+
+    const currentSelectedRestroomId = selectedRestroomIdRef.current;
+    if (currentSelectedRestroomId && !nextRestrooms.some((restroom) => restroom.id === currentSelectedRestroomId)) {
+      logMapDebug("selection cleared", {
+        restroomId: currentSelectedRestroomId,
+        boundsKey,
+        requestId
+      });
       setSelectedRestroomId(null);
     }
-  }, [restrooms, selectedRestroomId]);
+
+    logMapDebug("bounds response applied", {
+      requestId,
+      boundsKey,
+      count: nextRestrooms.length
+    });
+  };
+
+  const schedulePendingBoundsApply = () => {
+    clearPendingBoundsApplyTimeout();
+
+    if (!pendingBoundsApplyRef.current || markerExplorationActiveRef.current) {
+      return;
+    }
+
+    const delay = Math.max(0, boundsSuppressedUntilRef.current - Date.now());
+    pendingBoundsApplyTimeoutRef.current = setTimeout(() => {
+      pendingBoundsApplyTimeoutRef.current = null;
+
+      if (markerExplorationActiveRef.current) {
+        return;
+      }
+
+      const pendingApply = pendingBoundsApplyRef.current;
+      if (!pendingApply) {
+        return;
+      }
+
+      if (pendingApply.requestId !== latestBoundsRequestIdRef.current) {
+        logMapDebug("bounds response ignored", {
+          requestId: pendingApply.requestId,
+          boundsKey: pendingApply.boundsKey,
+          reason: "stale deferred apply"
+        });
+        pendingBoundsApplyRef.current = null;
+        return;
+      }
+
+      pendingBoundsApplyRef.current = null;
+      logMapDebug("bounds result accepted after marker interaction settles", {
+        requestId: pendingApply.requestId,
+        boundsKey: pendingApply.boundsKey,
+        count: pendingApply.restrooms.length
+      });
+      applyBoundsResult(pendingApply.restrooms, pendingApply.boundsKey, pendingApply.requestId, pendingApply.region);
+    }, delay);
+  };
+
+  const beginBoundsSuppression = (reason: string, durationMs: number, meta?: Record<string, unknown>) => {
+    boundsSuppressedUntilRef.current = Date.now() + durationMs;
+    logMapDebug("bounds suppression start", {
+      reason,
+      durationMs,
+      ...(meta ?? {})
+    });
+
+    schedulePendingBoundsApply();
+  };
+
+  const exitMarkerExplorationMode = (reason: string, options?: { discardDeferred?: boolean }) => {
+    if (!markerExplorationActiveRef.current) {
+      return;
+    }
+
+    markerExplorationActiveRef.current = false;
+    boundsSuppressedUntilRef.current = 0;
+    clearMarkerExplorationIdleTimeout();
+
+    logMapDebug("marker exploration mode ends", { reason });
+
+    if (options?.discardDeferred && pendingBoundsApplyRef.current) {
+      logMapDebug("deferred bounds result discarded", {
+        requestId: pendingBoundsApplyRef.current.requestId,
+        boundsKey: pendingBoundsApplyRef.current.boundsKey,
+        reason
+      });
+      pendingBoundsApplyRef.current = null;
+      clearPendingBoundsApplyTimeout();
+    }
+
+    schedulePendingBoundsApply();
+  };
+
+  const startMarkerExplorationIdleExit = () => {
+    if (!markerExplorationActiveRef.current) {
+      return;
+    }
+
+    clearMarkerExplorationIdleTimeout();
+    markerExplorationIdleTimeoutRef.current = setTimeout(() => {
+      markerExplorationIdleTimeoutRef.current = null;
+      exitMarkerExplorationMode("selection cleared and idle");
+    }, MARKER_EXPLORATION_IDLE_EXIT_MS);
+  };
+
+  const enterMarkerExplorationMode = (restroomId: string) => {
+    clearMarkerExplorationIdleTimeout();
+    clearPendingBoundsApplyTimeout();
+    markerExplorationActiveRef.current = true;
+    boundsSuppressedUntilRef.current = Date.now() + MARKER_TAP_SUPPRESSION_MS;
+    logMapDebug("marker exploration mode starts", {
+      restroomId,
+      durationMs: MARKER_TAP_SUPPRESSION_MS
+    });
+  };
 
   const handleToggleMapSheet = () => {
     setMapSheetState((current) => (current === "collapsed" ? "expanded" : "collapsed"));
@@ -189,7 +366,21 @@ export default function HomeScreen() {
     setMapSheetState("collapsed");
   };
 
+  const handleMapSelectionChange = (restroomId: string | null) => {
+    if (restroomId) {
+      enterMarkerExplorationMode(restroomId);
+      setMapFocusedRestroomId(null);
+      setSelectedRestroomId(restroomId);
+      return;
+    }
+
+    startMarkerExplorationIdleExit();
+    setSelectedRestroomId(restroomId);
+  };
+
   const handleSelectRestroomFromSheet = (restroomId: string) => {
+    logMapDebug("row selection", { restroomId });
+    beginBoundsSuppression("row selection", SHEET_SELECTION_SUPPRESSION_MS, { restroomId });
     setSelectedRestroomId(restroomId);
     setMapFocusedRestroomId(restroomId);
     setMapFocusRequestKey((current) => current + 1);
@@ -198,6 +389,32 @@ export default function HomeScreen() {
 
   const handleMapRegionSettled = (region: Region) => {
     setMapRegion(region);
+
+    const regionChange = getRegionChangeMetrics(lastMeaningfulRegionRef.current ?? lastAcceptedRegionRef.current, region);
+    if (!regionChange.meaningful) {
+      logMapDebug("bounds result skipped due to insignificant region change", {
+        latitudeShift: regionChange.latitudeShift,
+        longitudeShift: regionChange.longitudeShift,
+        minimumLatitudeShift: regionChange.minimumLatitudeShift,
+        minimumLongitudeShift: regionChange.minimumLongitudeShift,
+        latitudeDeltaChangeRatio: regionChange.latitudeDeltaChangeRatio,
+        longitudeDeltaChangeRatio: regionChange.longitudeDeltaChangeRatio,
+        minimumDeltaChangeRatio: regionChange.minimumDeltaChangeRatio
+      });
+      return;
+    }
+
+    if (markerExplorationActiveRef.current) {
+      exitMarkerExplorationMode("meaningful pan", { discardDeferred: true });
+    }
+
+    if (Date.now() < boundsSuppressedUntilRef.current) {
+      logMapDebug("bounds request ignored", {
+        reason: "suppressed region settle",
+        suppressedUntil: boundsSuppressedUntilRef.current
+      });
+      return;
+    }
 
     const bounds = regionToBounds(region);
     const boundsKey = toBoundsKey(bounds);
@@ -209,10 +426,30 @@ export default function HomeScreen() {
       clearTimeout(boundsDebounceTimeoutRef.current);
     }
 
+    lastMeaningfulRegionRef.current = region;
     lastQueuedBoundsKeyRef.current = boundsKey;
     boundsDebounceTimeoutRef.current = setTimeout(() => {
+      boundsDebounceTimeoutRef.current = null;
+
+      if (Date.now() < boundsSuppressedUntilRef.current) {
+        logMapDebug("bounds request ignored", {
+          reason: "suppressed before fetch",
+          boundsKey
+        });
+
+        if (lastQueuedBoundsKeyRef.current === boundsKey) {
+          lastQueuedBoundsKeyRef.current = null;
+        }
+
+        return;
+      }
+
       const requestId = latestBoundsRequestIdRef.current + 1;
       latestBoundsRequestIdRef.current = requestId;
+      logMapDebug("bounds request start", {
+        requestId,
+        boundsKey
+      });
 
       void (async () => {
         try {
@@ -222,17 +459,54 @@ export default function HomeScreen() {
           });
 
           if (requestId !== latestBoundsRequestIdRef.current) {
+            logMapDebug("bounds response ignored", {
+              requestId,
+              boundsKey,
+              reason: "stale response"
+            });
             return;
           }
 
-          lastAppliedBoundsKeyRef.current = boundsKey;
-          browseDataModeRef.current = "bounds";
-          setBrowseDataMode("bounds");
-          setErrorMessage(null);
-          setIsLoading(false);
-          setRestrooms(response.restrooms);
+          if (Date.now() < boundsSuppressedUntilRef.current) {
+            pendingBoundsApplyRef.current = {
+              requestId,
+              boundsKey,
+              restrooms: response.restrooms,
+              region
+            };
+            logMapDebug("bounds response deferred", {
+              requestId,
+              boundsKey,
+              count: response.restrooms.length
+            });
+            schedulePendingBoundsApply();
+            return;
+          }
+
+          if (markerExplorationActiveRef.current) {
+            pendingBoundsApplyRef.current = {
+              requestId,
+              boundsKey,
+              restrooms: response.restrooms,
+              region
+            };
+            logMapDebug("bounds response deferred", {
+              requestId,
+              boundsKey,
+              count: response.restrooms.length,
+              reason: "marker exploration mode active"
+            });
+            return;
+          }
+
+          applyBoundsResult(response.restrooms, boundsKey, requestId, region);
         } catch (error) {
           if (requestId !== latestBoundsRequestIdRef.current) {
+            logMapDebug("bounds response ignored", {
+              requestId,
+              boundsKey,
+              reason: "stale error"
+            });
             return;
           }
 
@@ -262,34 +536,32 @@ export default function HomeScreen() {
   const selectedRestroom = selectedRestroomId ? restrooms.find((restroom) => restroom.id === selectedRestroomId) ?? null : null;
   const mapOrigin = coordinates ?? FALLBACK_QUERY;
   const canRecenter = permissionStatus === "granted" && coordinates !== null;
-  const mapAction = user ? (
-    <Pressable
-      onPress={handleSignOut}
-      disabled={isSigningOut}
-      style={({ pressed }) => [styles.mapHeaderAction, styles.mapHeaderActionSecondary, pressed ? styles.buttonPressed : null]}
-    >
-      <Text style={styles.mapHeaderActionSecondaryText}>{isSigningOut ? "Signing out…" : "Sign out"}</Text>
-    </Pressable>
-  ) : (
-    <Pressable
-      onPress={() => router.push("/sign-in?returnTo=%2F" as Href)}
-      style={({ pressed }) => [styles.mapHeaderAction, styles.mapHeaderActionPrimary, pressed ? styles.buttonPressed : null]}
-    >
-      <Text style={styles.mapHeaderActionPrimaryText}>Sign in</Text>
-    </Pressable>
-  );
-  const mapSearchShell = (
-    <View style={styles.mapSearchShell}>
-      <View style={styles.mapSearchCopy}>
-        <Text style={styles.mapSearchLabel}>Map browse</Text>
-        <Text style={styles.mapSearchPlaceholder}>Search this area</Text>
-      </View>
-      <View style={styles.mapSearchBadge}>
-        <Text style={styles.mapSearchBadgeText}>Coming soon</Text>
-      </View>
-    </View>
-  );
-  const mapStatusContent = (
+  const mapSurfaceProps = {
+    coordinates,
+    focusRequestKey: mapFocusRequestKey,
+    focusedRestroomId: mapFocusedRestroomId,
+    initialCenter: mapOrigin,
+    locationCenterRequestKey,
+    onRegionSettled: handleMapRegionSettled,
+    onSelectRestroom: handleMapSelectionChange,
+    permissionStatus,
+    restrooms,
+    restoredRegion: mapRegion,
+    selectedRestroomId
+  } as const;
+  const openExpandedMap = () => {
+    setBrowseMode("map");
+    setIsExpandedMapOpen(true);
+  };
+  const closeExpandedMap = () => {
+    setIsExpandedMapOpen(false);
+    setBrowseMode("list");
+  };
+  const handleRecenterRequest = () => {
+    exitMarkerExplorationMode("recenter", { discardDeferred: true });
+    setLocationCenterRequestKey((current) => current + 1);
+  };
+  const homeMapStatusContent = (
     <>
       {showFallbackBanner ? (
         <View style={styles.noticeCard}>
@@ -318,6 +590,35 @@ export default function HomeScreen() {
       ) : null}
     </>
   );
+  const overlayMapStatusContent = (
+    <>
+      {showFallbackBanner ? (
+        <View style={styles.overlayNoticeCard}>
+          <Text style={styles.overlayNoticeTitle}>Using a default nearby area</Text>
+          <Text style={styles.overlayNoticeCopy}>
+            {locationErrorMessage ?? "Enable location to swap these fallback results for restrooms near you."}
+          </Text>
+        </View>
+      ) : null}
+
+      {showLiveRefreshNotice ? (
+        <View style={styles.overlayLiveNotice}>
+          <Text style={styles.overlayLiveNoticeText}>
+            {isRefreshingNearby ? "Refreshing with your current location…" : "Showing restrooms near your current location."}
+          </Text>
+        </View>
+      ) : null}
+
+      {errorMessage ? (
+        <View style={styles.overlayErrorCard}>
+          <Text style={styles.overlayErrorTitle}>
+            {browseDataMode === "bounds" ? "Unable to load restrooms in this map area" : "Unable to load nearby restrooms"}
+          </Text>
+          <Text style={styles.overlayErrorText}>{errorMessage}</Text>
+        </View>
+      ) : null}
+    </>
+  );
   const listHeaderContent = (
     <View style={styles.header}>
       <View style={styles.heroCard}>
@@ -339,7 +640,7 @@ export default function HomeScreen() {
             <Text style={[styles.browseModeButtonText, browseMode === "list" ? styles.browseModeButtonTextActive : null]}>List</Text>
           </Pressable>
           <Pressable
-            onPress={() => setBrowseMode("map")}
+            onPress={openExpandedMap}
             style={({ pressed }) => [
               styles.browseModeButton,
               browseMode === "map" ? styles.browseModeButtonActive : null,
@@ -372,56 +673,43 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {mapStatusContent}
-    </View>
-  );
-  const mapHeaderContent = (
-    <View style={styles.mapHeader}>
-      <View style={styles.mapChromeCard}>
-        <View style={styles.mapChromeTopRow}>
-          <View style={styles.mapChromeCopy}>
-            <Text style={styles.mapEyebrow}>Restroom map</Text>
-            <Text style={styles.mapTitle}>Browse the map</Text>
-            <Text style={styles.mapCopy}>Move the map to explore visible-area restroom results.</Text>
-          </View>
-          {mapAction}
+      {homeMapStatusContent}
+      <View style={styles.compactMapPreviewCard}>
+        <View style={styles.compactMapPreviewHeader}>
+          <Text style={styles.compactMapPreviewTitle}>Restroom map</Text>
+          <Pressable onPress={openExpandedMap} style={({ pressed }) => [styles.expandMapButton, pressed ? styles.buttonPressed : null]}>
+            <Text style={styles.expandMapButtonText}>Expand map</Text>
+          </Pressable>
         </View>
 
-        <View style={styles.mapChromeBottomRow}>
-          <View style={styles.mapBrowseModeSwitch}>
+        <View style={styles.compactMapPreviewSurface}>
+          {!isExpandedMapOpen ? <RestroomMapSurface {...mapSurfaceProps} /> : null}
+
+          <View style={styles.mapControlOverlay}>
             <Pressable
-              onPress={() => setBrowseMode("list")}
+              disabled={!canRecenter}
+              onPress={handleRecenterRequest}
               style={({ pressed }) => [
-                styles.browseModeButton,
-                browseMode === "list" ? styles.browseModeButtonActive : null,
+                styles.mapControlButton,
+                !canRecenter ? styles.mapControlButtonDisabled : null,
                 pressed ? styles.buttonPressed : null
               ]}
             >
-              <Text style={[styles.browseModeButtonText, browseMode === "list" ? styles.browseModeButtonTextActive : null]}>List</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setBrowseMode("map")}
-              style={({ pressed }) => [
-                styles.browseModeButton,
-                browseMode === "map" ? styles.browseModeButtonActive : null,
-                pressed ? styles.buttonPressed : null
-              ]}
-            >
-              <Text style={[styles.browseModeButtonText, browseMode === "map" ? styles.browseModeButtonTextActive : null]}>Map</Text>
+              <Text style={[styles.mapControlButtonText, !canRecenter ? styles.mapControlButtonTextDisabled : null]}>Recenter</Text>
             </Pressable>
           </View>
 
-          {user?.email ? (
-            <Text numberOfLines={1} style={styles.mapSessionLabel}>
-              {user.email}
-            </Text>
-          ) : (
-            <Text style={styles.mapHelperLabel}>Visible-area results update as you move the map.</Text>
-          )}
+          {selectedRestroom && !isExpandedMapOpen ? (
+            <View pointerEvents="box-none" style={styles.compactSelectedPreviewOverlay}>
+              <SelectedRestroomPreviewCard
+                onPress={() => router.push(`/restrooms/${selectedRestroom.id}` as Href)}
+                restroom={selectedRestroom}
+                variant="compact"
+              />
+            </View>
+          ) : null}
         </View>
       </View>
-
-      {mapStatusContent}
     </View>
   );
   const stateCard = isLoading ? (
@@ -441,92 +729,61 @@ export default function HomeScreen() {
     </View>
   );
 
-  if (browseMode === "map") {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.mapScreen}>
-          <View style={styles.mapHeaderContent}>{mapHeaderContent}</View>
-
-          <View style={styles.mapBody}>
-            {mapSearchShell}
-
-            {restrooms.length > 0 ? (
-              <View style={styles.mapCard}>
-                <RestroomMapSurface
-                  coordinates={coordinates}
-                  focusRequestKey={mapFocusRequestKey}
-                  focusedRestroomId={mapFocusedRestroomId}
-                  initialCenter={mapOrigin}
-                  locationCenterRequestKey={locationCenterRequestKey}
-                  onRegionSettled={handleMapRegionSettled}
-                  restoredRegion={mapRegion}
-                  onSelectRestroom={setSelectedRestroomId}
-                  permissionStatus={permissionStatus}
-                  restrooms={restrooms}
-                  selectedRestroomId={selectedRestroomId}
-                />
-                <View style={styles.mapControlOverlay}>
-                  <Pressable
-                    disabled={!canRecenter}
-                    onPress={() => setLocationCenterRequestKey((current) => current + 1)}
-                    style={({ pressed }) => [
-                      styles.mapControlButton,
-                      !canRecenter ? styles.mapControlButtonDisabled : null,
-                      pressed ? styles.buttonPressed : null
-                    ]}
-                  >
-                    <Text style={[styles.mapControlButtonText, !canRecenter ? styles.mapControlButtonTextDisabled : null]}>
-                      Recenter
-                    </Text>
-                  </Pressable>
-                </View>
-                <MapResultsSheet
-                  onCollapse={handleCollapseMapSheet}
-                  onExpand={handleExpandMapSheet}
-                  onPressDetails={(restroomId) => router.push(`/restrooms/${restroomId}` as Href)}
-                  onSelectRestroom={handleSelectRestroomFromSheet}
-                  onToggleSheet={handleToggleMapSheet}
-                  restrooms={restrooms}
-                  selectedRestroom={selectedRestroom}
-                  selectedRestroomId={selectedRestroomId}
-                  sheetState={mapSheetState}
-                />
-              </View>
-            ) : (
-              <View style={styles.mapStateCardWrap}>{stateCard}</View>
-            )}
-          </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={styles.safeArea}>
-      <FlatList
-        data={restrooms}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        ListHeaderComponent={listHeaderContent}
-        ListEmptyComponent={stateCard}
-        renderItem={({ item }) => (
-          <Pressable
-            onPress={() => router.push(`/restrooms/${item.id}` as Href)}
-            style={({ pressed }) => [styles.rowCard, pressed ? styles.cardPressed : null]}
-          >
-            <View style={styles.rowHeader}>
-              <Text style={styles.rowTitle}>{item.name}</Text>
-              <View style={styles.distanceBadge}>
-                <Text style={styles.rowDistance}>
-                  {typeof item.distanceMiles === "number" ? `${item.distanceMiles.toFixed(1)} mi` : "Nearby"}
-                </Text>
+      <View style={styles.screen}>
+        <FlatList
+          data={restrooms}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          ListHeaderComponent={listHeaderContent}
+          ListEmptyComponent={stateCard}
+          renderItem={({ item }) => (
+            <Pressable
+              onPress={() => router.push(`/restrooms/${item.id}` as Href)}
+              style={({ pressed }) => [styles.rowCard, pressed ? styles.cardPressed : null]}
+            >
+              <View style={styles.rowHeader}>
+                <Text style={styles.rowTitle}>{item.name}</Text>
+                <View style={styles.distanceBadge}>
+                  <Text style={styles.rowDistance}>
+                    {typeof item.distanceMiles === "number" ? `${item.distanceMiles.toFixed(1)} mi` : "Nearby"}
+                  </Text>
+                </View>
               </View>
-            </View>
-            <Text style={styles.rowLocation}>{toLocationLine(item)}</Text>
-            <Text style={styles.rowRating}>{formatRatingLabel(item)}</Text>
-          </Pressable>
-        )}
-      />
+              <Text style={styles.rowLocation}>{toLocationLine(item)}</Text>
+              <Text style={styles.rowRating}>{formatRatingLabel(item)}</Text>
+            </Pressable>
+          )}
+        />
+
+        {isExpandedMapOpen ? (
+          <ExpandedMapOverlay
+            canRecenter={canRecenter}
+            coordinates={coordinates}
+            focusRequestKey={mapFocusRequestKey}
+            focusedRestroomId={mapFocusedRestroomId}
+            initialCenter={mapOrigin}
+            locationCenterRequestKey={locationCenterRequestKey}
+            onCollapseSheet={handleCollapseMapSheet}
+            onClose={closeExpandedMap}
+            onExpandSheet={handleExpandMapSheet}
+            onPressDetails={(restroomId) => router.push(`/restrooms/${restroomId}` as Href)}
+            onPressUseLocation={handleRecenterRequest}
+            onRegionSettled={handleMapRegionSettled}
+            onSelectRestroom={handleMapSelectionChange}
+            onSelectRestroomFromSheet={handleSelectRestroomFromSheet}
+            onToggleSheet={handleToggleMapSheet}
+            permissionStatus={permissionStatus}
+            restoredRegion={mapRegion}
+            restrooms={restrooms}
+            selectedRestroom={selectedRestroom}
+            selectedRestroomId={selectedRestroomId}
+            sheetState={mapSheetState}
+            statusContent={overlayMapStatusContent}
+          />
+        ) : null}
+      </View>
     </SafeAreaView>
   );
 }
@@ -536,6 +793,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: mobileTheme.colors.pageBackground
   },
+  screen: {
+    flex: 1
+  },
   listContent: {
     paddingHorizontal: mobileTheme.spacing.screenX,
     paddingBottom: 32,
@@ -544,169 +804,49 @@ const styles = StyleSheet.create({
   header: {
     marginBottom: mobileTheme.spacing.sectionGap
   },
-  mapHeader: {
-    marginBottom: 10
+  compactMapPreviewCard: {
+    marginTop: 14
   },
-  mapScreen: {
-    flex: 1
-  },
-  mapHeaderContent: {
-    paddingHorizontal: mobileTheme.spacing.screenX,
-    paddingTop: 8
-  },
-  mapBody: {
-    flex: 1,
-    paddingBottom: 12,
-    paddingHorizontal: mobileTheme.spacing.screenX
-  },
-  mapChromeCard: {
-    backgroundColor: mobileTheme.colors.surface,
-    borderColor: mobileTheme.colors.borderSubtle,
-    borderRadius: mobileTheme.radii.lg,
-    borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    ...mobileTheme.shadows.card
-  },
-  mapChromeTopRow: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    justifyContent: "space-between"
-  },
-  mapChromeCopy: {
-    flex: 1,
-    paddingRight: 12
-  },
-  mapEyebrow: {
-    color: mobileTheme.colors.brandStrong,
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 1.2,
-    marginBottom: 6,
-    textTransform: "uppercase"
-  },
-  mapTitle: {
-    color: mobileTheme.colors.textPrimary,
-    fontSize: 24,
-    fontWeight: "700"
-  },
-  mapCopy: {
-    color: mobileTheme.colors.textSecondary,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 4
-  },
-  mapChromeBottomRow: {
+  compactMapPreviewHeader: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 12
+    marginBottom: 6
   },
-  mapBrowseModeSwitch: {
-    alignSelf: "flex-start",
-    backgroundColor: mobileTheme.colors.surfaceMuted,
-    borderColor: mobileTheme.colors.border,
-    borderRadius: mobileTheme.radii.pill,
-    borderWidth: 1,
-    flexDirection: "row",
-    padding: 4
-  },
-  mapSessionLabel: {
-    color: mobileTheme.colors.textMuted,
-    flex: 1,
-    fontSize: 12,
-    marginLeft: 12,
-    textAlign: "right"
-  },
-  mapHelperLabel: {
-    color: mobileTheme.colors.textMuted,
-    flex: 1,
-    fontSize: 12,
-    marginLeft: 12,
-    textAlign: "right"
-  },
-  mapHeaderAction: {
-    alignItems: "center",
-    borderRadius: mobileTheme.radii.pill,
-    justifyContent: "center",
-    minWidth: 86,
-    paddingHorizontal: 12,
-    paddingVertical: 10
-  },
-  mapHeaderActionPrimary: {
-    backgroundColor: mobileTheme.colors.brandDeep
-  },
-  mapHeaderActionSecondary: {
-    backgroundColor: mobileTheme.colors.surfaceMuted,
-    borderColor: mobileTheme.colors.border,
-    borderWidth: 1
-  },
-  mapHeaderActionPrimaryText: {
-    color: mobileTheme.colors.surface,
-    fontSize: 12,
-    fontWeight: "700"
-  },
-  mapHeaderActionSecondaryText: {
+  compactMapPreviewTitle: {
     color: mobileTheme.colors.textPrimary,
-    fontSize: 12,
-    fontWeight: "700"
-  },
-  mapSearchShell: {
-    alignItems: "center",
-    backgroundColor: mobileTheme.colors.surface,
-    borderColor: mobileTheme.colors.borderSubtle,
-    borderRadius: mobileTheme.radii.lg,
-    borderWidth: 1,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    ...mobileTheme.shadows.card
-  },
-  mapSearchCopy: {
     flex: 1,
-    paddingRight: 12
-  },
-  mapSearchLabel: {
-    color: mobileTheme.colors.textMuted,
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 1,
-    textTransform: "uppercase"
-  },
-  mapSearchPlaceholder: {
-    color: mobileTheme.colors.textPrimary,
     fontSize: 16,
-    fontWeight: "600",
-    marginTop: 4
+    fontWeight: "700"
   },
-  mapSearchBadge: {
+  expandMapButton: {
     alignItems: "center",
-    backgroundColor: mobileTheme.colors.surfaceMuted,
+    backgroundColor: "rgba(255,255,255,0.88)",
     borderColor: mobileTheme.colors.border,
     borderRadius: mobileTheme.radii.pill,
     borderWidth: 1,
     justifyContent: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 6
+    minWidth: 98,
+    paddingHorizontal: 12,
+    paddingVertical: 8
   },
-  mapSearchBadgeText: {
+  expandMapButtonText: {
     color: mobileTheme.colors.textSecondary,
-    fontSize: 11,
-    fontWeight: "700"
+    fontSize: 12,
+    fontWeight: "600"
   },
-  mapCard: {
+  compactMapPreviewSurface: {
     borderRadius: mobileTheme.radii.xl,
-    flex: 1,
-    minHeight: 0,
+    height: 236,
     overflow: "hidden",
     position: "relative",
     ...mobileTheme.shadows.hero
   },
-  mapStateCardWrap: {
-    flex: 1,
-    justifyContent: "center"
+  compactSelectedPreviewOverlay: {
+    bottom: 10,
+    left: 10,
+    position: "absolute",
+    right: 10
   },
   mapControlOverlay: {
     position: "absolute",
@@ -848,16 +988,35 @@ const styles = StyleSheet.create({
     marginTop: 16,
     padding: 14
   },
+  overlayNoticeCard: {
+    backgroundColor: "rgba(244,249,255,0.94)",
+    borderColor: mobileTheme.colors.infoBorder,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
   noticeTitle: {
     color: mobileTheme.colors.brandDeep,
     fontSize: 14,
     fontWeight: "700",
     marginBottom: 6
   },
+  overlayNoticeTitle: {
+    color: mobileTheme.colors.brandDeep,
+    fontSize: 12,
+    fontWeight: "700",
+    marginBottom: 4
+  },
   noticeCopy: {
     color: mobileTheme.colors.textSecondary,
     fontSize: 13,
     lineHeight: 19
+  },
+  overlayNoticeCopy: {
+    color: mobileTheme.colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17
   },
   liveNotice: {
     backgroundColor: mobileTheme.colors.infoTint,
@@ -868,9 +1027,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10
   },
+  overlayLiveNotice: {
+    backgroundColor: "rgba(239,246,255,0.95)",
+    borderColor: mobileTheme.colors.infoBorder,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 9
+  },
   liveNoticeText: {
     color: mobileTheme.colors.brandStrong,
     fontSize: 13,
+    fontWeight: "600"
+  },
+  overlayLiveNoticeText: {
+    color: mobileTheme.colors.brandStrong,
+    fontSize: 12,
     fontWeight: "600"
   },
   errorCard: {
@@ -881,9 +1053,23 @@ const styles = StyleSheet.create({
     marginTop: 16,
     padding: 14
   },
+  overlayErrorCard: {
+    backgroundColor: "rgba(254,242,242,0.95)",
+    borderColor: mobileTheme.colors.errorBorder,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
   errorTitle: {
     color: mobileTheme.colors.errorText,
     fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 4
+  },
+  overlayErrorTitle: {
+    color: mobileTheme.colors.errorText,
+    fontSize: 12,
     fontWeight: "700",
     marginBottom: 4
   },
@@ -891,6 +1077,11 @@ const styles = StyleSheet.create({
     color: mobileTheme.colors.errorText,
     fontSize: 13,
     lineHeight: 19
+  },
+  overlayErrorText: {
+    color: mobileTheme.colors.errorText,
+    fontSize: 12,
+    lineHeight: 17
   },
   stateCard: {
     alignItems: "center",
