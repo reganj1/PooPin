@@ -5,7 +5,10 @@ import type {
   RestroomDetailResponse,
   SendEmailOtpResponse
 } from "@poopin/api-client";
+import type { NearbyBathroom } from "@poopin/domain";
 import { mobileEnv } from "./env";
+
+const restroomCache = new Map<string, NearbyBathroom>();
 
 const createUrl = (path: string, params?: Record<string, string | number | undefined>) => {
   const url = new URL(path, mobileEnv.apiBaseUrl);
@@ -52,6 +55,16 @@ const fetchJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
   return readJson<T>(response);
 };
 
+export const primeRestroomCache = (restrooms: NearbyBathroom[]) => {
+  for (const restroom of restrooms) {
+    restroomCache.set(restroom.id, restroom);
+  }
+};
+
+export const getCachedRestroom = (id: string): NearbyBathroom | null => {
+  return restroomCache.get(id) ?? null;
+};
+
 export const sendEmailOtp = async (email: string): Promise<SendEmailOtpResponse> => {
   return fetchJson<SendEmailOtpResponse>(createUrl("/api/auth/email-otp"), {
     method: "POST",
@@ -73,5 +86,7 @@ export const getNearbyRestrooms = async (query: NearbyRestroomsQuery): Promise<N
 };
 
 export const getRestroom = async (id: string): Promise<RestroomDetailResponse> => {
-  return fetchJson<RestroomDetailResponse>(createUrl(`/api/restrooms/${encodeURIComponent(id)}`));
+  const response = await fetchJson<RestroomDetailResponse>(createUrl(`/api/restrooms/${encodeURIComponent(id)}`));
+  restroomCache.set(response.restroom.id, response.restroom);
+  return response;
 };

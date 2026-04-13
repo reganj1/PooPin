@@ -40,6 +40,7 @@ export function RestroomMapSurface({
   onSelectRestroom
 }: RestroomMapSurfaceProps) {
   const mapRef = useRef<MapView | null>(null);
+  const lastMarkerPressAtRef = useRef(0);
   const mapKey = `${initialCenter.lat.toFixed(4)}:${initialCenter.lng.toFixed(4)}`;
   const initialRegion: Region = {
     latitude: initialCenter.lat,
@@ -49,11 +50,16 @@ export function RestroomMapSurface({
   const validRestrooms = restrooms.filter((restroom) => isValidCoordinate(restroom.lat) && isValidCoordinate(restroom.lng));
 
   const handleMapPress = (event: MapPressEvent) => {
-    if (event.nativeEvent.action === "marker-press") {
+    if (Date.now() - lastMarkerPressAtRef.current < 250) {
       return;
     }
 
     onSelectRestroom(null);
+  };
+
+  const handleMarkerPress = (restroomId: string) => {
+    lastMarkerPressAtRef.current = Date.now();
+    onSelectRestroom(restroomId);
   };
 
   useEffect(() => {
@@ -89,7 +95,8 @@ export function RestroomMapSurface({
               longitude: restroom.lng
             }}
             description={toLocationLine(restroom)}
-            onSelect={() => onSelectRestroom(restroom.id)}
+            identifier={restroom.id}
+            onPress={() => handleMarkerPress(restroom.id)}
             pinColor={restroom.id === selectedRestroomId ? mobileTheme.colors.brandDeep : mobileTheme.colors.brand}
             title={restroom.name}
             zIndex={restroom.id === selectedRestroomId ? 2 : 1}

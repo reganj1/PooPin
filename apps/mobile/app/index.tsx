@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, type Href } from "expo-router";
 import type { NearbyBathroom } from "@poopin/domain";
 import { ActivityIndicator, FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
-import { getNearbyRestrooms } from "../src/lib/api";
+import { getNearbyRestrooms, primeRestroomCache } from "../src/lib/api";
 import { RestroomMapSurface } from "../src/features/browse-map/RestroomMapSurface";
 import { SelectedRestroomPreviewCard } from "../src/features/browse-map/SelectedRestroomPreviewCard";
 import { useCurrentLocation } from "../src/hooks/use-current-location";
@@ -55,6 +55,7 @@ export default function HomeScreen() {
           return;
         }
 
+        primeRestroomCache(response.restrooms);
         setRestrooms(response.restrooms);
         setResultSource("fallback");
       } catch (error) {
@@ -105,6 +106,7 @@ export default function HomeScreen() {
         }
 
         appliedLiveLocationKeyRef.current = locationKey;
+        primeRestroomCache(response.restrooms);
         setRestrooms(response.restrooms);
         setResultSource("live");
       } catch (error) {

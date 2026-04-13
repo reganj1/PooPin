@@ -2,7 +2,7 @@ import { Link, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import type { NearbyBathroom } from "@poopin/domain";
 import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
-import { getRestroom } from "../../src/lib/api";
+import { getCachedRestroom, getRestroom } from "../../src/lib/api";
 import { mobileTheme } from "../../src/ui/theme";
 
 const getLocationLine = (restroom: NearbyBathroom) => [restroom.address, restroom.city, restroom.state].filter(Boolean).join(", ");
@@ -75,9 +75,10 @@ export default function RestroomDetailScreen() {
     const resolved = Array.isArray(params.id) ? params.id[0] : params.id;
     return typeof resolved === "string" ? resolved : "";
   }, [params.id]);
-  const [restroom, setRestroom] = useState<NearbyBathroom | null>(null);
+  const initialCachedRestroom = restroomId ? getCachedRestroom(restroomId) : null;
+  const [restroom, setRestroom] = useState<NearbyBathroom | null>(initialCachedRestroom);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!initialCachedRestroom);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,8 +90,10 @@ export default function RestroomDetailScreen() {
         return;
       }
 
-      setIsLoading(true);
+      const cachedRestroom = getCachedRestroom(restroomId);
+      setRestroom(cachedRestroom);
       setErrorMessage(null);
+      setIsLoading(!cachedRestroom);
 
       try {
         const response = await getRestroom(restroomId);
@@ -104,9 +107,13 @@ export default function RestroomDetailScreen() {
           return;
         }
 
+        if (cachedRestroom) {
+          return;
+        }
+
         setErrorMessage(error instanceof Error ? error.message : "Could not load this restroom right now.");
       } finally {
-        if (!cancelled) {
+        if (!cancelled && !cachedRestroom) {
           setIsLoading(false);
         }
       }
