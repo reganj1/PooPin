@@ -3,6 +3,8 @@ import { useRouter, type Href } from "expo-router";
 import type { NearbyBathroom } from "@poopin/domain";
 import { ActivityIndicator, FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
 import { getNearbyRestrooms } from "../src/lib/api";
+import { RestroomMapSurface } from "../src/features/browse-map/RestroomMapSurface";
+import { SelectedRestroomPreviewCard } from "../src/features/browse-map/SelectedRestroomPreviewCard";
 import { useCurrentLocation } from "../src/hooks/use-current-location";
 import { useSession } from "../src/providers/session-provider";
 import { mobileTheme } from "../src/ui/theme";
@@ -12,6 +14,8 @@ const FALLBACK_QUERY = {
   lng: -122.4194,
   limit: 24
 } as const;
+
+type BrowseMode = "list" | "map";
 
 const toLocationLine = (restroom: NearbyBathroom) => [restroom.address, restroom.city, restroom.state].filter(Boolean).join(", ");
 
@@ -33,6 +37,8 @@ export default function HomeScreen() {
   const [isRefreshingNearby, setIsRefreshingNearby] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [resultSource, setResultSource] = useState<"fallback" | "live">("fallback");
+  const [browseMode, setBrowseMode] = useState<BrowseMode>("list");
+  const [selectedRestroomId, setSelectedRestroomId] = useState<string | null>(null);
   const appliedLiveLocationKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -120,6 +126,17 @@ export default function HomeScreen() {
     };
   }, [coordinates]);
 
+  useEffect(() => {
+    if (!selectedRestroomId) {
+      return;
+    }
+
+    const hasSelectedRestroom = restrooms.some((restroom) => restroom.id === selectedRestroomId);
+    if (!hasSelectedRestroom) {
+      setSelectedRestroomId(null);
+    }
+  }, [restrooms, selectedRestroomId]);
+
   const handleSignOut = async () => {
     setIsSigningOut(true);
 
@@ -132,6 +149,131 @@ export default function HomeScreen() {
 
   const showFallbackBanner = permissionStatus === "denied" || permissionStatus === "unavailable";
   const showLiveRefreshNotice = permissionStatus === "granted" && (isRefreshingNearby || resultSource === "live");
+  const selectedRestroom = selectedRestroomId ? restrooms.find((restroom) => restroom.id === selectedRestroomId) ?? null : null;
+  const mapOrigin = coordinates ?? FALLBACK_QUERY;
+  const headerContent = (
+    <View style={styles.header}>
+      <View style={styles.heroCard}>
+        <Text style={styles.eyebrow}>Nearby restrooms</Text>
+        <Text style={styles.title}>Find a restroom</Text>
+        <Text style={styles.copy}>
+          Browse trusted restroom listings nearby with the same clean Poopin experience you already have on the web.
+        </Text>
+
+        <View style={styles.browseModeSwitch}>
+          <Pressable
+            onPress={() => setBrowseMode("list")}
+            style={({ pressed }) => [
+              styles.browseModeButton,
+              browseMode === "list" ? styles.browseModeButtonActive : null,
+              pressed ? styles.buttonPressed : null
+            ]}
+          >
+            <Text style={[styles.browseModeButtonText, browseMode === "list" ? styles.browseModeButtonTextActive : null]}>List</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setBrowseMode("map")}
+            style={({ pressed }) => [
+              styles.browseModeButton,
+              browseMode === "map" ? styles.browseModeButtonActive : null,
+              pressed ? styles.buttonPressed : null
+            ]}
+          >
+            <Text style={[styles.browseModeButtonText, browseMode === "map" ? styles.browseModeButtonTextActive : null]}>Map</Text>
+          </Pressable>
+        </View>
+
+        {user ? <Text style={styles.sessionLabel}>{user.email ?? "Signed in"}</Text> : null}
+
+        <View style={styles.headerActions}>
+          {user ? (
+            <Pressable
+              onPress={handleSignOut}
+              disabled={isSigningOut}
+              style={({ pressed }) => [styles.secondaryButton, pressed ? styles.buttonPressed : null]}
+            >
+              <Text style={styles.secondaryButtonText}>{isSigningOut ? "Signing out…" : "Sign out"}</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={() => router.push("/sign-in?returnTo=%2F" as Href)}
+              style={({ pressed }) => [styles.primaryButton, pressed ? styles.buttonPressed : null]}
+            >
+              <Text style={styles.primaryButtonText}>Sign in</Text>
+            </Pressable>
+          )}
+        </View>
+      </View>
+
+      {showFallbackBanner ? (
+        <View style={styles.noticeCard}>
+          <Text style={styles.noticeTitle}>Using a default nearby area</Text>
+          <Text style={styles.noticeCopy}>
+            {locationErrorMessage ?? "Enable location to swap these fallback results for restrooms near you."}
+          </Text>
+        </View>
+      ) : null}
+
+      {showLiveRefreshNotice ? (
+        <View style={styles.liveNotice}>
+          <Text style={styles.liveNoticeText}>
+            {isRefreshingNearby ? "Refreshing with your current location…" : "Showing restrooms near your current location."}
+          </Text>
+        </View>
+      ) : null}
+
+      {errorMessage ? (
+        <View style={styles.errorCard}>
+          <Text style={styles.errorTitle}>Unable to load nearby restrooms</Text>
+          <Text style={styles.errorText}>{errorMessage}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+  const stateCard = isLoading ? (
+    <View style={styles.stateCard}>
+      <ActivityIndicator color={mobileTheme.colors.brandStrong} />
+      <Text style={styles.stateText}>Loading nearby restrooms…</Text>
+    </View>
+  ) : (
+    <View style={styles.stateCard}>
+      <Text style={styles.stateText}>No nearby restrooms are available right now.</Text>
+    </View>
+  );
+
+  if (browseMode === "map") {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.mapScreen}>
+          <View style={styles.mapHeaderContent}>{headerContent}</View>
+
+          <View style={styles.mapBody}>
+            {restrooms.length > 0 ? (
+              <View style={styles.mapCard}>
+                <RestroomMapSurface
+                  coordinates={coordinates}
+                  initialCenter={mapOrigin}
+                  onSelectRestroom={setSelectedRestroomId}
+                  restrooms={restrooms}
+                  selectedRestroomId={selectedRestroomId}
+                />
+                {selectedRestroom ? (
+                  <View style={styles.mapPreviewOverlay}>
+                    <SelectedRestroomPreviewCard
+                      restroom={selectedRestroom}
+                      onPress={() => router.push(`/restrooms/${selectedRestroom.id}` as Href)}
+                    />
+                  </View>
+                ) : null}
+              </View>
+            ) : (
+              stateCard
+            )}
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -139,74 +281,8 @@ export default function HomeScreen() {
         data={restrooms}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
-        ListHeaderComponent={
-          <View style={styles.header}>
-            <View style={styles.heroCard}>
-              <Text style={styles.eyebrow}>Nearby restrooms</Text>
-              <Text style={styles.title}>Find a restroom</Text>
-              <Text style={styles.copy}>
-                Browse trusted restroom listings nearby with the same clean Poopin experience you already have on the web.
-              </Text>
-
-              {user ? <Text style={styles.sessionLabel}>{user.email ?? "Signed in"}</Text> : null}
-
-              <View style={styles.headerActions}>
-                {user ? (
-                  <Pressable
-                    onPress={handleSignOut}
-                    disabled={isSigningOut}
-                    style={({ pressed }) => [styles.secondaryButton, pressed ? styles.buttonPressed : null]}
-                  >
-                    <Text style={styles.secondaryButtonText}>{isSigningOut ? "Signing out…" : "Sign out"}</Text>
-                  </Pressable>
-                ) : (
-                  <Pressable
-                    onPress={() => router.push("/sign-in?returnTo=%2F" as Href)}
-                    style={({ pressed }) => [styles.primaryButton, pressed ? styles.buttonPressed : null]}
-                  >
-                    <Text style={styles.primaryButtonText}>Sign in</Text>
-                  </Pressable>
-                )}
-              </View>
-            </View>
-
-            {showFallbackBanner ? (
-              <View style={styles.noticeCard}>
-                <Text style={styles.noticeTitle}>Using a default nearby area</Text>
-                <Text style={styles.noticeCopy}>
-                  {locationErrorMessage ?? "Enable location to swap these fallback results for restrooms near you."}
-                </Text>
-              </View>
-            ) : null}
-
-            {showLiveRefreshNotice ? (
-              <View style={styles.liveNotice}>
-                <Text style={styles.liveNoticeText}>
-                  {isRefreshingNearby ? "Refreshing with your current location…" : "Showing restrooms near your current location."}
-                </Text>
-              </View>
-            ) : null}
-
-            {errorMessage ? (
-              <View style={styles.errorCard}>
-                <Text style={styles.errorTitle}>Unable to load nearby restrooms</Text>
-                <Text style={styles.errorText}>{errorMessage}</Text>
-              </View>
-            ) : null}
-          </View>
-        }
-        ListEmptyComponent={
-          isLoading ? (
-            <View style={styles.stateCard}>
-              <ActivityIndicator color={mobileTheme.colors.brandStrong} />
-              <Text style={styles.stateText}>Loading nearby restrooms…</Text>
-            </View>
-          ) : (
-            <View style={styles.stateCard}>
-              <Text style={styles.stateText}>No nearby restrooms are available right now.</Text>
-            </View>
-          )
-        }
+        ListHeaderComponent={headerContent}
+        ListEmptyComponent={stateCard}
         renderItem={({ item }) => (
           <Pressable
             onPress={() => router.push(`/restrooms/${item.id}` as Href)}
@@ -242,6 +318,32 @@ const styles = StyleSheet.create({
   header: {
     marginBottom: mobileTheme.spacing.sectionGap
   },
+  mapScreen: {
+    flex: 1
+  },
+  mapHeaderContent: {
+    paddingHorizontal: mobileTheme.spacing.screenX,
+    paddingTop: mobileTheme.spacing.screenTop
+  },
+  mapBody: {
+    flex: 1,
+    paddingBottom: 24,
+    paddingHorizontal: mobileTheme.spacing.screenX
+  },
+  mapCard: {
+    borderRadius: mobileTheme.radii.xl,
+    flex: 1,
+    minHeight: 360,
+    overflow: "hidden",
+    position: "relative",
+    ...mobileTheme.shadows.hero
+  },
+  mapPreviewOverlay: {
+    bottom: 12,
+    left: 12,
+    position: "absolute",
+    right: 12
+  },
   heroCard: {
     backgroundColor: mobileTheme.colors.surface,
     borderColor: mobileTheme.colors.borderSubtle,
@@ -269,6 +371,35 @@ const styles = StyleSheet.create({
     color: mobileTheme.colors.textSecondary,
     fontSize: 15,
     lineHeight: 22
+  },
+  browseModeSwitch: {
+    alignSelf: "flex-start",
+    backgroundColor: mobileTheme.colors.surfaceMuted,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.pill,
+    borderWidth: 1,
+    flexDirection: "row",
+    marginTop: 16,
+    padding: 4
+  },
+  browseModeButton: {
+    alignItems: "center",
+    borderRadius: mobileTheme.radii.pill,
+    justifyContent: "center",
+    minWidth: 72,
+    paddingHorizontal: 16,
+    paddingVertical: 10
+  },
+  browseModeButtonActive: {
+    backgroundColor: mobileTheme.colors.brandDeep
+  },
+  browseModeButtonText: {
+    color: mobileTheme.colors.textSecondary,
+    fontSize: 14,
+    fontWeight: "700"
+  },
+  browseModeButtonTextActive: {
+    color: mobileTheme.colors.surface
   },
   headerActions: {
     alignItems: "flex-start",
