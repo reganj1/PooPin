@@ -215,7 +215,6 @@ export function RestroomMapSurface({
       >
         {renderedMarkers.map((marker) => (
           <StableRestroomMarker
-            isSelected={marker.id === selectedRestroomId}
             key={marker.id}
             marker={marker}
             onPressMarker={handleMarkerPress}

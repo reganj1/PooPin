@@ -13,9 +13,9 @@ type RegionChangeMetrics = {
   minimumDeltaChangeRatio: number;
 };
 
-const MIN_CENTER_SHIFT_RATIO = 0.2;
-const MIN_CENTER_SHIFT_DEGREES = 0.0025;
-const MIN_DELTA_CHANGE_RATIO = 0.12;
+const MIN_CENTER_SHIFT_RATIO = 0.12;
+const MIN_CENTER_SHIFT_DEGREES = 0.0015;
+const MIN_DELTA_CHANGE_RATIO = 0.08;
 
 export const regionToBounds = (region: Region): MapBounds => {
   const latitudeOffset = region.latitudeDelta / 2;
@@ -30,7 +30,7 @@ export const regionToBounds = (region: Region): MapBounds => {
 };
 
 export const toBoundsKey = (bounds: MapBounds) =>
-  `${bounds.minLat.toFixed(3)}:${bounds.maxLat.toFixed(3)}:${bounds.minLng.toFixed(3)}:${bounds.maxLng.toFixed(3)}`;
+  `${bounds.minLat.toFixed(4)}:${bounds.maxLat.toFixed(4)}:${bounds.minLng.toFixed(4)}:${bounds.maxLng.toFixed(4)}`;
 
 export const getRegionChangeMetrics = (previousRegion: Region | null, nextRegion: Region): RegionChangeMetrics => {
   if (!previousRegion) {

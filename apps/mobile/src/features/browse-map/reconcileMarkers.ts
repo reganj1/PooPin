@@ -11,7 +11,7 @@ export interface RenderedMarker {
 }
 
 const isValidCoordinate = (value: number) => Number.isFinite(value);
-const DEFAULT_MAP_MARKER_CAP = 60;
+const DEFAULT_MAP_MARKER_CAP = 120;
 
 const toLocationLine = (restroom: NearbyBathroom) => [restroom.address, restroom.city, restroom.state].filter(Boolean).join(", ");
 
