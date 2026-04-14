@@ -156,7 +156,7 @@ function ProgressHeroCard({
             <Image
               source={activeCardImage}
               style={styles.heroCardImage}
-              resizeMode="contain"
+              resizeMode="cover"
               accessibilityLabel={activeCard.title}
             />
           ) : (
@@ -285,7 +285,7 @@ function CollectionCard({
           <Image
             source={cardImage}
             style={styles.collCardImage}
-            resizeMode="contain"
+            resizeMode="cover"
             accessibilityLabel={card.title}
           />
         ) : (
@@ -501,7 +501,7 @@ function PreviewCard({ card }: { card: CollectibleCard }) {
           <Image
             source={cardImage}
             style={styles.previewCardImage}
-            resizeMode="contain"
+            resizeMode="cover"
             accessibilityLabel={card.title}
           />
         ) : (
@@ -566,20 +566,30 @@ export default function ProfileScreen() {
   }, [user, loadProfile]);
 
   const handleSaveName = useCallback(async (newName: string) => {
-    const result = await updateMyDisplayName(newName);
+    const profileId = profile?.id ?? null;
+    if (!profileId) {
+      Alert.alert("Could not update name", "Your profile isn't loaded yet. Try again in a moment.");
+      return;
+    }
+    const result = await updateMyDisplayName(profileId, newName);
     if ("error" in result) {
       Alert.alert("Could not update name", result.error);
       return;
     }
     setProfile((prev) => (prev ? { ...prev, displayName: result.displayName } : prev));
     setShowEditName(false);
-  }, []);
+  }, [profile?.id]);
 
   const handleSelectCard = useCallback(
     async (cardKey: string) => {
       if (selectingCardKey) return;
+      const profileId = profile?.id ?? null;
+      if (!profileId) {
+        Alert.alert("Could not update title", "Your profile isn't loaded yet. Try again in a moment.");
+        return;
+      }
       setSelectingCardKey(cardKey);
-      const result = await updateMyActiveCard(cardKey);
+      const result = await updateMyActiveCard(profileId, cardKey);
       if ("error" in result) {
         Alert.alert("Could not update title", result.error);
       } else {
@@ -587,7 +597,7 @@ export default function ProfileScreen() {
       }
       setSelectingCardKey(null);
     },
-    [selectingCardKey]
+    [profile?.id, selectingCardKey]
   );
 
   const handleSignOut = () => {
@@ -1267,8 +1277,9 @@ const styles = StyleSheet.create({
     fontSize: 34
   },
   heroCardImage: {
-    height: 56,
-    width: 56
+    height: 64,
+    width: 64,
+    transform: [{ scale: 1.04 }]
   },
   heroShowcaseText: {
     flex: 1,
@@ -1399,7 +1410,7 @@ const styles = StyleSheet.create({
    */
   collCardImageWrap: {
     alignItems: "center",
-    height: 96,
+    height: 112,
     justifyContent: "center",
     marginHorizontal: -13,
     marginTop: -13,
@@ -1407,7 +1418,8 @@ const styles = StyleSheet.create({
   },
   collCardImage: {
     height: "100%",
-    width: "100%"
+    width: "100%",
+    transform: [{ scale: 1.06 }]
   },
   collCardTitle: {
     color: mobileTheme.colors.textPrimary,
@@ -1595,7 +1607,7 @@ const styles = StyleSheet.create({
   previewCardImageWrap: {
     alignItems: "center",
     alignSelf: "stretch",
-    height: 72,
+    height: 84,
     justifyContent: "center",
     marginHorizontal: -14,
     marginTop: -14,
@@ -1603,7 +1615,8 @@ const styles = StyleSheet.create({
   },
   previewCardImage: {
     height: "100%",
-    width: "100%"
+    width: "100%",
+    transform: [{ scale: 1.06 }]
   },
   previewCardTitle: {
     fontSize: 11,

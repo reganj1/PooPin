@@ -469,6 +469,7 @@ export const getMyProfile = async (): Promise<MyProfile | null> => {
 const DISPLAY_NAME_RE = /^[A-Za-z0-9' -]+$/;
 
 export const updateMyDisplayName = async (
+  profileId: string,
   newName: string
 ): Promise<{ success: true; displayName: string } | { error: string }> => {
   const normalized = newName.trim().replace(/\s+/g, " ");
@@ -481,6 +482,7 @@ export const updateMyDisplayName = async (
   const { data, error } = await supabase
     .from("profiles")
     .update({ display_name: normalized, updated_at: new Date().toISOString() })
+    .eq("id", profileId)
     .select("display_name")
     .maybeSingle();
 
@@ -497,11 +499,13 @@ export const updateMyDisplayName = async (
 };
 
 export const updateMyActiveCard = async (
+  profileId: string,
   cardKey: string
 ): Promise<{ success: true } | { error: string }> => {
   const { error } = await supabase
     .from("profiles")
-    .update({ active_card_key: cardKey, updated_at: new Date().toISOString() });
+    .update({ active_card_key: cardKey, updated_at: new Date().toISOString() })
+    .eq("id", profileId);
 
   if (error) return { error: error.message || "Could not update your active card." };
   return { success: true };
