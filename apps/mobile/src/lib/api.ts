@@ -7,17 +7,64 @@ import type {
   RestroomDetailResponse,
   SendEmailOtpResponse
 } from "@poopin/api-client";
-import type { NearbyBathroom, Review } from "@poopin/domain";
+import type { NearbyBathroom, Review, ReviewQuickTag } from "@poopin/domain";
 import { mobileEnv } from "./env";
 import { supabase } from "./supabase";
 
 const RESTROOM_PHOTOS_BUCKET = "restroom-photos";
+const PHOTO_SIGNED_URL_EXPIRY_SECONDS = 3600;
+const PHOTO_LIMIT = 24;
 
 export interface RestroomPhotoItem {
   id: string;
+  /** Signed or public URL suitable for full-size lightbox display. */
   url: string;
+  /** Same as url for now; kept as a separate field for future thumbnail transforms. */
+  thumbnailUrl: string;
   createdAt: string;
 }
+
+const generateUUID = (): string => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+};
+
+const TAG_RATING_IMPACTS: Record<ReviewQuickTag, Partial<Record<string, number>>> = {
+  clean: { cleanliness_rating: 5 },
+  smelly: { smell_rating: 1 },
+  no_line: { wait_rating: 5 },
+  crowded: { wait_rating: 1 },
+  no_toilet_paper: { cleanliness_rating: 1 },
+  locked: { privacy_rating: 1 }
+};
+
+const computeDetailRatings = (tags: ReviewQuickTag[], overall: number) => {
+  const impacts: Record<string, number[]> = { smell_rating: [], cleanliness_rating: [], wait_rating: [], privacy_rating: [] };
+  for (const tag of tags) {
+    const tagImpacts = TAG_RATING_IMPACTS[tag];
+    if (tagImpacts) {
+      for (const [field, val] of Object.entries(tagImpacts)) {
+        impacts[field].push(val as number);
+      }
+    }
+  }
+  const resolve = (field: string) => {
+    const vals = impacts[field];
+    if (!vals || vals.length === 0) return overall;
+    return Math.max(1, Math.min(5, Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 10) / 10));
+  };
+  return {
+    smell_rating: resolve("smell_rating"),
+    cleanliness_rating: resolve("cleanliness_rating"),
+    wait_rating: resolve("wait_rating"),
+    privacy_rating: resolve("privacy_rating")
+  };
+};
 
 const restroomCache = new Map<string, NearbyBathroom>();
 
@@ -155,22 +202,109 @@ export const getRestroomPhotoUrls = async (bathroomId: string): Promise<Restroom
     .select("id, storage_path, created_at")
     .eq("bathroom_id", bathroomId)
     .eq("status", "active")
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(PHOTO_LIMIT);
 
   if (error) {
     throw new Error(error.message);
   }
 
   const rows = (data ?? []) as { id: string; storage_path: string; created_at: string }[];
+  if (rows.length === 0) return [];
+
+  const paths = rows.map((r) => r.storage_path);
+
+  // Try batch signed URLs first (works when the user is authenticated or the bucket allows it).
+  // Fall back to public URLs for each path that doesn't get a signed URL.
+  const { data: signedBatch } = await supabase.storage.from(RESTROOM_PHOTOS_BUCKET).createSignedUrls(paths, PHOTO_SIGNED_URL_EXPIRY_SECONDS);
+
+  const signedUrlByPath = new Map<string, string>();
+  if (signedBatch) {
+    for (const item of signedBatch) {
+      if (!item.error && item.path && item.signedUrl) {
+        signedUrlByPath.set(item.path, item.signedUrl);
+      }
+    }
+  }
 
   return rows.map((row) => {
-    const { data: urlData } = supabase.storage.from(RESTROOM_PHOTOS_BUCKET).getPublicUrl(row.storage_path);
+    const signed = signedUrlByPath.get(row.storage_path);
+    const url = signed ?? supabase.storage.from(RESTROOM_PHOTOS_BUCKET).getPublicUrl(row.storage_path).data.publicUrl;
     return {
       id: row.id,
-      url: urlData.publicUrl,
+      url,
+      thumbnailUrl: url,
       createdAt: row.created_at
     };
   });
+};
+
+export interface SubmitReviewInput {
+  bathroomId: string;
+  overallRating: number;
+  quickTags: ReviewQuickTag[];
+  reviewText: string;
+  profileId: string;
+}
+
+export const submitRestroomReview = async (input: SubmitReviewInput): Promise<void> => {
+  const { bathroomId, overallRating, quickTags, reviewText, profileId } = input;
+  const detailRatings = computeDetailRatings(quickTags, overallRating);
+
+  const { error } = await supabase.from("reviews").insert({
+    id: generateUUID(),
+    bathroom_id: bathroomId,
+    profile_id: profileId,
+    user_id: profileId,
+    overall_rating: overallRating,
+    ...detailRatings,
+    review_text: reviewText.trim(),
+    quick_tags: quickTags,
+    visit_time: new Date().toISOString(),
+    status: "active"
+  });
+
+  if (error) throw new Error(error.message);
+};
+
+export interface UploadPhotoInput {
+  bathroomId: string;
+  imageUri: string;
+  mimeType?: string;
+  profileId: string;
+}
+
+export const uploadRestroomPhoto = async (input: UploadPhotoInput): Promise<void> => {
+  const { bathroomId, imageUri, mimeType, profileId } = input;
+
+  const fetchResponse = await fetch(imageUri);
+  const blob = await fetchResponse.blob();
+
+  const rawExt = (mimeType?.split("/")[1] ?? imageUri.split(".").pop()?.toLowerCase() ?? "jpg").replace("jpeg", "jpg");
+  const ext = rawExt.length > 5 ? "jpg" : rawExt;
+  const photoId = generateUUID();
+  const storagePath = `${bathroomId}/${photoId}.${ext}`;
+
+  const { error: uploadError } = await supabase.storage.from(RESTROOM_PHOTOS_BUCKET).upload(storagePath, blob, {
+    contentType: mimeType ?? "image/jpeg",
+    cacheControl: "3600"
+  });
+
+  if (uploadError) throw new Error(uploadError.message);
+
+  const { error: insertError } = await supabase.from("photos").insert({
+    id: photoId,
+    bathroom_id: bathroomId,
+    profile_id: profileId,
+    user_id: profileId,
+    storage_path: storagePath,
+    status: "pending"
+  });
+
+  if (insertError) {
+    await supabase.storage.from(RESTROOM_PHOTOS_BUCKET).remove([storagePath]);
+    throw new Error(insertError.message);
+  }
 };
 
 export const searchPlaces = async (

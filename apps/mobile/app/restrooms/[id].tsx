@@ -1,10 +1,14 @@
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import * as ImagePicker from "expo-image-picker";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NearbyBathroom, Review, ReviewQuickTag } from "@poopin/domain";
 import {
   ActivityIndicator,
+  Alert,
+  Dimensions,
   Image,
   Linking,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -13,12 +17,25 @@ import {
   Text,
   View
 } from "react-native";
-import { getCachedRestroom, getRestroom, getRestroomPhotoUrls, getRestroomReviews } from "../../src/lib/api";
+import {
+  getCachedRestroom,
+  getRestroom,
+  getRestroomPhotoUrls,
+  getRestroomReviews,
+  uploadRestroomPhoto
+} from "../../src/lib/api";
 import type { RestroomPhotoItem } from "../../src/lib/api";
-import { mobileEnv } from "../../src/lib/env";
 import { mobileTheme } from "../../src/ui/theme";
+import { useSession } from "../../src/providers/session-provider";
+import { ReviewFormModal } from "../../src/features/restroom-detail/ReviewFormModal";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const SCREEN_WIDTH = Dimensions.get("window").width;
+const GRID_PADDING = mobileTheme.spacing.screenX;
+const GRID_GAP = 10;
+const THUMB_SIZE = (SCREEN_WIDTH - GRID_PADDING * 2 - GRID_GAP) / 2;
+const INLINE_PHOTO_LIMIT = 6;
 
 const getLocationLine = (r: NearbyBathroom) => [r.address, r.city, r.state].filter(Boolean).join(", ");
 
@@ -63,13 +80,13 @@ const buildFeatureTags = (r: NearbyBathroom) => {
   return tags;
 };
 
-const QUICK_TAG_INFO: Record<ReviewQuickTag, { label: string; positive: boolean }> = {
-  clean: { label: "Clean", positive: true },
-  smelly: { label: "Smelly", positive: false },
-  no_line: { label: "No wait", positive: true },
-  crowded: { label: "Crowded", positive: false },
-  no_toilet_paper: { label: "No paper", positive: false },
-  locked: { label: "Often locked", positive: false }
+const QUICK_TAG_INFO: Record<ReviewQuickTag, { label: string; icon: string; positive: boolean }> = {
+  clean: { label: "Clean", icon: "✨", positive: true },
+  smelly: { label: "Smelly", icon: "🤢", positive: false },
+  no_line: { label: "No line", icon: "🚫", positive: true },
+  crowded: { label: "Crowded", icon: "🚻", positive: false },
+  no_toilet_paper: { label: "No toilet paper", icon: "🧻", positive: false },
+  locked: { label: "Locked", icon: "🔒", positive: false }
 };
 
 const formatDate = (value: string) => {
@@ -85,11 +102,6 @@ const openNavigation = (lat: number, lng: number) => {
   void Linking.openURL(mapsUrl).catch(() => {
     void Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
   });
-};
-
-const openWebPage = (restroomId: string, hash?: string) => {
-  const base = mobileEnv.apiBaseUrl.replace(/\/$/, "");
-  void Linking.openURL(`${base}/restroom/${restroomId}${hash ?? ""}`);
 };
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -124,6 +136,7 @@ function ReviewCard({ review }: { review: Review }) {
             if (!info) return null;
             return (
               <View key={tag} style={[styles.signalChip, info.positive ? styles.signalChipPositive : styles.signalChipNegative]}>
+                <Text style={styles.signalIcon}>{info.icon}</Text>
                 <Text style={[styles.signalChipText, info.positive ? styles.signalChipTextPositive : styles.signalChipTextNegative]}>
                   {info.label}
                 </Text>
@@ -134,11 +147,102 @@ function ReviewCard({ review }: { review: Review }) {
       )}
 
       {review.review_text ? (
-        <Text style={styles.reviewText}>{review.review_text}</Text>
+        <Text style={styles.reviewText}>"{review.review_text}"</Text>
       ) : (
         <Text style={styles.reviewTextEmpty}>No additional notes shared.</Text>
       )}
     </View>
+  );
+}
+
+// ─── Photo gallery with lightbox ─────────────────────────────────────────────
+
+function PhotoGallery({
+  photos,
+  isLoading,
+  hiddenCount
+}: {
+  photos: RestroomPhotoItem[];
+  isLoading: boolean;
+  hiddenCount: number;
+}) {
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+
+  const closeLightbox = useCallback(() => setLightboxIndex(null), []);
+  const showPrev = useCallback(
+    () => setLightboxIndex((i) => (i === null ? null : (i - 1 + photos.length) % photos.length)),
+    [photos.length]
+  );
+  const showNext = useCallback(
+    () => setLightboxIndex((i) => (i === null ? null : (i + 1) % photos.length)),
+    [photos.length]
+  );
+
+  const inlinePhotos = photos.slice(0, INLINE_PHOTO_LIMIT);
+  const activePhoto = lightboxIndex !== null ? photos[lightboxIndex] ?? null : null;
+
+  if (isLoading) {
+    return <ActivityIndicator color={mobileTheme.colors.brandStrong} style={{ alignSelf: "flex-start", marginTop: 4 }} />;
+  }
+
+  if (photos.length === 0) {
+    return <Text style={styles.emptyNote}>No approved photos yet. Uploads are reviewed before they appear.</Text>;
+  }
+
+  return (
+    <>
+      {/* Grid */}
+      <View style={styles.photoGrid}>
+        {inlinePhotos.map((photo, index) => {
+          const isOverflowTile = hiddenCount > 0 && index === inlinePhotos.length - 1;
+          return (
+            <Pressable key={photo.id} onPress={() => setLightboxIndex(index)} style={styles.photoGridItem}>
+              <Image source={{ uri: photo.thumbnailUrl }} style={styles.photoGridThumb} resizeMode="cover" />
+              {isOverflowTile && (
+                <View style={styles.overflowOverlay}>
+                  <Text style={styles.overflowText}>+{hiddenCount} more</Text>
+                </View>
+              )}
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {/* Lightbox modal */}
+      {activePhoto ? (
+        <Modal visible animationType="fade" statusBarTranslucent onRequestClose={closeLightbox}>
+          <View style={lightboxStyles.container}>
+            {/* Close */}
+            <Pressable style={lightboxStyles.closeBtn} onPress={closeLightbox} hitSlop={12}>
+              <Text style={lightboxStyles.closeBtnText}>✕</Text>
+            </Pressable>
+
+            {/* Photo */}
+            <Image source={{ uri: activePhoto.url }} style={lightboxStyles.image} resizeMode="contain" />
+
+            {/* Prev/Next */}
+            {photos.length > 1 && (
+              <>
+                <Pressable style={[lightboxStyles.navBtn, lightboxStyles.navLeft]} onPress={showPrev} hitSlop={8}>
+                  <Text style={lightboxStyles.navBtnText}>‹</Text>
+                </Pressable>
+                <Pressable style={[lightboxStyles.navBtn, lightboxStyles.navRight]} onPress={showNext} hitSlop={8}>
+                  <Text style={lightboxStyles.navBtnText}>›</Text>
+                </Pressable>
+              </>
+            )}
+
+            {/* Footer */}
+            <View style={lightboxStyles.footer}>
+              <Text style={lightboxStyles.footerDate}>{formatDate(activePhoto.createdAt)}</Text>
+              <Text style={lightboxStyles.footerCount}>
+                {(lightboxIndex ?? 0) + 1} / {photos.length}
+              </Text>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
+    </>
   );
 }
 
@@ -147,6 +251,7 @@ function ReviewCard({ review }: { review: Review }) {
 export default function RestroomDetailScreen() {
   const params = useLocalSearchParams<{ id?: string | string[] }>();
   const router = useRouter();
+  const { user } = useSession();
 
   const restroomId = useMemo(() => {
     const resolved = Array.isArray(params.id) ? params.id[0] : params.id;
@@ -159,7 +264,14 @@ export default function RestroomDetailScreen() {
   const [photos, setPhotos] = useState<RestroomPhotoItem[]>([]);
   const [isLoading, setIsLoading] = useState(!initialCachedRestroom);
   const [isLoadingReviews, setIsLoadingReviews] = useState(true);
+  const [isLoadingPhotos, setIsLoadingPhotos] = useState(true);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showReviewForm, setShowReviewForm] = useState(false);
+
+  // Keep a stable ref to the current restroom for callbacks that shouldn't change identity.
+  const restroomRef = useRef(restroom);
+  useEffect(() => { restroomRef.current = restroom; }, [restroom]);
 
   useEffect(() => {
     let cancelled = false;
@@ -169,6 +281,7 @@ export default function RestroomDetailScreen() {
         setErrorMessage("Missing restroom id.");
         setIsLoading(false);
         setIsLoadingReviews(false);
+        setIsLoadingPhotos(false);
         return;
       }
 
@@ -193,33 +306,105 @@ export default function RestroomDetailScreen() {
       }
       setIsLoading(false);
 
-      if (reviewsResult.status === "fulfilled") {
-        setReviews(reviewsResult.value);
-      }
+      if (reviewsResult.status === "fulfilled") setReviews(reviewsResult.value);
       setIsLoadingReviews(false);
 
-      if (photosResult.status === "fulfilled") {
-        setPhotos(photosResult.value);
-      }
+      if (photosResult.status === "fulfilled") setPhotos(photosResult.value);
+      setIsLoadingPhotos(false);
     };
 
     void loadAll();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [restroomId]);
+
+  const handleReviewSuccess = useCallback(() => {
+    setShowReviewForm(false);
+    // Refresh reviews after a short delay to let Supabase propagate
+    setTimeout(() => {
+      if (!restroomId) return;
+      void getRestroomReviews(restroomId).then((updated) => setReviews(updated)).catch(() => null);
+    }, 600);
+  }, [restroomId]);
+
+  const handleAddPhoto = useCallback(async () => {
+    if (!user) {
+      Alert.alert("Sign in required", "Please sign in to upload a restroom photo.", [
+        { text: "Cancel" },
+        { text: "Sign in", onPress: () => router.push("/sign-in") }
+      ]);
+      return;
+    }
+
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Poopin needs access to your photo library to upload photos.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8
+    });
+
+    if (result.canceled || !result.assets[0]) return;
+
+    const asset = result.assets[0];
+    if (!asset.uri) return;
+
+    setIsUploadingPhoto(true);
+    try {
+      await uploadRestroomPhoto({
+        bathroomId: restroomId,
+        imageUri: asset.uri,
+        mimeType: asset.mimeType ?? undefined,
+        profileId: user.id
+      });
+
+      Alert.alert("Photo submitted!", "Your photo has been submitted for review and will appear once approved.");
+    } catch (error) {
+      Alert.alert("Upload failed", error instanceof Error ? error.message : "Could not upload photo. Please try again.");
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  }, [user, restroomId, router]);
+
+  const handleWriteReview = useCallback(() => {
+    if (!user) {
+      Alert.alert("Sign in required", "Please sign in to write a review.", [
+        { text: "Cancel" },
+        { text: "Sign in", onPress: () => router.push("/sign-in") }
+      ]);
+      return;
+    }
+    setShowReviewForm(true);
+  }, [user, router]);
 
   const heroPhotoUri = photos[0]?.url ?? restroom?.previewPhotoUrl ?? null;
   const hasRatings = restroom && restroom.ratings.reviewCount > 0 && restroom.ratings.overall > 0;
   const qualitySignals = (restroom?.ratings.qualitySignals ?? []) as ReviewQuickTag[];
   const featureTags = restroom ? buildFeatureTags(restroom) : [];
+  const hiddenPhotoCount = Math.max(0, photos.length - INLINE_PHOTO_LIMIT);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <Stack.Screen options={{ title: restroom?.name ?? "Restroom detail" }} />
 
+      {/* Native review form modal */}
+      {restroom && user ? (
+        <ReviewFormModal
+          visible={showReviewForm}
+          bathroomId={restroom.id}
+          restroomName={restroom.name}
+          profileId={user.id}
+          onClose={() => setShowReviewForm(false)}
+          onSuccess={handleReviewSuccess}
+        />
+      ) : null}
+
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Back link */}
+        {/* Back */}
         <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.backLink, pressed && { opacity: 0.7 }]}>
           <Text style={styles.backLinkText}>← Back</Text>
         </Pressable>
@@ -241,14 +426,12 @@ export default function RestroomDetailScreen() {
               <Image source={{ uri: heroPhotoUri }} style={styles.heroPhoto} resizeMode="cover" />
             ) : null}
 
-            {/* Main content card */}
+            {/* ── Identity card ── */}
             <View style={styles.mainCard}>
-              {/* Eyebrow + name + location */}
               <Text style={styles.eyebrow}>Restroom listing</Text>
               <Text style={styles.title}>{restroom.name}</Text>
               <Text style={styles.locationText}>{getLocationLine(restroom)}</Text>
 
-              {/* Meta pills */}
               <View style={styles.metaPillRow}>
                 <View style={styles.pill}>
                   <Text style={styles.pillText}>{getSourceLabel(restroom.source)}</Text>
@@ -258,7 +441,7 @@ export default function RestroomDetailScreen() {
                 </View>
               </View>
 
-              {/* Navigate button */}
+              {/* Navigate */}
               <Pressable
                 onPress={() => openNavigation(restroom.lat, restroom.lng)}
                 style={({ pressed }) => [styles.navigateBtn, pressed && styles.btnPressed]}
@@ -266,16 +449,16 @@ export default function RestroomDetailScreen() {
                 <Text style={styles.navigateBtnText}>▶  Navigate</Text>
               </Pressable>
 
-              {/* Write a review button */}
+              {/* Write a review */}
               <Pressable
-                onPress={() => openWebPage(restroom.id, "?intent=review#add-review")}
+                onPress={handleWriteReview}
                 style={({ pressed }) => [styles.outlineBtn, pressed && styles.btnPressed]}
               >
                 <Text style={styles.outlineBtnText}>✏  Write a review</Text>
               </Pressable>
             </View>
 
-            {/* Ratings card */}
+            {/* ── Ratings card ── */}
             {hasRatings ? (
               <View style={styles.sectionCard}>
                 <Text style={styles.sectionTitle}>Ratings</Text>
@@ -288,7 +471,6 @@ export default function RestroomDetailScreen() {
                   Based on {restroom.ratings.reviewCount} review{restroom.ratings.reviewCount === 1 ? "" : "s"}
                 </Text>
 
-                {/* Quality signals */}
                 {qualitySignals.length > 0 && (
                   <View style={styles.signalRow}>
                     {qualitySignals.map((tag) => {
@@ -296,6 +478,7 @@ export default function RestroomDetailScreen() {
                       if (!info) return null;
                       return (
                         <View key={tag} style={[styles.signalChip, info.positive ? styles.signalChipPositive : styles.signalChipNegative]}>
+                          <Text style={styles.signalIcon}>{info.icon}</Text>
                           <Text style={[styles.signalChipText, info.positive ? styles.signalChipTextPositive : styles.signalChipTextNegative]}>
                             {info.label}
                           </Text>
@@ -307,7 +490,7 @@ export default function RestroomDetailScreen() {
               </View>
             ) : null}
 
-            {/* Feature tags */}
+            {/* ── Amenities ── */}
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Access &amp; amenities</Text>
               <View style={styles.tagWrap}>
@@ -319,58 +502,65 @@ export default function RestroomDetailScreen() {
               </View>
             </View>
 
-            {/* Photos section */}
+            {/* ── Photos ── */}
             <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>Photos</Text>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionTitle}>
+                  Photos{!isLoadingPhotos && photos.length > 0 ? ` (${photos.length})` : ""}
+                </Text>
+              </View>
 
-              {photos.length > 0 ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoScroll}>
-                  {photos.map((photo) => (
-                    <Image key={photo.id} source={{ uri: photo.url }} style={styles.photoItem} resizeMode="cover" />
-                  ))}
-                </ScrollView>
-              ) : (
-                <Text style={styles.emptyNote}>No approved photos yet.</Text>
-              )}
+              <PhotoGallery photos={photos} isLoading={isLoadingPhotos} hiddenCount={hiddenPhotoCount} />
 
               <Pressable
-                onPress={() => openWebPage(restroom.id, "?intent=photo#photos")}
+                onPress={() => void handleAddPhoto()}
+                disabled={isUploadingPhoto}
                 style={({ pressed }) => [styles.addPhotoBtn, pressed && styles.btnPressed]}
               >
-                <Text style={styles.addPhotoBtnText}>📷  Add a photo</Text>
+                {isUploadingPhoto ? (
+                  <ActivityIndicator size="small" color={mobileTheme.colors.textPrimary} />
+                ) : (
+                  <Text style={styles.addPhotoBtnText}>📷  Add a photo</Text>
+                )}
               </Pressable>
-              <Text style={styles.addPhotoHint}>Sign in on the web to upload. Photos are reviewed before appearing publicly.</Text>
+
+              <Text style={styles.addPhotoHint}>
+                {user ? "Photos are reviewed before appearing publicly." : "Sign in to upload a photo."}
+              </Text>
             </View>
 
-            {/* Reviews section */}
+            {/* ── Reviews ── */}
             <View style={[styles.sectionCard, styles.sectionCardLast]}>
-              <View style={styles.reviewsHeader}>
+              <View style={styles.sectionHeaderRow}>
                 <Text style={styles.sectionTitle}>
                   {isLoadingReviews ? "Reviews" : `Recent reviews${reviews.length > 0 ? ` (${reviews.length})` : ""}`}
                 </Text>
-                <Pressable
-                  onPress={() => openWebPage(restroom.id, "?intent=review#add-review")}
-                  style={({ pressed }) => [styles.writeReviewLink, pressed && { opacity: 0.7 }]}
-                >
+                <Pressable onPress={handleWriteReview} style={({ pressed }) => [styles.writeReviewLink, pressed && { opacity: 0.7 }]}>
                   <Text style={styles.writeReviewLinkText}>Write a review →</Text>
                 </Pressable>
               </View>
 
               {isLoadingReviews ? (
-                <ActivityIndicator color={mobileTheme.colors.brandStrong} style={{ marginTop: 8 }} />
+                <ActivityIndicator color={mobileTheme.colors.brandStrong} style={{ alignSelf: "flex-start" }} />
               ) : reviews.length === 0 ? (
                 <View style={styles.noReviewsCard}>
                   <Text style={styles.noReviewsTitle}>Be the first to review</Text>
-                  <Text style={styles.noReviewsBody}>Share your experience to help others find clean, accessible restrooms.</Text>
+                  <Text style={styles.noReviewsBody}>
+                    Share your experience to help others find clean, accessible restrooms.
+                  </Text>
                   <Pressable
-                    onPress={() => openWebPage(restroom.id, "?intent=review#add-review")}
-                    style={({ pressed }) => [styles.navigateBtn, { marginTop: 12 }, pressed && styles.btnPressed]}
+                    onPress={handleWriteReview}
+                    style={({ pressed }) => [styles.navigateBtn, { marginTop: 14 }, pressed && styles.btnPressed]}
                   >
                     <Text style={styles.navigateBtnText}>Write a review</Text>
                   </Pressable>
                 </View>
               ) : (
-                reviews.map((review) => <ReviewCard key={review.id} review={review} />)
+                <View style={styles.reviewList}>
+                  {reviews.map((review) => (
+                    <ReviewCard key={review.id} review={review} />
+                  ))}
+                </View>
               )}
             </View>
           </>
@@ -380,7 +570,7 @@ export default function RestroomDetailScreen() {
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   safeArea: {
@@ -388,7 +578,7 @@ const styles = StyleSheet.create({
     backgroundColor: mobileTheme.colors.pageBackground
   },
   scrollContent: {
-    paddingBottom: 48
+    paddingBottom: 52
   },
   backLink: {
     paddingHorizontal: mobileTheme.spacing.screenX,
@@ -441,7 +631,7 @@ const styles = StyleSheet.create({
   },
   heroPhoto: {
     width: "100%",
-    height: 220,
+    height: 230,
     backgroundColor: mobileTheme.colors.surfaceMuted
   },
   mainCard: {
@@ -449,7 +639,8 @@ const styles = StyleSheet.create({
     borderBottomColor: mobileTheme.colors.borderSubtle,
     borderBottomWidth: 1,
     paddingHorizontal: mobileTheme.spacing.screenX,
-    paddingVertical: 20,
+    paddingTop: 20,
+    paddingBottom: 22,
     gap: 14
   },
   eyebrow: {
@@ -525,12 +716,18 @@ const styles = StyleSheet.create({
     borderTopColor: mobileTheme.colors.borderSubtle,
     borderTopWidth: 1,
     paddingHorizontal: mobileTheme.spacing.screenX,
-    paddingVertical: 20,
+    paddingTop: 20,
+    paddingBottom: 22,
     gap: 14
   },
   sectionCardLast: {
     borderBottomColor: mobileTheme.colors.borderSubtle,
     borderBottomWidth: 1
+  },
+  sectionHeaderRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between"
   },
   sectionTitle: {
     color: mobileTheme.colors.textPrimary,
@@ -566,8 +763,7 @@ const styles = StyleSheet.create({
   reviewCountNote: {
     color: mobileTheme.colors.textMuted,
     fontSize: 13,
-    lineHeight: 18,
-    marginTop: -4
+    lineHeight: 18
   },
   signalRow: {
     flexDirection: "row",
@@ -575,8 +771,11 @@ const styles = StyleSheet.create({
     gap: 8
   },
   signalChip: {
+    alignItems: "center",
     borderRadius: mobileTheme.radii.pill,
     borderWidth: 1,
+    flexDirection: "row",
+    gap: 5,
     paddingHorizontal: 12,
     paddingVertical: 6
   },
@@ -587,6 +786,9 @@ const styles = StyleSheet.create({
   signalChipNegative: {
     backgroundColor: "#fef9ec",
     borderColor: "#fcd34d"
+  },
+  signalIcon: {
+    fontSize: 13
   },
   signalChipText: {
     fontSize: 13,
@@ -616,21 +818,39 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600"
   },
-  photoScroll: {
-    marginHorizontal: -mobileTheme.spacing.screenX,
-    paddingHorizontal: mobileTheme.spacing.screenX
+  // Photo grid
+  photoGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: GRID_GAP
   },
-  photoItem: {
-    width: 160,
-    height: 120,
+  photoGridItem: {
     borderRadius: 12,
-    marginRight: 10,
+    height: THUMB_SIZE * 0.72,
+    overflow: "hidden",
+    width: THUMB_SIZE
+  },
+  photoGridThumb: {
+    width: "100%",
+    height: "100%",
     backgroundColor: mobileTheme.colors.surfaceMuted
+  },
+  overflowOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    backgroundColor: "rgba(15,23,42,0.58)",
+    justifyContent: "center"
+  },
+  overflowText: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "700"
   },
   emptyNote: {
     color: mobileTheme.colors.textFaint,
     fontSize: 14,
-    fontStyle: "italic"
+    fontStyle: "italic",
+    lineHeight: 20
   },
   addPhotoBtn: {
     alignItems: "center",
@@ -639,6 +859,7 @@ const styles = StyleSheet.create({
     borderRadius: mobileTheme.radii.sm,
     borderWidth: 1,
     justifyContent: "center",
+    minHeight: 46,
     paddingVertical: 12
   },
   addPhotoBtnText: {
@@ -649,13 +870,7 @@ const styles = StyleSheet.create({
   addPhotoHint: {
     color: mobileTheme.colors.textFaint,
     fontSize: 12,
-    lineHeight: 17,
-    marginTop: -4
-  },
-  reviewsHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between"
+    lineHeight: 17
   },
   writeReviewLink: {
     paddingVertical: 4
@@ -682,6 +897,9 @@ const styles = StyleSheet.create({
     color: mobileTheme.colors.textSecondary,
     fontSize: 13,
     lineHeight: 19
+  },
+  reviewList: {
+    gap: 12
   },
   reviewCard: {
     backgroundColor: mobileTheme.colors.pageBackground,
@@ -731,12 +949,85 @@ const styles = StyleSheet.create({
   reviewText: {
     color: mobileTheme.colors.textSecondary,
     fontSize: 14,
-    lineHeight: 21,
-    fontStyle: "italic"
+    fontStyle: "italic",
+    lineHeight: 21
   },
   reviewTextEmpty: {
     color: mobileTheme.colors.textFaint,
     fontSize: 13,
     fontStyle: "italic"
+  }
+});
+
+const lightboxStyles = StyleSheet.create({
+  container: {
+    alignItems: "center",
+    backgroundColor: "rgba(2,6,23,0.96)",
+    flex: 1,
+    justifyContent: "center"
+  },
+  closeBtn: {
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderColor: "rgba(255,255,255,0.25)",
+    borderRadius: 22,
+    borderWidth: 1,
+    height: 44,
+    justifyContent: "center",
+    position: "absolute",
+    right: 16,
+    top: 56,
+    width: 44,
+    zIndex: 10
+  },
+  closeBtnText: {
+    color: "#ffffff",
+    fontSize: 17,
+    fontWeight: "600"
+  },
+  image: {
+    height: "72%",
+    width: "100%"
+  },
+  navBtn: {
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.45)",
+    borderColor: "rgba(255,255,255,0.25)",
+    borderRadius: 22,
+    borderWidth: 1,
+    height: 44,
+    justifyContent: "center",
+    position: "absolute",
+    top: "50%",
+    width: 44,
+    zIndex: 10
+  },
+  navLeft: {
+    left: 16
+  },
+  navRight: {
+    right: 16
+  },
+  navBtnText: {
+    color: "#ffffff",
+    fontSize: 28,
+    fontWeight: "300",
+    lineHeight: 32
+  },
+  footer: {
+    bottom: 40,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    position: "absolute",
+    width: "100%"
+  },
+  footerDate: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 13
+  },
+  footerCount: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 13
   }
 });

@@ -20,11 +20,18 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Poopin uses your location to show nearby restrooms.",
+        "NSPhotoLibraryUsageDescription": "Poopin needs access to your photo library to upload restroom photos.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Poopin needs access to your photo library to upload restroom photos."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
