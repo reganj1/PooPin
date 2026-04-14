@@ -606,6 +606,140 @@ export const getMyRecentActivity = async (
   }
 };
 
+// ─── Your List (contribution history) ────────────────────────────────────────
+// Fetches the signed-in user's awarded point_events then enriches each row
+// with restroom name/address via batch lookups on reviews, photos, and
+// bathrooms. All queries use the authenticated Supabase client — RLS allows
+// a user to read their own point_events, reviews, and photos.
+
+export interface YourListItem {
+  id: string;
+  eventType: PointEventType;
+  pointsDelta: number;
+  createdAt: string;
+  entityId: string;
+  restroomId: string | null;
+  restroomName: string | null;
+  restroomAddressLine: string | null;
+  overallRating: number | null;
+  reviewText: string | null;
+  quickTags: string[] | null;
+}
+
+export const getMyContributions = async (
+  profileId: string,
+  limit = 60
+): Promise<YourListItem[]> => {
+  try {
+    // 1 — Fetch point events
+    const { data: events } = await supabase
+      .from("point_events")
+      .select("id, event_type, entity_id, points_delta, created_at")
+      .eq("profile_id", profileId)
+      .eq("status", "awarded")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (!events?.length) return [];
+
+    type RawEvent = { id: string; event_type: string; entity_id: string; points_delta: number; created_at: string };
+
+    // 2 — Bucket entity IDs by type
+    const reviewIds: string[] = [];
+    const photoIds: string[] = [];
+    const restroomIds: string[] = [];
+
+    for (const e of events as RawEvent[]) {
+      if (e.event_type === "review_created") reviewIds.push(e.entity_id);
+      else if (e.event_type === "photo_uploaded") photoIds.push(e.entity_id);
+      else if (e.event_type === "restroom_added") restroomIds.push(e.entity_id);
+    }
+
+    // 3 — Batch fetch reviews + photos in parallel
+    type RawReview = { id: string; bathroom_id: string; overall_rating: number; review_text: string; quick_tags: string[] | null };
+    type RawPhoto = { id: string; bathroom_id: string };
+    type RawBathroom = { id: string; name: string; address: string; city: string; state: string };
+
+    const [reviews, photos] = await Promise.all([
+      reviewIds.length > 0
+        ? supabase
+            .from("reviews")
+            .select("id, bathroom_id, overall_rating, review_text, quick_tags")
+            .in("id", reviewIds)
+            .then((r) => (r.data ?? []) as RawReview[])
+        : Promise.resolve([] as RawReview[]),
+      photoIds.length > 0
+        ? supabase
+            .from("photos")
+            .select("id, bathroom_id")
+            .in("id", photoIds)
+            .then((r) => (r.data ?? []) as RawPhoto[])
+        : Promise.resolve([] as RawPhoto[])
+    ]);
+
+    // 4 — Collect unique bathroom IDs and batch fetch
+    const bathroomIdSet = new Set<string>([
+      ...reviews.map((r) => r.bathroom_id).filter(Boolean),
+      ...photos.map((p) => p.bathroom_id).filter(Boolean),
+      ...restroomIds
+    ]);
+
+    const bathroomIds = [...bathroomIdSet];
+    const bathrooms =
+      bathroomIds.length > 0
+        ? ((
+            await supabase
+              .from("bathrooms")
+              .select("id, name, address, city, state")
+              .in("id", bathroomIds)
+          ).data ?? []) as RawBathroom[]
+        : [];
+
+    // 5 — Build lookup maps
+    const reviewMap = new Map(reviews.map((r) => [r.id, r]));
+    const photoMap = new Map(photos.map((p) => [p.id, p]));
+    const bathroomMap = new Map(bathrooms.map((b) => [b.id, b]));
+
+    // 6 — Assemble final items
+    return (events as RawEvent[]).map((e) => {
+      let restroomId: string | null = null;
+      let overallRating: number | null = null;
+      let reviewText: string | null = null;
+      let quickTags: string[] | null = null;
+
+      if (e.event_type === "review_created") {
+        const rev = reviewMap.get(e.entity_id);
+        restroomId = rev?.bathroom_id ?? null;
+        overallRating = rev?.overall_rating ?? null;
+        reviewText = rev?.review_text?.trim() || null;
+        quickTags = rev?.quick_tags ?? null;
+      } else if (e.event_type === "photo_uploaded") {
+        restroomId = photoMap.get(e.entity_id)?.bathroom_id ?? null;
+      } else if (e.event_type === "restroom_added") {
+        restroomId = e.entity_id;
+      }
+
+      const bth = restroomId ? bathroomMap.get(restroomId) : null;
+
+      return {
+        id: e.id,
+        eventType: e.event_type as PointEventType,
+        pointsDelta: e.points_delta,
+        createdAt: e.created_at,
+        entityId: e.entity_id,
+        restroomId: restroomId ?? null,
+        restroomName: bth?.name ?? null,
+        restroomAddressLine: bth ? [bth.address, bth.city].filter(Boolean).join(", ") : null,
+        overallRating,
+        reviewText,
+        quickTags
+      };
+    });
+  } catch {
+    return [];
+  }
+};
+
 // ─── Contact form ────────────────────────────────────────────────────────────
 
 export const CONTACT_TOPICS = [

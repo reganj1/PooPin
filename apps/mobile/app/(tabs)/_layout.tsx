@@ -34,6 +34,7 @@ export default function TabsLayout() {
         tabBarItemStyle: styles.tabItem
       }}
     >
+      {/* 1 — Explore */}
       <Tabs.Screen
         name="index"
         options={{
@@ -41,13 +42,19 @@ export default function TabsLayout() {
           tabBarIcon: ({ focused }) => <TabIcon name={focused ? "map" : "map-outline"} focused={focused} />
         }}
       />
+
+      {/* 2 — Your List */}
       <Tabs.Screen
-        name="leaderboard"
+        name="your-list"
         options={{
-          title: "Leaderboard",
-          tabBarIcon: ({ focused }) => <TabIcon name={focused ? "trophy" : "trophy-outline"} focused={focused} />
+          title: "Your List",
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name={focused ? "bookmark" : "bookmark-outline"} focused={focused} />
+          )
         }}
       />
+
+      {/* 3 — Add (centered, prominent) */}
       <Tabs.Screen
         name="add"
         options={{
@@ -57,6 +64,17 @@ export default function TabsLayout() {
           tabBarInactiveTintColor: mobileTheme.colors.brand
         }}
       />
+
+      {/* 4 — Leaderboard */}
+      <Tabs.Screen
+        name="leaderboard"
+        options={{
+          title: "Leaderboard",
+          tabBarIcon: ({ focused }) => <TabIcon name={focused ? "trophy" : "trophy-outline"} focused={focused} />
+        }}
+      />
+
+      {/* 5 — Profile */}
       <Tabs.Screen
         name="profile"
         options={{
