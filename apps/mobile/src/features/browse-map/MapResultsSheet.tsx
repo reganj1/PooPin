@@ -171,66 +171,72 @@ export function MapResultsSheet({
       {sheetState === "collapsed" ? null : (
         <>
           <View style={styles.controlsStripWrap}>
-            <View style={styles.sortControlGroup}>
-              <Pressable
-                onPress={() => setSortMode("closest")}
-                style={({ pressed }) => [
-                  styles.sortSegment,
-                  sortMode === "closest" ? styles.sortSegmentSelected : null,
-                  pressed ? styles.cardPressed : null
-                ]}
-              >
-                <Text style={[styles.sortSegmentText, sortMode === "closest" ? styles.sortSegmentTextSelected : null]}>Closest</Text>
-              </Pressable>
+            <View style={styles.controlsSection}>
+              <Text style={styles.controlsLabel}>Sort</Text>
+              <View style={styles.sortControlGroup}>
+                <Pressable
+                  onPress={() => setSortMode("closest")}
+                  style={({ pressed }) => [
+                    styles.sortSegment,
+                    sortMode === "closest" ? styles.sortSegmentSelected : null,
+                    pressed ? styles.cardPressed : null
+                  ]}
+                >
+                  <Text style={[styles.sortSegmentText, sortMode === "closest" ? styles.sortSegmentTextSelected : null]}>Closest</Text>
+                </Pressable>
 
-              <Pressable
-                onPress={() => setSortMode("recommended")}
-                style={({ pressed }) => [
-                  styles.sortSegment,
-                  sortMode === "recommended" ? styles.sortSegmentSelected : null,
-                  pressed ? styles.cardPressed : null
-                ]}
-              >
-                <Text style={[styles.sortSegmentText, sortMode === "recommended" ? styles.sortSegmentTextSelected : null]}>
-                  Recommended
-                </Text>
-              </Pressable>
+                <Pressable
+                  onPress={() => setSortMode("recommended")}
+                  style={({ pressed }) => [
+                    styles.sortSegment,
+                    sortMode === "recommended" ? styles.sortSegmentSelected : null,
+                    pressed ? styles.cardPressed : null
+                  ]}
+                >
+                  <Text style={[styles.sortSegmentText, sortMode === "recommended" ? styles.sortSegmentTextSelected : null]}>
+                    Recommended
+                  </Text>
+                </Pressable>
+              </View>
             </View>
 
-            <ScrollView contentContainerStyle={styles.filterChipRow} horizontal showsHorizontalScrollIndicator={false}>
-              <Pressable
-                onPress={() => setShowPublicOnly((current) => !current)}
-                style={({ pressed }) => [
-                  styles.filterChip,
-                  showPublicOnly ? styles.filterChipSelected : null,
-                  pressed ? styles.cardPressed : null
-                ]}
-              >
-                <Text style={[styles.filterChipText, showPublicOnly ? styles.filterChipTextSelected : null]}>Public only</Text>
-              </Pressable>
+            <View style={styles.controlsSection}>
+              <Text style={styles.controlsLabel}>Filters</Text>
+              <ScrollView contentContainerStyle={styles.filterChipRow} horizontal showsHorizontalScrollIndicator={false}>
+                <Pressable
+                  onPress={() => setShowPublicOnly((current) => !current)}
+                  style={({ pressed }) => [
+                    styles.filterChip,
+                    showPublicOnly ? styles.filterChipSelected : null,
+                    pressed ? styles.cardPressed : null
+                  ]}
+                >
+                  <Text style={[styles.filterChipText, showPublicOnly ? styles.filterChipTextSelected : null]}>Public only</Text>
+                </Pressable>
 
-              <Pressable
-                onPress={() => setShowAccessibleOnly((current) => !current)}
-                style={({ pressed }) => [
-                  styles.filterChip,
-                  showAccessibleOnly ? styles.filterChipSelected : null,
-                  pressed ? styles.cardPressed : null
-                ]}
-              >
-                <Text style={[styles.filterChipText, showAccessibleOnly ? styles.filterChipTextSelected : null]}>Accessible</Text>
-              </Pressable>
+                <Pressable
+                  onPress={() => setShowAccessibleOnly((current) => !current)}
+                  style={({ pressed }) => [
+                    styles.filterChip,
+                    showAccessibleOnly ? styles.filterChipSelected : null,
+                    pressed ? styles.cardPressed : null
+                  ]}
+                >
+                  <Text style={[styles.filterChipText, showAccessibleOnly ? styles.filterChipTextSelected : null]}>Accessible</Text>
+                </Pressable>
 
-              <Pressable
-                onPress={() => setShowBabyStationOnly((current) => !current)}
-                style={({ pressed }) => [
-                  styles.filterChip,
-                  showBabyStationOnly ? styles.filterChipSelected : null,
-                  pressed ? styles.cardPressed : null
-                ]}
-              >
-                <Text style={[styles.filterChipText, showBabyStationOnly ? styles.filterChipTextSelected : null]}>Baby station</Text>
-              </Pressable>
-            </ScrollView>
+                <Pressable
+                  onPress={() => setShowBabyStationOnly((current) => !current)}
+                  style={({ pressed }) => [
+                    styles.filterChip,
+                    showBabyStationOnly ? styles.filterChipSelected : null,
+                    pressed ? styles.cardPressed : null
+                  ]}
+                >
+                  <Text style={[styles.filterChipText, showBabyStationOnly ? styles.filterChipTextSelected : null]}>Baby station</Text>
+                </Pressable>
+              </ScrollView>
+            </View>
           </View>
 
           {selectedRestroom ? (
@@ -425,6 +431,16 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     paddingHorizontal: 14
   },
+  controlsSection: {
+    gap: 6
+  },
+  controlsLabel: {
+    color: mobileTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+    textTransform: "uppercase"
+  },
   sortControlGroup: {
     alignItems: "center",
     backgroundColor: mobileTheme.colors.surfaceMuted,
@@ -461,14 +477,14 @@ const styles = StyleSheet.create({
   },
   filterChip: {
     alignItems: "center",
-    backgroundColor: mobileTheme.colors.surface,
+    backgroundColor: mobileTheme.colors.surfaceMuted,
     borderColor: mobileTheme.colors.border,
     borderRadius: mobileTheme.radii.pill,
     borderWidth: 1,
     justifyContent: "center",
-    minHeight: 34,
+    minHeight: 32,
     paddingHorizontal: 12,
-    paddingVertical: 7
+    paddingVertical: 6
   },
   filterChipSelected: {
     backgroundColor: mobileTheme.colors.surfaceBrandTint,

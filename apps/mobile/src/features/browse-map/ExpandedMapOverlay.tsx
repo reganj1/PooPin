@@ -60,7 +60,8 @@ const MOBILE_SHEET_EXPANDED_VISIBLE_RATIO = 0.84;
 const MOBILE_SHEET_MAX_HEIGHT_RATIO = 0.86;
 const MOBILE_SHEET_SWIPE_VELOCITY_THRESHOLD = 0.55;
 const SEARCH_ROW_TOP_OFFSET = 6;
-const SHEET_TOP_MIN_GAP = 14;
+const SHEET_TOP_MIN_GAP = 20;
+const EXPANDED_SHEET_EXTRA_GAP = 20;
 
 const clampNumber = (value: number, min: number, max: number) => {
   const lowerBound = Math.min(min, max);
@@ -84,11 +85,16 @@ const getMobileSheetMetrics = (viewportHeight: number, topReservedHeight: number
     collapsedVisible + 120,
     maxHeight
   );
+  const maxExpandedVisibleByTopClamp = clampNumber(
+    maxHeight - (minOffset + EXPANDED_SHEET_EXTRA_GAP),
+    collapsedVisible + 120,
+    maxVisibleByTopClamp
+  );
   const expandedMinVisible = Math.min(maxVisibleByTopClamp, Math.max(collapsedVisible + 120, 240));
   const expandedVisible = clampNumber(
     Math.round(clampedViewportHeight * MOBILE_SHEET_EXPANDED_VISIBLE_RATIO),
     expandedMinVisible,
-    maxVisibleByTopClamp
+    maxExpandedVisibleByTopClamp
   );
   const defaultMaxVisible = Math.max(collapsedVisible + 72, expandedVisible - 72);
   const defaultMinVisible = Math.min(defaultMaxVisible, Math.max(collapsedVisible + 72, 220));
