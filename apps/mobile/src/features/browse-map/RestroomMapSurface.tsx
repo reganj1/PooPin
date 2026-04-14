@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { NearbyBathroom } from "@poopin/domain";
 import { StyleSheet, View } from "react-native";
-import MapView, { type MapPressEvent, type Region } from "react-native-maps";
+import MapView, { Marker, type MapPressEvent, type Region } from "react-native-maps";
 import { mobileTheme } from "../../ui/theme";
 import { reconcileMarkers, selectMapMarkerRestrooms } from "./reconcileMarkers";
 import { StableRestroomMarker } from "./StableRestroomMarker";
+
+const selectedMarkerImage = require("../../../assets/map-markers/restroom-marker-selected.png");
 
 interface Coordinates {
   lat: number;
@@ -57,6 +59,7 @@ export function RestroomMapSurface({
 }: RestroomMapSurfaceProps) {
   const mapRef = useRef<MapView | null>(null);
   const onSelectRestroomRef = useRef(onSelectRestroom);
+  const selectedRestroomIdRef = useRef(selectedRestroomId);
   const currentRegionRef = useRef<Region>(restoredRegion ?? {
     latitude: initialCenter.lat,
     longitude: initialCenter.lng,
@@ -82,14 +85,22 @@ export function RestroomMapSurface({
   }, [onSelectRestroom]);
 
   useEffect(() => {
+    selectedRestroomIdRef.current = selectedRestroomId;
+  }, [selectedRestroomId]);
+
+  // Reconcile markers only when restrooms data or focused pin changes.
+  // selectedRestroomId is intentionally read from a ref so that tapping a
+  // visible marker never triggers a reconciliation pass (the tapped marker is
+  // already rendered — no native child reorder needed).
+  useEffect(() => {
     setRenderedMarkers((currentMarkers) => {
       const markerRestrooms = selectMapMarkerRestrooms(currentMarkers, restrooms, {
-        pinnedRestroomId: focusedRestroomId ?? selectedRestroomId
+        pinnedRestroomId: focusedRestroomId ?? selectedRestroomIdRef.current
       });
 
       return reconcileMarkers(currentMarkers, markerRestrooms);
     });
-  }, [focusedRestroomId, restrooms, selectedRestroomId]);
+  }, [focusedRestroomId, restrooms]);
 
   const handleMapPress = useCallback((event: MapPressEvent) => {
     if (Date.now() - lastMarkerPressAtRef.current < 250) {
@@ -101,6 +112,19 @@ export function RestroomMapSurface({
 
   const handleMarkerPress = useCallback((restroomId: string) => {
     logMapDebug("marker tap", { restroomId });
+    lastMarkerPressAtRef.current = Date.now();
+    onSelectRestroomRef.current(restroomId);
+  }, []);
+
+  // Stable handler for the selected indicator — reads the current selection from
+  // a ref so the callback identity never changes and the indicator never remounts.
+  const handleIndicatorPress = useCallback(() => {
+    const restroomId = selectedRestroomIdRef.current;
+    if (!restroomId) {
+      return;
+    }
+
+    logMapDebug("indicator tap", { restroomId });
     lastMarkerPressAtRef.current = Date.now();
     onSelectRestroomRef.current(restroomId);
   }, []);
@@ -220,6 +244,28 @@ export function RestroomMapSurface({
             onPressMarker={handleMarkerPress}
           />
         ))}
+        {/* Selected indicator — always rendered LAST so it sits above all base
+            markers in native z-order. Uses a separate blue image; the base marker
+            underneath is untouched. The stable key means React only updates the
+            coordinate prop when selection moves, never inserts/removes mid-list. */}
+        {selectedRestroomId ? (() => {
+          const indicatorMarker = renderedMarkers.find(m => m.id === selectedRestroomId);
+          if (!indicatorMarker) {
+            return null;
+          }
+
+          return (
+            <Marker
+              anchor={{ x: 0.5, y: 0.5 }}
+              coordinate={indicatorMarker.coordinate}
+              identifier="__selected_indicator__"
+              image={selectedMarkerImage}
+              key="__selected_indicator__"
+              onPress={handleIndicatorPress}
+              tracksViewChanges={false}
+            />
+          );
+        })() : null}
       </MapView>
 
       {!coordinates ? <View pointerEvents="none" style={styles.mapTint} /> : null}

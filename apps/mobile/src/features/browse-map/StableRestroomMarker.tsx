@@ -21,6 +21,7 @@ function StableRestroomMarkerComponent({ marker, onPressMarker }: StableRestroom
       image={normalMarkerImage}
       identifier={marker.id}
       onPress={handlePress}
+      tracksViewChanges={false}
     />
   );
 }

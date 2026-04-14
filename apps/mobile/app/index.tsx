@@ -24,8 +24,8 @@ const MARKER_TAP_SUPPRESSION_MS = 1000;
 const SHEET_SELECTION_SUPPRESSION_MS = 600;
 const MARKER_EXPLORATION_IDLE_EXIT_MS = 1000;
 const PLACE_SEARCH_REGION_DELTA = {
-  latitudeDelta: 0.24,
-  longitudeDelta: 0.24
+  latitudeDelta: 0.08,
+  longitudeDelta: 0.08
 } as const;
 const PLACE_SUGGESTION_DEBOUNCE_MS = 240;
 const MAX_LOCAL_SEARCH_SUGGESTIONS = 4;
