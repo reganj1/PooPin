@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -38,6 +39,7 @@ import {
   getUnlockedCards,
   RARITY_COLORS
 } from "../../src/lib/collectibles";
+import { getTitleCardImage } from "../../src/features/profile/cardAssets";
 import { useSession } from "../../src/providers/session-provider";
 import { mobileTheme } from "../../src/ui/theme";
 
@@ -112,6 +114,7 @@ function ProgressHeroCard({
   counts: Counts;
 }) {
   const c = RARITY_COLORS[activeCard.rarity] ?? RARITY_COLORS.Common;
+  const activeCardImage = getTitleCardImage(activeCard.key);
   const nextCard = getNextCard(score);
   const remaining = nextCard ? Math.max(0, nextCard.threshold - score) : 0;
 
@@ -147,8 +150,18 @@ function ProgressHeroCard({
 
       {/* ── Active card showcase ── */}
       <View style={styles.heroShowcase}>
-        <View style={[styles.heroEmojiWrap, { borderColor: c.border }]}>
-          <Text style={styles.heroEmoji}>{activeCard.mascot}</Text>
+        {/* Rarity-tinted wrap; PNG art fills it, emoji as fallback */}
+        <View style={[styles.heroEmojiWrap, { borderColor: c.border, backgroundColor: c.bg }]}>
+          {activeCardImage ? (
+            <Image
+              source={activeCardImage}
+              style={styles.heroCardImage}
+              resizeMode="contain"
+              accessibilityLabel={activeCard.title}
+            />
+          ) : (
+            <Text style={styles.heroEmoji}>{activeCard.mascot}</Text>
+          )}
         </View>
         <View style={styles.heroShowcaseText}>
           {/* Title uses rarity color — small, intentional collectible accent */}
@@ -247,6 +260,7 @@ function CollectionCard({
 }) {
   const c = RARITY_COLORS[card.rarity] ?? RARITY_COLORS.Common;
   const locked = !isUnlocked;
+  const cardImage = getTitleCardImage(card.key);
 
   return (
     <Pressable
@@ -265,7 +279,21 @@ function CollectionCard({
         pressed && !isActive && !locked && styles.collCardPressed
       ]}
     >
-      {/* Top-right state badge: checkmark (equipped) or lock (locked) */}
+      {/* Art image — bleeds to card top/sides; card's overflow:hidden clips to rounded corners */}
+      <View style={[styles.collCardImageWrap, { backgroundColor: c.bg }]}>
+        {cardImage ? (
+          <Image
+            source={cardImage}
+            style={styles.collCardImage}
+            resizeMode="contain"
+            accessibilityLabel={card.title}
+          />
+        ) : (
+          <Text style={styles.collCardEmoji}>{card.mascot}</Text>
+        )}
+      </View>
+
+      {/* State badge — absolutely positioned over the art */}
       {isActive ? (
         <View style={[styles.collActiveBadge, { backgroundColor: c.text }]}>
           <Ionicons name="checkmark" size={10} color="#ffffff" />
@@ -275,9 +303,6 @@ function CollectionCard({
           <Ionicons name="lock-closed" size={9} color={mobileTheme.colors.textFaint} />
         </View>
       ) : null}
-
-      {/* Emoji */}
-      <Text style={styles.collCardEmoji}>{card.mascot}</Text>
 
       {/* Title */}
       <Text
@@ -467,9 +492,22 @@ function SettingsRow({
 
 function PreviewCard({ card }: { card: CollectibleCard }) {
   const c = RARITY_COLORS[card.rarity] ?? RARITY_COLORS.Common;
+  const cardImage = getTitleCardImage(card.key);
   return (
-    <View style={[styles.previewCard, { borderColor: c.border, backgroundColor: c.bg }]}>
-      <Text style={styles.previewCardEmoji}>{card.mascot}</Text>
+    <View style={[styles.previewCard, { borderColor: c.border }]}>
+      {/* Art image — bleeds to card top/sides; card's overflow:hidden clips corners */}
+      <View style={[styles.previewCardImageWrap, { backgroundColor: c.bg }]}>
+        {cardImage ? (
+          <Image
+            source={cardImage}
+            style={styles.previewCardImage}
+            resizeMode="contain"
+            accessibilityLabel={card.title}
+          />
+        ) : (
+          <Text style={styles.previewCardEmoji}>{card.mascot}</Text>
+        )}
+      </View>
       <Text style={[styles.previewCardTitle, { color: c.text }]} numberOfLines={1}>
         {card.title}
       </Text>
@@ -1228,6 +1266,10 @@ const styles = StyleSheet.create({
   heroEmoji: {
     fontSize: 34
   },
+  heroCardImage: {
+    height: 56,
+    width: 56
+  },
   heroShowcaseText: {
     flex: 1,
     gap: 4,
@@ -1350,6 +1392,22 @@ const styles = StyleSheet.create({
   collCardEmoji: {
     fontSize: 36,
     textAlign: "center"
+  },
+  /**
+   * Bleeds to the top and sides of the card (negates the card's padding).
+   * The card's overflow:hidden + borderRadius clips the rounded top corners.
+   */
+  collCardImageWrap: {
+    alignItems: "center",
+    height: 96,
+    justifyContent: "center",
+    marginHorizontal: -13,
+    marginTop: -13,
+    overflow: "hidden"
+  },
+  collCardImage: {
+    height: "100%",
+    width: "100%"
   },
   collCardTitle: {
     color: mobileTheme.colors.textPrimary,
@@ -1526,12 +1584,26 @@ const styles = StyleSheet.create({
     borderRadius: mobileTheme.radii.md,
     borderWidth: 1.5,
     gap: 6,
+    overflow: "hidden",
     padding: 14,
     width: 112,
     ...mobileTheme.shadows.card
   },
   previewCardEmoji: {
     fontSize: 30
+  },
+  previewCardImageWrap: {
+    alignItems: "center",
+    alignSelf: "stretch",
+    height: 72,
+    justifyContent: "center",
+    marginHorizontal: -14,
+    marginTop: -14,
+    overflow: "hidden"
+  },
+  previewCardImage: {
+    height: "100%",
+    width: "100%"
   },
   previewCardTitle: {
     fontSize: 11,
