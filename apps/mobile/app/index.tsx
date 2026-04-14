@@ -73,6 +73,7 @@ export default function HomeScreen() {
   const [mapRegion, setMapRegion] = useState<Region | null>(null);
   const [mapSheetState, setMapSheetState] = useState<MapSheetState>("default");
   const [selectedRestroomId, setSelectedRestroomId] = useState<string | null>(null);
+  const [showExpandedMapSelectionPopup, setShowExpandedMapSelectionPopup] = useState(false);
   const [mapFocusedRestroomId, setMapFocusedRestroomId] = useState<string | null>(null);
   const [mapFocusRequestKey, setMapFocusRequestKey] = useState(0);
   const [locationCenterRequestKey, setLocationCenterRequestKey] = useState(0);
@@ -214,6 +215,7 @@ export default function HomeScreen() {
 
     if (!selectedRestroomId) {
       setMapFocusedRestroomId(null);
+      setShowExpandedMapSelectionPopup(false);
     }
   }, [selectedRestroomId]);
 
@@ -389,6 +391,9 @@ export default function HomeScreen() {
   };
 
   const handleMapSheetStateChange = (nextState: MapSheetState) => {
+    if (nextState !== "collapsed") {
+      setShowExpandedMapSelectionPopup(false);
+    }
     setMapSheetState(nextState);
   };
 
@@ -397,16 +402,23 @@ export default function HomeScreen() {
       enterMarkerExplorationMode(restroomId);
       setMapFocusedRestroomId(null);
       setSelectedRestroomId(restroomId);
+
+      if (isExpandedMapOpen) {
+        setMapSheetState("collapsed");
+        setShowExpandedMapSelectionPopup(true);
+      }
       return;
     }
 
     startMarkerExplorationIdleExit();
+    setShowExpandedMapSelectionPopup(false);
     setSelectedRestroomId(restroomId);
   };
 
   const handleSelectRestroomFromSheet = (restroomId: string) => {
     logMapDebug("row selection", { restroomId });
     beginBoundsSuppression("row selection", SHEET_SELECTION_SUPPRESSION_MS, { restroomId });
+    setShowExpandedMapSelectionPopup(false);
     setSelectedRestroomId(restroomId);
     setMapFocusedRestroomId(restroomId);
     setMapFocusRequestKey((current) => current + 1);
@@ -587,9 +599,11 @@ export default function HomeScreen() {
   } as const;
   const openExpandedMap = () => {
     setMapSheetState("default");
+    setShowExpandedMapSelectionPopup(false);
     setIsExpandedMapOpen(true);
   };
   const closeExpandedMap = () => {
+    setShowExpandedMapSelectionPopup(false);
     setIsExpandedMapOpen(false);
   };
   const handleRecenterRequest = () => {
@@ -768,8 +782,16 @@ export default function HomeScreen() {
             restrooms={restrooms}
             selectedRestroom={selectedRestroom}
             selectedRestroomId={selectedRestroomId}
+            selectedPopupVisible={showExpandedMapSelectionPopup}
             sheetState={mapSheetState}
             statusContent={overlayMapStatusContent}
+            onPressSelectedPopup={() => {
+              if (!selectedRestroom) {
+                return;
+              }
+
+              router.push(`/restrooms/${selectedRestroom.id}` as Href);
+            }}
           />
         ) : null}
       </View>

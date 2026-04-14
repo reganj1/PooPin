@@ -15,6 +15,7 @@ import type { Region } from "react-native-maps";
 import { mobileTheme } from "../../ui/theme";
 import { MapResultsSheet } from "./MapResultsSheet";
 import { RestroomMapSurface } from "./RestroomMapSurface";
+import { SelectedRestroomPreviewCard } from "./SelectedRestroomPreviewCard";
 
 interface Coordinates {
   lat: number;
@@ -43,8 +44,10 @@ interface ExpandedMapOverlayProps {
   restrooms: NearbyBathroom[];
   selectedRestroom: NearbyBathroom | null;
   selectedRestroomId: string | null;
+  selectedPopupVisible: boolean;
   sheetState: MapSheetState;
   statusContent: ReactNode;
+  onPressSelectedPopup: () => void;
 }
 
 interface MobileSheetMetrics {
@@ -156,8 +159,10 @@ export function ExpandedMapOverlay({
   restrooms,
   selectedRestroom,
   selectedRestroomId,
+  selectedPopupVisible,
   sheetState,
-  statusContent
+  statusContent,
+  onPressSelectedPopup
 }: ExpandedMapOverlayProps) {
   const { height: viewportHeight } = useWindowDimensions();
   const [topReservedHeight, setTopReservedHeight] = useState(96);
@@ -349,6 +354,12 @@ export function ExpandedMapOverlay({
           {statusContent ? <View style={styles.statusWrap}>{statusContent}</View> : null}
         </View>
 
+        {selectedPopupVisible && sheetState === "collapsed" && selectedRestroom ? (
+          <View pointerEvents="box-none" style={styles.selectedPopupOverlay}>
+            <SelectedRestroomPreviewCard onPress={onPressSelectedPopup} restroom={selectedRestroom} variant="compact" />
+          </View>
+        ) : null}
+
         <View pointerEvents="box-none" style={styles.sheetLayer}>
           <MapResultsSheet
             canUseLocation={canRecenter}
@@ -452,6 +463,13 @@ const styles = StyleSheet.create({
   },
   statusWrap: {
     marginTop: 6
+  },
+  selectedPopupOverlay: {
+    bottom: MOBILE_SHEET_COLLAPSED_VISIBLE_PX + 14,
+    left: 12,
+    position: "absolute",
+    right: 12,
+    zIndex: 4
   },
   sheetLayer: {
     ...StyleSheet.absoluteFillObject
