@@ -162,11 +162,24 @@ const readJson = async <T>(response: Response): Promise<T> => {
 const fetchJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
   let response: Response;
 
+  // [DEBUG] — remove once the failing request is identified
+  const method = init?.method ?? "GET";
+  console.log(`[DEBUG fetch] → ${method} ${url}`);
+
   try {
     response = await fetch(url, init);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Network request failed";
+    // [DEBUG]
+    console.warn(`[DEBUG fetch] ✗ NETWORK ERROR ${method} ${url}`, message);
     throw new Error(`Request to ${url} failed before a response was received. ${message}`);
+  }
+
+  // [DEBUG]
+  if (!response.ok) {
+    console.warn(`[DEBUG fetch] ✗ HTTP ${response.status} ${method} ${url}`);
+  } else {
+    console.log(`[DEBUG fetch] ✓ ${response.status} ${method} ${url}`);
   }
 
   return readJson<T>(response);
@@ -395,6 +408,10 @@ export interface LeaderboardEntry {
   restroomAddCount: number;
   contributionCount: number;
   lastContributionAt: string | null;
+  /** Collectible card title attached server-side (may be null for users with no activity). */
+  collectibleTitle: string | null;
+  /** Collectible card rarity string (e.g. "Common", "Legendary"). */
+  collectibleRarity: string | null;
 }
 
 export interface LeaderboardResult {
@@ -418,5 +435,189 @@ export const getLeaderboard = async (limit = 50, profileId?: string | null): Pro
     entries: data.entries ?? [],
     totalContributors: data.totalContributors ?? (data.entries?.length ?? 0),
     currentViewerEntry: data.currentViewerEntry ?? null
+  };
+};
+
+// ─── Profile (mobile-direct Supabase mutations) ──────────────────────────────
+// The web profile API routes use cookie-based session auth, which mobile cannot
+// replicate. Instead, the mobile Supabase client sends the JWT automatically,
+// and the `profiles` table RLS (supabase_auth_user_id = auth.uid()) ensures
+// each user can only read/mutate their own row.
+
+export interface MyProfile {
+  id: string;
+  displayName: string;
+  activeCardKey: string | null;
+}
+
+export const getMyProfile = async (): Promise<MyProfile | null> => {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, display_name, active_card_key")
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  const row = data as { id: string; display_name: string | null; active_card_key: string | null };
+  return {
+    id: row.id,
+    displayName: row.display_name?.trim() || "Poopin Pal",
+    activeCardKey: row.active_card_key ?? null
+  };
+};
+
+const DISPLAY_NAME_RE = /^[A-Za-z0-9' -]+$/;
+
+export const updateMyDisplayName = async (
+  newName: string
+): Promise<{ success: true; displayName: string } | { error: string }> => {
+  const normalized = newName.trim().replace(/\s+/g, " ");
+  if (normalized.length < 3) return { error: "Display name must be at least 3 characters." };
+  if (normalized.length > 40) return { error: "Display name must be 40 characters or fewer." };
+  if (!DISPLAY_NAME_RE.test(normalized)) {
+    return { error: "Use letters, numbers, spaces, apostrophes, or hyphens only." };
+  }
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({ display_name: normalized, updated_at: new Date().toISOString() })
+    .select("display_name")
+    .maybeSingle();
+
+  if (error) {
+    const msg = error.message ?? "";
+    if (error.code === "23505" || msg.toLowerCase().includes("unique") || msg.toLowerCase().includes("duplicate")) {
+      return { error: "That name is already taken. Try another one." };
+    }
+    return { error: msg || "Could not update your name right now." };
+  }
+
+  const row = data as { display_name: string | null } | null;
+  return { success: true, displayName: row?.display_name?.trim() || normalized };
+};
+
+export const updateMyActiveCard = async (
+  cardKey: string
+): Promise<{ success: true } | { error: string }> => {
+  const { error } = await supabase
+    .from("profiles")
+    .update({ active_card_key: cardKey, updated_at: new Date().toISOString() });
+
+  if (error) return { error: error.message || "Could not update your active card." };
+  return { success: true };
+};
+
+export const getMyContributionCounts = async (
+  profileId: string
+): Promise<{ reviewCount: number; photoCount: number; restroomAddCount: number }> => {
+  const [reviewRes, photoRes, restroomRes] = await Promise.all([
+    supabase
+      .from("reviews")
+      .select("id", { count: "exact", head: true })
+      .eq("profile_id", profileId)
+      .eq("status", "active"),
+    supabase
+      .from("photos")
+      .select("id", { count: "exact", head: true })
+      .eq("profile_id", profileId),
+    supabase
+      .from("bathrooms")
+      .select("id", { count: "exact", head: true })
+      .eq("created_by_profile_id", profileId)
+      .eq("source", "user")
+  ]);
+
+  return {
+    reviewCount: reviewRes.count ?? 0,
+    photoCount: photoRes.count ?? 0,
+    restroomAddCount: restroomRes.count ?? 0
+  };
+};
+
+// ─── Contact form ────────────────────────────────────────────────────────────
+
+export const CONTACT_TOPICS = [
+  { value: "general_feedback", label: "General feedback" },
+  { value: "incorrect_restroom_info", label: "Report incorrect restroom info" },
+  { value: "photo_or_content_issue", label: "Report photo or content issue" },
+  { value: "business_or_partnership", label: "Business or partnership inquiry" },
+  { value: "press_or_media", label: "Press or media" },
+  { value: "other", label: "Other" }
+] as const;
+
+export type ContactTopic = (typeof CONTACT_TOPICS)[number]["value"];
+
+export interface ContactFormValues {
+  name: string;
+  email: string;
+  topic: ContactTopic;
+  message: string;
+  restroomReference: string;
+  cityLocation: string;
+}
+
+export interface ContactSubmitResult {
+  message: string;
+  submissionId?: string | null;
+}
+
+/** Mirrors the field-level errors from the web /api/contact endpoint. */
+export type ContactFieldErrors = Partial<Record<keyof ContactFormValues, string>>;
+
+export class ContactApiError extends Error {
+  fieldErrors?: ContactFieldErrors;
+  constructor(message: string, fieldErrors?: ContactFieldErrors) {
+    super(message);
+    this.name = "ContactApiError";
+    this.fieldErrors = fieldErrors;
+  }
+}
+
+export const submitContactForm = async (values: ContactFormValues): Promise<ContactSubmitResult> => {
+  const url = createUrl("/api/contact");
+  console.log(`[DEBUG fetch] → POST ${url}`);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: values.name.trim(),
+        email: values.email.trim().toLowerCase(),
+        topic: values.topic,
+        message: values.message.trim(),
+        restroomReference: values.restroomReference.trim() || undefined,
+        cityLocation: values.cityLocation.trim() || undefined
+      })
+    });
+  } catch {
+    throw new ContactApiError("Could not send your message. Please check your connection and try again.");
+  }
+
+  const payload = await response.json().catch(() => null) as {
+    success?: boolean;
+    message?: string;
+    submissionId?: string;
+    error?: string;
+    fieldErrors?: Partial<Record<keyof ContactFormValues, string[]>>;
+  } | null;
+
+  if (!response.ok) {
+    const firstFieldErrors = payload?.fieldErrors
+      ? (Object.fromEntries(
+          Object.entries(payload.fieldErrors).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v])
+        ) as ContactFieldErrors)
+      : undefined;
+    throw new ContactApiError(
+      payload?.error ?? "Could not send your message right now. Please try again.",
+      firstFieldErrors
+    );
+  }
+
+  console.log(`[DEBUG fetch] ✓ 200 POST ${url}`);
+  return {
+    message: payload?.message ?? "Thanks for reaching out. Our team will review this message shortly.",
+    submissionId: payload?.submissionId ?? null
   };
 };

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { getLeaderboard, type LeaderboardEntry } from "../../src/lib/api";
+import { RARITY_COLORS, type CollectibleCardRarity } from "../../src/lib/collectibles";
 import { useSession } from "../../src/providers/session-provider";
 import { mobileTheme } from "../../src/ui/theme";
 
@@ -50,6 +52,15 @@ const getTopCardBorder = (rank: number) => {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
+function TitlePill({ title, rarity }: { title: string; rarity: string }) {
+  const colors = RARITY_COLORS[rarity as CollectibleCardRarity] ?? RARITY_COLORS.Common;
+  return (
+    <View style={[styles.titlePill, { backgroundColor: colors.bg, borderColor: colors.border }]}>
+      <Text style={[styles.titlePillText, { color: colors.text }]}>{title}</Text>
+    </View>
+  );
+}
+
 function Avatar({ displayName, rank, size = 44 }: { displayName: string; rank: number; size?: number }) {
   const { bg, text } = getAvatarStyle(rank);
   return (
@@ -89,6 +100,11 @@ function TopCard({ entry, isViewer }: { entry: LeaderboardEntry; isViewer: boole
             {entry.displayName}
             {isViewer ? "  (You)" : ""}
           </Text>
+          {entry.collectibleTitle && entry.collectibleRarity ? (
+            <View style={styles.titlePillRow}>
+              <TitlePill title={entry.collectibleTitle} rarity={entry.collectibleRarity} />
+            </View>
+          ) : null}
         </View>
         <View style={styles.pointsBadge}>
           <Text style={styles.pointsBadgeLabel}>pts</Text>
@@ -115,10 +131,15 @@ function LeaderboardRow({ entry, isViewer }: { entry: LeaderboardEntry; isViewer
       <Text style={styles.rowRank}>#{entry.rank}</Text>
       <Avatar displayName={entry.displayName} rank={entry.rank} size={36} />
       <View style={styles.rowInfo}>
-        <Text style={styles.rowName} numberOfLines={1}>
-          {entry.displayName}
-          {isViewer ? "  (You)" : ""}
-        </Text>
+        <View style={styles.rowNameRow}>
+          <Text style={styles.rowName} numberOfLines={1}>
+            {entry.displayName}
+            {isViewer ? "  (You)" : ""}
+          </Text>
+          {entry.collectibleTitle && entry.collectibleRarity ? (
+            <TitlePill title={entry.collectibleTitle} rarity={entry.collectibleRarity} />
+          ) : null}
+        </View>
         <View style={styles.rowStatRow}>
           <Text style={styles.rowStatText}>
             {formatNumber(entry.reviewCount)}R · {formatNumber(entry.photoCount)}P · {formatNumber(entry.restroomAddCount)}A
@@ -655,5 +676,29 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingHorizontal: mobileTheme.spacing.screenX,
     textAlign: "center"
+  },
+
+  // ── Title pill ──
+  titlePill: {
+    alignSelf: "flex-start",
+    borderRadius: 99,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3
+  },
+  titlePillText: {
+    fontSize: 11,
+    fontWeight: "600"
+  },
+  titlePillRow: {
+    marginTop: 4
+  },
+
+  // ── Row name row (name + title pill side-by-side) ──
+  rowNameRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6
   }
 });

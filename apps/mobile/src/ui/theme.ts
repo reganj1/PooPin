@@ -1,3 +1,5 @@
+import { Platform } from "react-native";
+
 export const mobileTheme = {
   colors: {
     pageBackground: "#f8fafc",
@@ -38,18 +40,18 @@ export const mobileTheme = {
   },
   shadows: {
     card: {
-      elevation: 2,
+      ...(Platform.OS === "android" ? { elevation: 2 } : {}),
       shadowColor: "#0f254a",
       shadowOffset: { width: 0, height: 6 },
       shadowOpacity: 0.08,
       shadowRadius: 18
     },
     hero: {
-      elevation: 3,
+      ...(Platform.OS === "android" ? { elevation: 3 } : {}),
       shadowColor: "#0f254a",
       shadowOffset: { width: 0, height: 6 },
       shadowOpacity: 0.08,
       shadowRadius: 24
     }
   }
-} as const;
+};

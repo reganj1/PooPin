@@ -38,6 +38,8 @@ export function SessionProvider({ children }: PropsWithChildren) {
     const {
       data: { subscription }
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      // [DEBUG] — remove once the failing request is identified
+      console.log("[DEBUG session] onAuthStateChange", _event, "user:", nextSession?.user?.email ?? "none");
       if (!isMounted) {
         return;
       }

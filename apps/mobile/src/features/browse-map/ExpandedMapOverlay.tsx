@@ -6,7 +6,6 @@ import {
   LayoutChangeEvent,
   PanResponder,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,6 +13,7 @@ import {
   View,
   useWindowDimensions
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import type { Region } from "react-native-maps";
 import type { PlaceSearchResult } from "../../lib/api";
 import { mobileTheme } from "../../ui/theme";

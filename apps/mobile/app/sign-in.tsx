@@ -1,6 +1,7 @@
 import { Link, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { sendEmailOtp } from "../src/lib/api";
 import { supabase } from "../src/lib/supabase";
 import { useSession } from "../src/providers/session-provider";
@@ -74,6 +75,8 @@ export default function SignInScreen() {
     setStatusMessage(null);
 
     try {
+      // [DEBUG] — remove once the failing request is identified
+      console.log("[DEBUG sign-in] calling supabase.auth.verifyOtp for", normalizedEmail);
       const { error } = await supabase.auth.verifyOtp({
         email: normalizedEmail,
         token: normalizedCode,
@@ -81,13 +84,19 @@ export default function SignInScreen() {
       });
 
       if (error) {
+        // [DEBUG]
+        console.warn("[DEBUG sign-in] verifyOtp returned error:", error.message, "status:", error.status);
         setErrorMessage(error.message || "We couldn’t verify that code. Try again.");
         return;
       }
 
+      // [DEBUG]
+      console.log("[DEBUG sign-in] verifyOtp succeeded — redirecting to", safeReturnTo);
       setStatusMessage("Signed in. Redirecting…");
       router.replace(toSafeHref(safeReturnTo));
     } catch (error) {
+      // [DEBUG]
+      console.warn("[DEBUG sign-in] verifyOtp threw:", error instanceof Error ? error.message : String(error));
       setErrorMessage(error instanceof Error ? error.message : "We couldn’t verify that code. Try again.");
     } finally {
       setIsSubmitting(false);
