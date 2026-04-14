@@ -23,9 +23,8 @@ const MARKER_TAP_SUPPRESSION_MS = 1000;
 const SHEET_SELECTION_SUPPRESSION_MS = 600;
 const MARKER_EXPLORATION_IDLE_EXIT_MS = 1000;
 
-type BrowseMode = "list" | "map";
 type BrowseDataMode = "nearby" | "bounds";
-type MapSheetState = "collapsed" | "expanded";
+type MapSheetState = "collapsed" | "default" | "expanded";
 type PendingBoundsApply = {
   requestId: number;
   boundsKey: string;
@@ -48,6 +47,17 @@ const formatRatingLabel = (restroom: NearbyBathroom) => {
   return `${restroom.ratings.overall.toFixed(1)} overall • ${restroom.ratings.reviewCount} review${restroom.ratings.reviewCount === 1 ? "" : "s"}`;
 };
 
+const isFallbackMapRegion = (region: Region | null) => {
+  if (!region) {
+    return true;
+  }
+
+  return (
+    Math.abs(region.latitude - FALLBACK_QUERY.lat) < 0.02 &&
+    Math.abs(region.longitude - FALLBACK_QUERY.lng) < 0.02
+  );
+};
+
 export default function HomeScreen() {
   const router = useRouter();
   const { user, signOut } = useSession();
@@ -58,11 +68,10 @@ export default function HomeScreen() {
   const [isRefreshingNearby, setIsRefreshingNearby] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [resultSource, setResultSource] = useState<"fallback" | "live">("fallback");
-  const [browseMode, setBrowseMode] = useState<BrowseMode>("list");
   const [isExpandedMapOpen, setIsExpandedMapOpen] = useState(false);
   const [browseDataMode, setBrowseDataMode] = useState<BrowseDataMode>("nearby");
   const [mapRegion, setMapRegion] = useState<Region | null>(null);
-  const [mapSheetState, setMapSheetState] = useState<MapSheetState>("collapsed");
+  const [mapSheetState, setMapSheetState] = useState<MapSheetState>("default");
   const [selectedRestroomId, setSelectedRestroomId] = useState<string | null>(null);
   const [mapFocusedRestroomId, setMapFocusedRestroomId] = useState<string | null>(null);
   const [mapFocusRequestKey, setMapFocusRequestKey] = useState(0);
@@ -81,6 +90,9 @@ export default function HomeScreen() {
   const pendingBoundsApplyRef = useRef<PendingBoundsApply | null>(null);
   const pendingBoundsApplyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const markerExplorationIdleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasAppliedInitialLiveMapCenterRef = useRef(false);
+  const isApplyingInitialLiveMapCenterRef = useRef(false);
+  const hasUserPositionedMapRef = useRef(false);
 
   useEffect(() => {
     browseDataModeRef.current = browseDataMode;
@@ -204,6 +216,28 @@ export default function HomeScreen() {
       setMapFocusedRestroomId(null);
     }
   }, [selectedRestroomId]);
+
+  useEffect(() => {
+    if (permissionStatus !== "granted" || !coordinates) {
+      return;
+    }
+
+    if (hasAppliedInitialLiveMapCenterRef.current || isApplyingInitialLiveMapCenterRef.current || hasUserPositionedMapRef.current) {
+      return;
+    }
+
+    if (!isExpandedMapOpen && !isFallbackMapRegion(mapRegion)) {
+      return;
+    }
+
+    isApplyingInitialLiveMapCenterRef.current = true;
+    logMapDebug("initial live center requested", {
+      source: isExpandedMapOpen ? "expanded open" : "live location available",
+      latitude: coordinates.lat,
+      longitude: coordinates.lng
+    });
+    setLocationCenterRequestKey((current) => current + 1);
+  }, [coordinates, isExpandedMapOpen, mapRegion, permissionStatus]);
 
   const clearPendingBoundsApplyTimeout = () => {
     if (pendingBoundsApplyTimeoutRef.current) {
@@ -354,16 +388,8 @@ export default function HomeScreen() {
     });
   };
 
-  const handleToggleMapSheet = () => {
-    setMapSheetState((current) => (current === "collapsed" ? "expanded" : "collapsed"));
-  };
-
-  const handleExpandMapSheet = () => {
-    setMapSheetState("expanded");
-  };
-
-  const handleCollapseMapSheet = () => {
-    setMapSheetState("collapsed");
+  const handleMapSheetStateChange = (nextState: MapSheetState) => {
+    setMapSheetState(nextState);
   };
 
   const handleMapSelectionChange = (restroomId: string | null) => {
@@ -384,7 +410,6 @@ export default function HomeScreen() {
     setSelectedRestroomId(restroomId);
     setMapFocusedRestroomId(restroomId);
     setMapFocusRequestKey((current) => current + 1);
-    setMapSheetState("expanded");
   };
 
   const handleMapRegionSettled = (region: Region) => {
@@ -402,6 +427,17 @@ export default function HomeScreen() {
         minimumDeltaChangeRatio: regionChange.minimumDeltaChangeRatio
       });
       return;
+    }
+
+    if (isApplyingInitialLiveMapCenterRef.current) {
+      isApplyingInitialLiveMapCenterRef.current = false;
+      hasAppliedInitialLiveMapCenterRef.current = true;
+      logMapDebug("initial live center applied", {
+        latitude: region.latitude,
+        longitude: region.longitude
+      });
+    } else {
+      hasUserPositionedMapRef.current = true;
     }
 
     if (markerExplorationActiveRef.current) {
@@ -550,12 +586,11 @@ export default function HomeScreen() {
     selectedRestroomId
   } as const;
   const openExpandedMap = () => {
-    setBrowseMode("map");
+    setMapSheetState("default");
     setIsExpandedMapOpen(true);
   };
   const closeExpandedMap = () => {
     setIsExpandedMapOpen(false);
-    setBrowseMode("list");
   };
   const handleRecenterRequest = () => {
     exitMarkerExplorationMode("recenter", { discardDeferred: true });
@@ -590,35 +625,14 @@ export default function HomeScreen() {
       ) : null}
     </>
   );
-  const overlayMapStatusContent = (
-    <>
-      {showFallbackBanner ? (
-        <View style={styles.overlayNoticeCard}>
-          <Text style={styles.overlayNoticeTitle}>Using a default nearby area</Text>
-          <Text style={styles.overlayNoticeCopy}>
-            {locationErrorMessage ?? "Enable location to swap these fallback results for restrooms near you."}
-          </Text>
-        </View>
-      ) : null}
-
-      {showLiveRefreshNotice ? (
-        <View style={styles.overlayLiveNotice}>
-          <Text style={styles.overlayLiveNoticeText}>
-            {isRefreshingNearby ? "Refreshing with your current location…" : "Showing restrooms near your current location."}
-          </Text>
-        </View>
-      ) : null}
-
-      {errorMessage ? (
-        <View style={styles.overlayErrorCard}>
-          <Text style={styles.overlayErrorTitle}>
-            {browseDataMode === "bounds" ? "Unable to load restrooms in this map area" : "Unable to load nearby restrooms"}
-          </Text>
-          <Text style={styles.overlayErrorText}>{errorMessage}</Text>
-        </View>
-      ) : null}
-    </>
-  );
+  const overlayMapStatusContent = errorMessage ? (
+    <View style={styles.overlayErrorCard}>
+      <Text style={styles.overlayErrorTitle}>
+        {browseDataMode === "bounds" ? "Unable to load restrooms in this map area" : "Unable to load nearby restrooms"}
+      </Text>
+      <Text style={styles.overlayErrorText}>{errorMessage}</Text>
+    </View>
+  ) : null;
   const listHeaderContent = (
     <View style={styles.header}>
       <View style={styles.heroCard}>
@@ -627,29 +641,6 @@ export default function HomeScreen() {
         <Text style={styles.copy}>
           Browse trusted restroom listings nearby with the same clean Poopin experience you already have on the web.
         </Text>
-
-        <View style={styles.browseModeSwitch}>
-          <Pressable
-            onPress={() => setBrowseMode("list")}
-            style={({ pressed }) => [
-              styles.browseModeButton,
-              browseMode === "list" ? styles.browseModeButtonActive : null,
-              pressed ? styles.buttonPressed : null
-            ]}
-          >
-            <Text style={[styles.browseModeButtonText, browseMode === "list" ? styles.browseModeButtonTextActive : null]}>List</Text>
-          </Pressable>
-          <Pressable
-            onPress={openExpandedMap}
-            style={({ pressed }) => [
-              styles.browseModeButton,
-              browseMode === "map" ? styles.browseModeButtonActive : null,
-              pressed ? styles.buttonPressed : null
-            ]}
-          >
-            <Text style={[styles.browseModeButtonText, browseMode === "map" ? styles.browseModeButtonTextActive : null]}>Map</Text>
-          </Pressable>
-        </View>
 
         {user ? <Text style={styles.sessionLabel}>{user.email ?? "Signed in"}</Text> : null}
 
@@ -765,15 +756,13 @@ export default function HomeScreen() {
             focusedRestroomId={mapFocusedRestroomId}
             initialCenter={mapOrigin}
             locationCenterRequestKey={locationCenterRequestKey}
-            onCollapseSheet={handleCollapseMapSheet}
             onClose={closeExpandedMap}
-            onExpandSheet={handleExpandMapSheet}
             onPressDetails={(restroomId) => router.push(`/restrooms/${restroomId}` as Href)}
             onPressUseLocation={handleRecenterRequest}
             onRegionSettled={handleMapRegionSettled}
             onSelectRestroom={handleMapSelectionChange}
             onSelectRestroomFromSheet={handleSelectRestroomFromSheet}
-            onToggleSheet={handleToggleMapSheet}
+            onSheetStateChange={handleMapSheetStateChange}
             permissionStatus={permissionStatus}
             restoredRegion={mapRegion}
             restrooms={restrooms}
@@ -903,35 +892,6 @@ const styles = StyleSheet.create({
     color: mobileTheme.colors.textSecondary,
     fontSize: 15,
     lineHeight: 22
-  },
-  browseModeSwitch: {
-    alignSelf: "flex-start",
-    backgroundColor: mobileTheme.colors.surfaceMuted,
-    borderColor: mobileTheme.colors.border,
-    borderRadius: mobileTheme.radii.pill,
-    borderWidth: 1,
-    flexDirection: "row",
-    marginTop: 16,
-    padding: 4
-  },
-  browseModeButton: {
-    alignItems: "center",
-    borderRadius: mobileTheme.radii.pill,
-    justifyContent: "center",
-    minWidth: 72,
-    paddingHorizontal: 16,
-    paddingVertical: 10
-  },
-  browseModeButtonActive: {
-    backgroundColor: mobileTheme.colors.brandDeep
-  },
-  browseModeButtonText: {
-    color: mobileTheme.colors.textSecondary,
-    fontSize: 14,
-    fontWeight: "700"
-  },
-  browseModeButtonTextActive: {
-    color: mobileTheme.colors.surface
   },
   headerActions: {
     alignItems: "flex-start",

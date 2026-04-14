@@ -1,20 +1,33 @@
+import { useMemo, useState } from "react";
 import type { NearbyBathroom } from "@poopin/domain";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Animated,
+  FlatList,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type PanResponderInstance
+} from "react-native";
 import { mobileTheme } from "../../ui/theme";
-import { SelectedRestroomPreviewCard } from "./SelectedRestroomPreviewCard";
 
-type MapSheetState = "collapsed" | "expanded";
+type MapSheetState = "collapsed" | "default" | "expanded";
+type SheetSortMode = "closest" | "recommended";
 
 interface MapResultsSheetProps {
-  sheetState: MapSheetState;
-  selectedRestroom: NearbyBathroom | null;
-  restrooms: NearbyBathroom[];
-  selectedRestroomId: string | null;
-  onToggleSheet: () => void;
-  onExpand: () => void;
-  onCollapse: () => void;
-  onSelectRestroom: (restroomId: string) => void;
+  canUseLocation: boolean;
+  handlePanHandlers: PanResponderInstance["panHandlers"];
   onPressDetails: (restroomId: string) => void;
+  onPressUseLocation: () => void;
+  onSelectRestroom: (restroomId: string) => void;
+  onSheetHeaderPress: () => void;
+  restrooms: NearbyBathroom[];
+  selectedRestroom: NearbyBathroom | null;
+  selectedRestroomId: string | null;
+  sheetHeight: number;
+  sheetState: MapSheetState;
+  sheetTranslateY: Animated.Value;
 }
 
 const toLocationLine = (restroom: NearbyBathroom) => [restroom.address, restroom.city, restroom.state].filter(Boolean).join(", ");
@@ -31,206 +44,317 @@ const formatDistanceLabel = (restroom: NearbyBathroom) =>
   typeof restroom.distanceMiles === "number" ? `${restroom.distanceMiles.toFixed(1)} mi` : "Nearby";
 
 export function MapResultsSheet({
-  sheetState,
-  selectedRestroom,
-  restrooms,
-  selectedRestroomId,
-  onToggleSheet,
-  onExpand,
-  onCollapse,
+  canUseLocation,
+  handlePanHandlers,
+  onPressDetails,
+  onPressUseLocation,
   onSelectRestroom,
-  onPressDetails
+  onSheetHeaderPress,
+  restrooms,
+  selectedRestroom,
+  selectedRestroomId,
+  sheetHeight,
+  sheetState,
+  sheetTranslateY
 }: MapResultsSheetProps) {
-  const hasResults = restrooms.length > 0;
-  const collapsedTitle = hasResults ? "Nearby results" : "No restrooms in this area";
-  const collapsedSubtitle = hasResults
-    ? `${restrooms.length} in current map area`
-    : "Move the map or recenter to keep browsing.";
-  const expandedSubtitle = hasResults ? `${restrooms.length} in current map area` : "No visible results in this map area";
+  const [sortMode, setSortMode] = useState<SheetSortMode>("closest");
+  const [showPublicOnly, setShowPublicOnly] = useState(false);
+  const [showAccessibleOnly, setShowAccessibleOnly] = useState(false);
+  const [showBabyStationOnly, setShowBabyStationOnly] = useState(false);
 
-  if (sheetState === "collapsed") {
-    if (!selectedRestroom) {
-      return (
-        <View pointerEvents="box-none" style={styles.overlay}>
-          <Pressable onPress={onToggleSheet} style={({ pressed }) => [styles.collapsedSummary, pressed ? styles.cardPressed : null]}>
-            <View style={styles.handle} />
-            <View style={styles.collapsedSummaryRow}>
-              <View style={styles.collapsedCopy}>
-                <Text style={styles.sheetTitle}>{collapsedTitle}</Text>
-                <Text style={styles.sheetSubtitle}>{collapsedSubtitle}</Text>
-              </View>
-              <View style={styles.headerActionPill}>
-                <Text style={styles.headerActionText}>{hasResults ? "Show" : "Browse"}</Text>
-              </View>
-            </View>
-          </Pressable>
-        </View>
-      );
-    }
+  const filteredRestrooms = useMemo(() => {
+    const next = restrooms.filter((restroom) => {
+      if (showPublicOnly && restroom.access_type !== "public") {
+        return false;
+      }
 
-    return (
-      <View pointerEvents="box-none" style={styles.overlay}>
-        <View style={styles.collapsedSelectionCard}>
-          <Pressable onPress={onToggleSheet} style={({ pressed }) => [styles.sheetHeader, pressed ? styles.cardPressed : null]}>
-            <View style={styles.handle} />
-            <View style={styles.sheetHeaderRow}>
-              <View>
-                <Text style={styles.sheetTitle}>Nearby results</Text>
-                <Text style={styles.sheetSubtitle}>{expandedSubtitle}</Text>
-              </View>
-              <View style={styles.headerActionPill}>
-                <Text style={styles.headerActionText}>Show</Text>
-              </View>
-            </View>
-          </Pressable>
+      if (showAccessibleOnly && !restroom.is_accessible) {
+        return false;
+      }
 
-          <SelectedRestroomPreviewCard onPress={() => onPressDetails(selectedRestroom.id)} restroom={selectedRestroom} variant="compact" />
-        </View>
-      </View>
-    );
-  }
+      if (showBabyStationOnly && !restroom.has_baby_station) {
+        return false;
+      }
+
+      return true;
+    });
+
+    next.sort((left, right) => {
+      if (sortMode === "recommended") {
+        if (right.ratings.overall !== left.ratings.overall) {
+          return right.ratings.overall - left.ratings.overall;
+        }
+
+        if (right.ratings.reviewCount !== left.ratings.reviewCount) {
+          return right.ratings.reviewCount - left.ratings.reviewCount;
+        }
+      }
+
+      return left.distanceMiles - right.distanceMiles;
+    });
+
+    return next;
+  }, [restrooms, showAccessibleOnly, showBabyStationOnly, showPublicOnly, sortMode]);
+
+  const hasResults = filteredRestrooms.length > 0;
+  const resultsCountLabel = hasResults ? `${filteredRestrooms.length} visible` : "No visible results";
+  const listSubtitle = hasResults ? `${filteredRestrooms.length} in this map area` : "No visible results in this map area";
+  const hasActiveFilters = showPublicOnly || showAccessibleOnly || showBabyStationOnly;
+
+  const handleResultPress = (restroomId: string) => {
+    onSelectRestroom(restroomId);
+    onPressDetails(restroomId);
+  };
 
   return (
-    <View pointerEvents="box-none" style={styles.overlay}>
-      <View style={styles.expandedSheet}>
-        <Pressable onPress={onToggleSheet} style={({ pressed }) => [styles.sheetHeader, pressed ? styles.cardPressed : null]}>
+    <Animated.View
+      pointerEvents="auto"
+      style={[
+        styles.overlay,
+        {
+          height: sheetHeight,
+          transform: [{ translateY: sheetTranslateY }]
+        }
+      ]}
+    >
+      <View {...handlePanHandlers}>
+        <Pressable onPress={onSheetHeaderPress} style={({ pressed }) => [styles.sheetHeader, pressed ? styles.cardPressed : null]}>
           <View style={styles.handle} />
-          <View style={styles.sheetHeaderRow}>
-            <View>
-              <Text style={styles.sheetTitle}>Nearby results</Text>
-              <Text style={styles.sheetSubtitle}>{expandedSubtitle}</Text>
+
+          {sheetState === "collapsed" ? (
+            <View style={styles.collapsedHeaderRow}>
+              <View style={styles.collapsedCopy}>
+                <Text style={styles.sheetTitle}>Nearby results</Text>
+                <Text style={styles.sheetSubtitle}>{resultsCountLabel}</Text>
+              </View>
+
+              <View style={styles.collapsedActions}>
+                <Pressable
+                  disabled={!canUseLocation}
+                  onPress={onPressUseLocation}
+                  style={({ pressed }) => [
+                    styles.locationActionPill,
+                    !canUseLocation ? styles.locationActionPillDisabled : null,
+                    pressed ? styles.cardPressed : null
+                  ]}
+                >
+                  <Text style={[styles.locationActionText, !canUseLocation ? styles.locationActionTextDisabled : null]}>
+                    Use my location
+                  </Text>
+                </Pressable>
+              </View>
             </View>
-            <View style={styles.headerActionPill}>
-              <Text style={styles.headerActionText}>Hide</Text>
+          ) : (
+            <View style={styles.sheetHeaderRow}>
+              <View style={styles.sheetHeaderCopy}>
+                <Text style={styles.sheetTitle}>Nearby results</Text>
+                <Text style={styles.sheetSubtitle}>{listSubtitle}</Text>
+              </View>
+              <Pressable
+                disabled={!canUseLocation}
+                onPress={onPressUseLocation}
+                style={({ pressed }) => [
+                  styles.locationActionPill,
+                  !canUseLocation ? styles.locationActionPillDisabled : null,
+                  pressed ? styles.cardPressed : null
+                ]}
+              >
+                <Text style={[styles.locationActionText, !canUseLocation ? styles.locationActionTextDisabled : null]}>
+                  Use my location
+                </Text>
+              </Pressable>
             </View>
-          </View>
+          )}
         </Pressable>
-
-        {selectedRestroom ? (
-          <View style={styles.selectedSummary}>
-            <Text style={styles.selectedSummaryEyebrow}>Selected on map</Text>
-            <Text numberOfLines={1} style={styles.selectedSummaryTitle}>
-              {selectedRestroom.name}
-            </Text>
-          </View>
-        ) : null}
-
-        {hasResults ? (
-          <FlatList
-            contentContainerStyle={styles.resultsListContent}
-            data={restrooms}
-            keyExtractor={(item) => item.id}
-            style={styles.resultsList}
-            renderItem={({ item }) => {
-              const isSelected = item.id === selectedRestroomId;
-
-              return (
-                <View style={[styles.resultRow, isSelected ? styles.resultRowSelected : null]}>
-                  <Pressable onPress={() => onSelectRestroom(item.id)} style={({ pressed }) => [styles.resultMainPressable, pressed ? styles.cardPressed : null]}>
-                    <View style={styles.resultHeader}>
-                      <Text numberOfLines={1} style={styles.resultTitle}>
-                        {item.name}
-                      </Text>
-                      <View style={styles.distanceBadge}>
-                        <Text style={styles.distanceText}>{formatDistanceLabel(item)}</Text>
-                      </View>
-                    </View>
-                    <Text numberOfLines={1} style={styles.resultLocation}>
-                      {toLocationLine(item)}
-                    </Text>
-                    <Text style={styles.resultRating}>{formatRatingLabel(item)}</Text>
-                  </Pressable>
-
-                  <View style={styles.resultFooter}>
-                    <Text style={styles.resultFooterLabel}>{isSelected ? "Selected" : "Visible on map"}</Text>
-                    <Pressable onPress={() => onPressDetails(item.id)} style={({ pressed }) => [styles.detailsButton, pressed ? styles.cardPressed : null]}>
-                      <Text style={styles.detailsButtonText}>Details</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              );
-            }}
-          />
-        ) : (
-          <View style={styles.emptyStateWrap}>
-            <View style={styles.emptyStateCard}>
-              <Text style={styles.emptyStateTitle}>No restrooms are visible in this area right now.</Text>
-              <Text style={styles.emptyStateCopy}>Pan the map or tap recenter to keep exploring nearby options.</Text>
-            </View>
-          </View>
-        )}
       </View>
-    </View>
+
+      {sheetState === "collapsed" ? null : (
+        <>
+          <View style={styles.controlsStripWrap}>
+            <View style={styles.sortControlGroup}>
+              <Pressable
+                onPress={() => setSortMode("closest")}
+                style={({ pressed }) => [
+                  styles.sortSegment,
+                  sortMode === "closest" ? styles.sortSegmentSelected : null,
+                  pressed ? styles.cardPressed : null
+                ]}
+              >
+                <Text style={[styles.sortSegmentText, sortMode === "closest" ? styles.sortSegmentTextSelected : null]}>Closest</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setSortMode("recommended")}
+                style={({ pressed }) => [
+                  styles.sortSegment,
+                  sortMode === "recommended" ? styles.sortSegmentSelected : null,
+                  pressed ? styles.cardPressed : null
+                ]}
+              >
+                <Text style={[styles.sortSegmentText, sortMode === "recommended" ? styles.sortSegmentTextSelected : null]}>
+                  Recommended
+                </Text>
+              </Pressable>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.filterChipRow} horizontal showsHorizontalScrollIndicator={false}>
+              <Pressable
+                onPress={() => setShowPublicOnly((current) => !current)}
+                style={({ pressed }) => [
+                  styles.filterChip,
+                  showPublicOnly ? styles.filterChipSelected : null,
+                  pressed ? styles.cardPressed : null
+                ]}
+              >
+                <Text style={[styles.filterChipText, showPublicOnly ? styles.filterChipTextSelected : null]}>Public only</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setShowAccessibleOnly((current) => !current)}
+                style={({ pressed }) => [
+                  styles.filterChip,
+                  showAccessibleOnly ? styles.filterChipSelected : null,
+                  pressed ? styles.cardPressed : null
+                ]}
+              >
+                <Text style={[styles.filterChipText, showAccessibleOnly ? styles.filterChipTextSelected : null]}>Accessible</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setShowBabyStationOnly((current) => !current)}
+                style={({ pressed }) => [
+                  styles.filterChip,
+                  showBabyStationOnly ? styles.filterChipSelected : null,
+                  pressed ? styles.cardPressed : null
+                ]}
+              >
+                <Text style={[styles.filterChipText, showBabyStationOnly ? styles.filterChipTextSelected : null]}>Baby station</Text>
+              </Pressable>
+            </ScrollView>
+          </View>
+
+          {selectedRestroom ? (
+            <View style={styles.selectedSummary}>
+              <View style={styles.selectedSummaryCopy}>
+                <Text style={styles.selectedSummaryEyebrow}>Selected on map</Text>
+                <Text numberOfLines={1} style={styles.selectedSummaryTitle}>
+                  {selectedRestroom.name}
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
+          {hasResults ? (
+            <FlatList
+              contentContainerStyle={styles.resultsListContent}
+              data={filteredRestrooms}
+              keyExtractor={(item) => item.id}
+              style={styles.resultsList}
+              renderItem={({ item }) => {
+                const isSelected = item.id === selectedRestroomId;
+
+                return (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => handleResultPress(item.id)}
+                    style={({ pressed }) => [
+                      styles.resultRow,
+                      isSelected ? styles.resultRowSelected : null,
+                      pressed ? styles.cardPressed : null
+                    ]}
+                  >
+                    <View style={styles.resultMainPressable}>
+                      <View style={styles.resultHeader}>
+                        <Text numberOfLines={1} style={styles.resultTitle}>
+                          {item.name}
+                        </Text>
+                        <View style={styles.distanceBadge}>
+                          <Text style={styles.distanceText}>{formatDistanceLabel(item)}</Text>
+                        </View>
+                      </View>
+                      <Text numberOfLines={1} style={styles.resultLocation}>
+                        {toLocationLine(item)}
+                      </Text>
+                      <Text style={styles.resultRating}>{formatRatingLabel(item)}</Text>
+                    </View>
+
+                    <View style={styles.resultFooter}>
+                      <Text style={styles.resultFooterLabel}>{isSelected ? "Selected on map" : "Visible on map"}</Text>
+                      <Text style={styles.resultFooterAction}>Tap for details</Text>
+                    </View>
+                  </Pressable>
+                );
+              }}
+            />
+          ) : (
+            <View style={styles.emptyStateWrap}>
+              <View style={styles.emptyStateCard}>
+                <Text style={styles.emptyStateTitle}>
+                  {hasActiveFilters ? "No restrooms match these filters right now." : "No restrooms are visible in this area right now."}
+                </Text>
+                <Text style={styles.emptyStateCopy}>
+                  {hasActiveFilters
+                    ? "Try a different sort or clear a filter chip to see more options in this map area."
+                    : "Pan the map or tap recenter to keep exploring nearby options."}
+                </Text>
+              </View>
+            </View>
+          )}
+        </>
+      )}
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: "flex-end"
-  },
-  collapsedSummary: {
     backgroundColor: mobileTheme.colors.surface,
     borderColor: mobileTheme.colors.borderSubtle,
     borderTopLeftRadius: mobileTheme.radii.xl,
     borderTopRightRadius: mobileTheme.radii.xl,
     borderWidth: 1,
     borderBottomWidth: 0,
-    minHeight: 72,
-    paddingBottom: 10,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    ...mobileTheme.shadows.hero
-  },
-  collapsedSelectionCard: {
-    backgroundColor: mobileTheme.colors.surface,
-    borderColor: mobileTheme.colors.borderSubtle,
-    borderTopLeftRadius: mobileTheme.radii.xl,
-    borderTopRightRadius: mobileTheme.radii.xl,
-    borderWidth: 1,
-    borderBottomWidth: 0,
-    maxHeight: 204,
-    paddingBottom: 10,
-    paddingHorizontal: 12,
-    paddingTop: 6,
-    ...mobileTheme.shadows.hero
-  },
-  expandedSheet: {
-    backgroundColor: mobileTheme.colors.surface,
-    borderColor: mobileTheme.colors.borderSubtle,
-    borderTopLeftRadius: mobileTheme.radii.xl,
-    borderTopRightRadius: mobileTheme.radii.xl,
-    borderWidth: 1,
-    borderBottomWidth: 0,
-    height: "56%",
-    minHeight: 300,
+    bottom: 0,
+    left: 0,
     overflow: "hidden",
+    position: "absolute",
+    right: 0,
+    zIndex: 4,
     ...mobileTheme.shadows.hero
+  },
+  sheetHeader: {
+    paddingBottom: 7,
+    paddingHorizontal: 16,
+    paddingTop: 6
   },
   handle: {
     alignSelf: "center",
     backgroundColor: mobileTheme.colors.border,
     borderRadius: mobileTheme.radii.pill,
     height: 4,
-    marginBottom: 8,
+    marginBottom: 5,
     width: 40
   },
-  sheetHeader: {
-    paddingBottom: 10,
-    paddingHorizontal: 16,
-    paddingTop: 8
+  collapsedHeaderRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minHeight: 30
+  },
+  collapsedCopy: {
+    flex: 1,
+    paddingRight: 12
+  },
+  collapsedActions: {
+    alignItems: "center",
+    flexDirection: "row"
   },
   sheetHeaderRow: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between"
   },
-  collapsedSummaryRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between"
-  },
-  collapsedCopy: {
+  sheetHeaderCopy: {
     flex: 1,
     paddingRight: 12
   },
@@ -242,33 +366,44 @@ const styles = StyleSheet.create({
   sheetSubtitle: {
     color: mobileTheme.colors.textMuted,
     fontSize: 12,
-    marginTop: 2
+    marginTop: 1
   },
-  headerActionPill: {
+  locationActionPill: {
     alignItems: "center",
-    backgroundColor: mobileTheme.colors.surfaceMuted,
+    backgroundColor: mobileTheme.colors.surface,
     borderColor: mobileTheme.colors.border,
     borderRadius: mobileTheme.radii.pill,
     borderWidth: 1,
     justifyContent: "center",
-    minWidth: 58,
-    paddingHorizontal: 11,
-    paddingVertical: 7
+    minWidth: 104,
+    paddingHorizontal: 10,
+    paddingVertical: 5
   },
-  headerActionText: {
-    color: mobileTheme.colors.textSecondary,
+  locationActionPillDisabled: {
+    backgroundColor: mobileTheme.colors.surfaceMuted
+  },
+  locationActionText: {
+    color: mobileTheme.colors.textPrimary,
     fontSize: 11,
     fontWeight: "700"
   },
+  locationActionTextDisabled: {
+    color: mobileTheme.colors.textFaint
+  },
   selectedSummary: {
+    alignItems: "center",
     backgroundColor: mobileTheme.colors.surfaceBrandTint,
     borderColor: mobileTheme.colors.infoBorder,
     borderRadius: mobileTheme.radii.md,
     borderWidth: 1,
+    flexDirection: "row",
     marginBottom: 8,
     marginHorizontal: 14,
     paddingHorizontal: 12,
-    paddingVertical: 10
+    paddingVertical: 9
+  },
+  selectedSummaryCopy: {
+    flex: 1
   },
   selectedSummaryEyebrow: {
     color: mobileTheme.colors.brandStrong,
@@ -279,9 +414,73 @@ const styles = StyleSheet.create({
   },
   selectedSummaryTitle: {
     color: mobileTheme.colors.textPrimary,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "700",
-    marginTop: 4
+    marginTop: 3
+  },
+  controlsStripWrap: {
+    borderBottomColor: mobileTheme.colors.borderSubtle,
+    borderBottomWidth: 1,
+    gap: 10,
+    paddingBottom: 10,
+    paddingHorizontal: 14
+  },
+  sortControlGroup: {
+    alignItems: "center",
+    backgroundColor: mobileTheme.colors.surfaceMuted,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.pill,
+    borderWidth: 1,
+    flexDirection: "row",
+    padding: 4
+  },
+  sortSegment: {
+    alignItems: "center",
+    borderRadius: mobileTheme.radii.pill,
+    flex: 1,
+    justifyContent: "center",
+    minHeight: 34,
+    paddingHorizontal: 12,
+    paddingVertical: 7
+  },
+  sortSegmentSelected: {
+    backgroundColor: mobileTheme.colors.brandDeep
+  },
+  sortSegmentText: {
+    color: mobileTheme.colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  sortSegmentTextSelected: {
+    color: mobileTheme.colors.surface
+  },
+  filterChipRow: {
+    alignItems: "center",
+    gap: 8,
+    paddingRight: 14
+  },
+  filterChip: {
+    alignItems: "center",
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.pill,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 34,
+    paddingHorizontal: 12,
+    paddingVertical: 7
+  },
+  filterChipSelected: {
+    backgroundColor: mobileTheme.colors.surfaceBrandTint,
+    borderColor: mobileTheme.colors.infoBorder
+  },
+  filterChipText: {
+    color: mobileTheme.colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  filterChipTextSelected: {
+    color: mobileTheme.colors.brandStrong
   },
   resultsList: {
     flex: 1
@@ -293,8 +492,8 @@ const styles = StyleSheet.create({
   emptyStateWrap: {
     flex: 1,
     justifyContent: "center",
-    paddingHorizontal: 14,
-    paddingBottom: 18
+    paddingBottom: 18,
+    paddingHorizontal: 14
   },
   emptyStateCard: {
     backgroundColor: mobileTheme.colors.surfaceBrandTint,
@@ -386,17 +585,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600"
   },
-  detailsButton: {
-    alignItems: "center",
-    backgroundColor: mobileTheme.colors.brandDeep,
-    borderRadius: mobileTheme.radii.pill,
-    justifyContent: "center",
-    minWidth: 76,
-    paddingHorizontal: 12,
-    paddingVertical: 8
-  },
-  detailsButtonText: {
-    color: mobileTheme.colors.surface,
+  resultFooterAction: {
+    color: mobileTheme.colors.brandStrong,
     fontSize: 12,
     fontWeight: "700"
   },
