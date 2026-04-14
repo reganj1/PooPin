@@ -24,6 +24,9 @@ export default function RootLayout() {
         <Stack.Screen name="sign-in" options={{ title: "Sign in" }} />
         <Stack.Screen name="restrooms/[id]" options={{ title: "Restroom detail" }} />
         <Stack.Screen name="contact" options={{ headerShown: false }} />
+        <Stack.Screen name="add-restroom" options={{ headerShown: false }} />
+        <Stack.Screen name="add-review" options={{ headerShown: false }} />
+        <Stack.Screen name="add-photo" options={{ headerShown: false }} />
       </Stack>
     </SessionProvider>
   );

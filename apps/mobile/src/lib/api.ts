@@ -366,6 +366,78 @@ export const uploadRestroomPhoto = async (input: UploadPhotoInput): Promise<void
   }
 };
 
+// ─── Bathroom search (drives review/photo contribution pickers) ───────────────
+// Queries the bathrooms table directly. RLS allows anonymous reads, so this
+// works for both signed-in and signed-out callers.
+
+export interface BathroomSearchResult {
+  id: string;
+  name: string;
+  address: string;
+  city: string;
+  state: string;
+}
+
+export const searchBathrooms = async (query: string): Promise<BathroomSearchResult[]> => {
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+  try {
+    const { data } = await supabase
+      .from("bathrooms")
+      .select("id, name, address, city, state")
+      .or(`name.ilike.%${trimmed}%,address.ilike.%${trimmed}%`)
+      .eq("status", "active")
+      .limit(15);
+    return (data ?? []) as BathroomSearchResult[];
+  } catch {
+    return [];
+  }
+};
+
+// ─── Restroom submission (direct client insert, mirrors review/photo pattern) ─
+// Note: point awards for restroom_added events are handled server-side or via
+// a database trigger. The mobile client inserts directly, same as reviews.
+
+export interface SubmitRestroomInput {
+  name: string;
+  placeType: string;
+  address: string;
+  city: string;
+  state: string;
+  lat: number;
+  lng: number;
+  accessType: string;
+  hasBabyStation: boolean;
+  isGenderNeutral: boolean;
+  isAccessible: boolean;
+  requiresPurchase: boolean;
+  profileId: string;
+}
+
+export const submitRestroom = async (input: SubmitRestroomInput): Promise<{ bathroomId: string }> => {
+  const id = generateUUID();
+  const { error } = await supabase.from("bathrooms").insert({
+    id,
+    name: input.name.trim(),
+    place_type: input.placeType,
+    address: input.address.trim(),
+    city: input.city.trim(),
+    state: input.state.trim().toUpperCase().slice(0, 30),
+    lat: input.lat,
+    lng: input.lng,
+    access_type: input.accessType,
+    has_baby_station: input.hasBabyStation,
+    is_gender_neutral: input.isGenderNeutral,
+    is_accessible: input.isAccessible,
+    requires_purchase: input.requiresPurchase,
+    created_by_profile_id: input.profileId,
+    source: "user",
+    status: "pending"
+  });
+  if (error) throw new Error(error.message);
+  return { bathroomId: id };
+};
+
 export const searchPlaces = async (
   query: string,
   options?: { signal?: AbortSignal; proximity?: { lat: number; lng: number } | null }
