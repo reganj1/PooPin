@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as Location from "expo-location";
 import { useRouter, type Href } from "expo-router";
 import type { NearbyBathroom } from "@poopin/domain";
 import { ActivityIndicator, FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
 import type { Region } from "react-native-maps";
-import { getBoundsRestrooms, getNearbyRestrooms, primeRestroomCache } from "../src/lib/api";
+import { getBoundsRestrooms, getNearbyRestrooms, primeRestroomCache, searchPlaces, type PlaceSearchResult } from "../src/lib/api";
 import { ExpandedMapOverlay } from "../src/features/browse-map/ExpandedMapOverlay";
 import { getRegionChangeMetrics, regionToBounds, toBoundsKey } from "../src/features/browse-map/mapBounds";
 import { RestroomMapSurface } from "../src/features/browse-map/RestroomMapSurface";
@@ -22,6 +23,12 @@ const BOUNDS_FETCH_LIMIT = 300;
 const MARKER_TAP_SUPPRESSION_MS = 1000;
 const SHEET_SELECTION_SUPPRESSION_MS = 600;
 const MARKER_EXPLORATION_IDLE_EXIT_MS = 1000;
+const PLACE_SEARCH_REGION_DELTA = {
+  latitudeDelta: 0.24,
+  longitudeDelta: 0.24
+} as const;
+const PLACE_SUGGESTION_DEBOUNCE_MS = 240;
+const MAX_LOCAL_SEARCH_SUGGESTIONS = 4;
 
 type BrowseDataMode = "nearby" | "bounds";
 type MapSheetState = "collapsed" | "default" | "expanded";
@@ -31,6 +38,21 @@ type PendingBoundsApply = {
   restrooms: NearbyBathroom[];
   region: Region;
 };
+type SearchSuggestion =
+  | {
+      id: string;
+      type: "place";
+      title: string;
+      subtitle: string;
+      place: PlaceSearchResult;
+    }
+  | {
+      id: string;
+      type: "restroom";
+      title: string;
+      subtitle: string;
+      restroomId: string;
+    };
 
 const toLocationLine = (restroom: NearbyBathroom) => [restroom.address, restroom.city, restroom.state].filter(Boolean).join(", ");
 const logMapDebug = (event: string, meta?: Record<string, unknown>) => {
@@ -45,6 +67,15 @@ const formatRatingLabel = (restroom: NearbyBathroom) => {
   }
 
   return `${restroom.ratings.overall.toFixed(1)} overall • ${restroom.ratings.reviewCount} review${restroom.ratings.reviewCount === 1 ? "" : "s"}`;
+};
+
+const matchesRestroomSearch = (restroom: NearbyBathroom, query: string) => {
+  if (!query) {
+    return true;
+  }
+
+  const searchableText = [restroom.name, restroom.address, restroom.city, restroom.state].filter(Boolean).join(" ").toLowerCase();
+  return searchableText.includes(query);
 };
 
 const isFallbackMapRegion = (region: Region | null) => {
@@ -77,6 +108,14 @@ export default function HomeScreen() {
   const [mapFocusedRestroomId, setMapFocusedRestroomId] = useState<string | null>(null);
   const [mapFocusRequestKey, setMapFocusRequestKey] = useState(0);
   const [locationCenterRequestKey, setLocationCenterRequestKey] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [submittedLocalSearchQuery, setSubmittedLocalSearchQuery] = useState("");
+  const [searchErrorMessage, setSearchErrorMessage] = useState<string | null>(null);
+  const [isPlaceSearchSubmitting, setIsPlaceSearchSubmitting] = useState(false);
+  const [isPlaceSuggestionsLoading, setIsPlaceSuggestionsLoading] = useState(false);
+  const [placeSuggestions, setPlaceSuggestions] = useState<PlaceSearchResult[]>([]);
+  const [searchTargetRegion, setSearchTargetRegion] = useState<Region | null>(null);
+  const [searchPanRequestKey, setSearchPanRequestKey] = useState(0);
   const appliedLiveLocationKeyRef = useRef<string | null>(null);
   const browseDataModeRef = useRef<BrowseDataMode>("nearby");
   const boundsDebounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -94,13 +133,100 @@ export default function HomeScreen() {
   const hasAppliedInitialLiveMapCenterRef = useRef(false);
   const isApplyingInitialLiveMapCenterRef = useRef(false);
   const hasUserPositionedMapRef = useRef(false);
+  const skipNextBoundsFetchReasonRef = useRef<string | null>(null);
+  const latestPlaceSearchRequestIdRef = useRef(0);
+  const placeSuggestionAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     browseDataModeRef.current = browseDataMode;
   }, [browseDataMode]);
 
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const normalizedSubmittedLocalSearchQuery = submittedLocalSearchQuery.trim().toLowerCase();
+  const localSuggestionRestrooms = useMemo(
+    () =>
+      normalizedSearchQuery
+        ? restrooms.filter((restroom) => matchesRestroomSearch(restroom, normalizedSearchQuery)).slice(0, MAX_LOCAL_SEARCH_SUGGESTIONS)
+        : [],
+    [normalizedSearchQuery, restrooms]
+  );
+  const expandedMapRestrooms = useMemo(
+    () =>
+      normalizedSubmittedLocalSearchQuery
+        ? restrooms.filter((restroom) => matchesRestroomSearch(restroom, normalizedSubmittedLocalSearchQuery))
+        : restrooms,
+    [normalizedSubmittedLocalSearchQuery, restrooms]
+  );
+  const searchSuggestions = useMemo<SearchSuggestion[]>(
+    () => [
+      ...placeSuggestions.map((place) => ({
+        id: `place:${place.id}`,
+        type: "place" as const,
+        title: place.name,
+        subtitle: place.secondaryName,
+        place
+      })),
+      ...localSuggestionRestrooms.map((restroom) => ({
+        id: `restroom:${restroom.id}`,
+        type: "restroom" as const,
+        title: restroom.name,
+        subtitle: toLocationLine(restroom),
+        restroomId: restroom.id
+      }))
+    ],
+    [localSuggestionRestrooms, placeSuggestions]
+  );
+
+  useEffect(() => {
+    placeSuggestionAbortRef.current?.abort();
+
+    if (normalizedSearchQuery.length < 2) {
+      setPlaceSuggestions([]);
+      setIsPlaceSuggestionsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    placeSuggestionAbortRef.current = controller;
+    const timeoutId = setTimeout(() => {
+      setIsPlaceSuggestionsLoading(true);
+
+      void searchPlaces(normalizedSearchQuery, {
+        signal: controller.signal,
+        proximity: coordinates
+      })
+        .then((results) => {
+          if (controller.signal.aborted) {
+            return;
+          }
+
+          setPlaceSuggestions(results);
+        })
+        .catch((error) => {
+          if (controller.signal.aborted) {
+            return;
+          }
+
+          console.warn("[mobile-map] place suggestions failed", error);
+          setPlaceSuggestions([]);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setIsPlaceSuggestionsLoading(false);
+          }
+        });
+    }, PLACE_SUGGESTION_DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [coordinates, normalizedSearchQuery]);
+
   useEffect(() => {
     return () => {
+      placeSuggestionAbortRef.current?.abort();
+
       if (boundsDebounceTimeoutRef.current) {
         clearTimeout(boundsDebounceTimeoutRef.current);
       }
@@ -114,6 +240,61 @@ export default function HomeScreen() {
       }
     };
   }, []);
+
+  const loadNearbyRestrooms = useCallback(
+    async (
+      nextCoordinates: { lat: number; lng: number },
+      options?: { forceApply?: boolean; isCancelled?: () => boolean }
+    ) => {
+      const isCancelled = options?.isCancelled ?? (() => false);
+      const shouldForceApply = options?.forceApply ?? false;
+      const locationKey = `${nextCoordinates.lat.toFixed(4)}:${nextCoordinates.lng.toFixed(4)}`;
+
+      setIsRefreshingNearby(true);
+      setErrorMessage(null);
+
+      try {
+        const response = await getNearbyRestrooms({
+          lat: nextCoordinates.lat,
+          lng: nextCoordinates.lng,
+          limit: FALLBACK_QUERY.limit
+        });
+
+        if (isCancelled()) {
+          return;
+        }
+
+        appliedLiveLocationKeyRef.current = locationKey;
+        primeRestroomCache(response.restrooms);
+        if (!shouldForceApply && browseDataModeRef.current !== "nearby") {
+          return;
+        }
+
+        if (shouldForceApply) {
+          browseDataModeRef.current = "nearby";
+          setBrowseDataMode("nearby");
+          lastAppliedBoundsKeyRef.current = null;
+          lastQueuedBoundsKeyRef.current = null;
+          pendingBoundsApplyRef.current = null;
+          clearPendingBoundsApplyTimeout();
+        }
+
+        setRestrooms(response.restrooms);
+        setResultSource("live");
+      } catch (error) {
+        if (isCancelled()) {
+          return;
+        }
+
+        setErrorMessage(error instanceof Error ? error.message : "Could not refresh nearby restrooms with your location.");
+      } finally {
+        if (!isCancelled()) {
+          setIsRefreshingNearby(false);
+        }
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -168,39 +349,9 @@ export default function HomeScreen() {
     let cancelled = false;
 
     const loadLiveNearby = async () => {
-      setIsRefreshingNearby(true);
-      setErrorMessage(null);
-
-      try {
-        const response = await getNearbyRestrooms({
-          lat: coordinates.lat,
-          lng: coordinates.lng,
-          limit: FALLBACK_QUERY.limit
-        });
-
-        if (cancelled) {
-          return;
-        }
-
-        appliedLiveLocationKeyRef.current = locationKey;
-        primeRestroomCache(response.restrooms);
-        if (browseDataModeRef.current !== "nearby") {
-          return;
-        }
-
-        setRestrooms(response.restrooms);
-        setResultSource("live");
-      } catch (error) {
-        if (cancelled || browseDataModeRef.current !== "nearby") {
-          return;
-        }
-
-        setErrorMessage(error instanceof Error ? error.message : "Could not refresh nearby restrooms with your location.");
-      } finally {
-        if (!cancelled) {
-          setIsRefreshingNearby(false);
-        }
-      }
+      await loadNearbyRestrooms(coordinates, {
+        isCancelled: () => cancelled
+      });
     };
 
     void loadLiveNearby();
@@ -208,7 +359,7 @@ export default function HomeScreen() {
     return () => {
       cancelled = true;
     };
-  }, [coordinates]);
+  }, [coordinates, loadNearbyRestrooms]);
 
   useEffect(() => {
     selectedRestroomIdRef.current = selectedRestroomId;
@@ -233,6 +384,7 @@ export default function HomeScreen() {
     }
 
     isApplyingInitialLiveMapCenterRef.current = true;
+    skipNextBoundsFetchReasonRef.current = "initial live location center";
     logMapDebug("initial live center requested", {
       source: isExpandedMapOpen ? "expanded open" : "live location available",
       latitude: coordinates.lat,
@@ -441,6 +593,25 @@ export default function HomeScreen() {
       return;
     }
 
+    const skipBoundsReason = skipNextBoundsFetchReasonRef.current;
+    if (skipBoundsReason) {
+      skipNextBoundsFetchReasonRef.current = null;
+
+      if (isApplyingInitialLiveMapCenterRef.current) {
+        isApplyingInitialLiveMapCenterRef.current = false;
+        hasAppliedInitialLiveMapCenterRef.current = true;
+      }
+
+      lastAcceptedRegionRef.current = region;
+      lastMeaningfulRegionRef.current = region;
+      logMapDebug("bounds request skipped", {
+        reason: skipBoundsReason,
+        latitude: region.latitude,
+        longitude: region.longitude
+      });
+      return;
+    }
+
     if (isApplyingInitialLiveMapCenterRef.current) {
       isApplyingInitialLiveMapCenterRef.current = false;
       hasAppliedInitialLiveMapCenterRef.current = true;
@@ -582,6 +753,9 @@ export default function HomeScreen() {
   const showLiveRefreshNotice =
     browseDataMode === "nearby" && permissionStatus === "granted" && (isRefreshingNearby || resultSource === "live");
   const selectedRestroom = selectedRestroomId ? restrooms.find((restroom) => restroom.id === selectedRestroomId) ?? null : null;
+  const expandedSelectedRestroom =
+    selectedRestroomId ? expandedMapRestrooms.find((restroom) => restroom.id === selectedRestroomId) ?? null : null;
+  const expandedSelectedRestroomId = expandedSelectedRestroom ? selectedRestroomId : null;
   const mapOrigin = coordinates ?? FALLBACK_QUERY;
   const canRecenter = permissionStatus === "granted" && coordinates !== null;
   const mapSurfaceProps = {
@@ -595,6 +769,8 @@ export default function HomeScreen() {
     permissionStatus,
     restrooms,
     restoredRegion: mapRegion,
+    searchRegion: null,
+    searchRegionRequestKey: 0,
     selectedRestroomId
   } as const;
   const openExpandedMap = () => {
@@ -603,13 +779,123 @@ export default function HomeScreen() {
     setIsExpandedMapOpen(true);
   };
   const closeExpandedMap = () => {
+    latestPlaceSearchRequestIdRef.current += 1;
+    placeSuggestionAbortRef.current?.abort();
+    setIsPlaceSearchSubmitting(false);
+    setIsPlaceSuggestionsLoading(false);
+    setPlaceSuggestions([]);
+    setSearchQuery("");
+    setSubmittedLocalSearchQuery("");
+    setSearchErrorMessage(null);
+    setSearchTargetRegion(null);
     setShowExpandedMapSelectionPopup(false);
     setIsExpandedMapOpen(false);
   };
   const handleRecenterRequest = () => {
     exitMarkerExplorationMode("recenter", { discardDeferred: true });
+    skipNextBoundsFetchReasonRef.current = "manual location recenter";
+
+    if (coordinates) {
+      void loadNearbyRestrooms(coordinates, { forceApply: true });
+    }
+
     setLocationCenterRequestKey((current) => current + 1);
   };
+  const panToSearchRegion = useCallback((region: Region) => {
+    exitMarkerExplorationMode("place search", { discardDeferred: true });
+    setMapFocusedRestroomId(null);
+    setSelectedRestroomId(null);
+    setSubmittedLocalSearchQuery("");
+    setShowExpandedMapSelectionPopup(false);
+    setSearchTargetRegion(region);
+    setSearchPanRequestKey((current) => current + 1);
+  }, []);
+  const handleSelectSearchSuggestion = useCallback(
+    (suggestion: SearchSuggestion) => {
+      setSearchQuery(suggestion.type === "place" ? suggestion.place.fullName : suggestion.title);
+      setSearchErrorMessage(null);
+
+      if (suggestion.type === "place") {
+        panToSearchRegion({
+          latitude: suggestion.place.lat,
+          longitude: suggestion.place.lng,
+          ...PLACE_SEARCH_REGION_DELTA
+        });
+        return;
+      }
+
+      beginBoundsSuppression("local search suggestion", SHEET_SELECTION_SUPPRESSION_MS, { restroomId: suggestion.restroomId });
+      setSubmittedLocalSearchQuery("");
+      setShowExpandedMapSelectionPopup(false);
+      setSelectedRestroomId(suggestion.restroomId);
+      setMapFocusedRestroomId(suggestion.restroomId);
+      setMapFocusRequestKey((current) => current + 1);
+    },
+    [panToSearchRegion]
+  );
+  const handleSearchQueryChange = useCallback((nextQuery: string) => {
+    latestPlaceSearchRequestIdRef.current += 1;
+    setIsPlaceSearchSubmitting(false);
+    setSubmittedLocalSearchQuery("");
+    setSearchQuery(nextQuery);
+    setSearchErrorMessage(null);
+  }, []);
+  const handleExpandedMapSearchSubmit = useCallback(async () => {
+    const trimmedQuery = searchQuery.trim();
+    if (!trimmedQuery) {
+      setSubmittedLocalSearchQuery("");
+      setSearchErrorMessage(null);
+      return;
+    }
+
+    const requestId = latestPlaceSearchRequestIdRef.current + 1;
+    latestPlaceSearchRequestIdRef.current = requestId;
+    setIsPlaceSearchSubmitting(true);
+    setSearchErrorMessage(null);
+
+    try {
+      const results = await Location.geocodeAsync(trimmedQuery);
+      if (requestId !== latestPlaceSearchRequestIdRef.current) {
+        return;
+      }
+
+      const firstResult = results[0];
+      if (!firstResult) {
+        if (restrooms.some((restroom) => matchesRestroomSearch(restroom, trimmedQuery.toLowerCase()))) {
+          setSubmittedLocalSearchQuery(trimmedQuery);
+          setSearchErrorMessage(null);
+          return;
+        }
+
+        setSubmittedLocalSearchQuery("");
+        setSearchErrorMessage(`Couldn't find a place or visible restroom for "${trimmedQuery}".`);
+        return;
+      }
+
+      panToSearchRegion({
+        latitude: firstResult.latitude,
+        longitude: firstResult.longitude,
+        ...PLACE_SEARCH_REGION_DELTA
+      });
+      setSearchErrorMessage(null);
+    } catch (error) {
+      if (requestId !== latestPlaceSearchRequestIdRef.current) {
+        return;
+      }
+
+      if (restrooms.some((restroom) => matchesRestroomSearch(restroom, trimmedQuery.toLowerCase()))) {
+        setSubmittedLocalSearchQuery(trimmedQuery);
+        setSearchErrorMessage(null);
+      } else {
+        setSubmittedLocalSearchQuery("");
+        setSearchErrorMessage(error instanceof Error ? error.message : "Place search is unavailable right now.");
+      }
+    } finally {
+      if (requestId === latestPlaceSearchRequestIdRef.current) {
+        setIsPlaceSearchSubmitting(false);
+      }
+    }
+  }, [panToSearchRegion, restrooms, searchQuery]);
   const homeMapStatusContent = (
     <>
       {showFallbackBanner ? (
@@ -769,28 +1055,39 @@ export default function HomeScreen() {
             focusRequestKey={mapFocusRequestKey}
             focusedRestroomId={mapFocusedRestroomId}
             initialCenter={mapOrigin}
+            isPlaceSearchSubmitting={isPlaceSearchSubmitting}
             locationCenterRequestKey={locationCenterRequestKey}
             onClose={closeExpandedMap}
+            onChangeSearchQuery={handleSearchQueryChange}
             onPressDetails={(restroomId) => router.push(`/restrooms/${restroomId}` as Href)}
             onPressUseLocation={handleRecenterRequest}
             onRegionSettled={handleMapRegionSettled}
             onSelectRestroom={handleMapSelectionChange}
             onSelectRestroomFromSheet={handleSelectRestroomFromSheet}
+            onSelectSearchSuggestion={handleSelectSearchSuggestion}
+            onSubmitSearchQuery={handleExpandedMapSearchSubmit}
             onSheetStateChange={handleMapSheetStateChange}
             permissionStatus={permissionStatus}
             restoredRegion={mapRegion}
-            restrooms={restrooms}
-            selectedRestroom={selectedRestroom}
-            selectedRestroomId={selectedRestroomId}
-            selectedPopupVisible={showExpandedMapSelectionPopup}
+            restrooms={expandedMapRestrooms}
+            searchErrorMessage={searchErrorMessage}
+            searchSuggestions={searchSuggestions}
+            searchPanRequestKey={searchPanRequestKey}
+            searchQuery={searchQuery}
+            searchTargetRegion={searchTargetRegion}
+            showSubmittedLocalSearchResults={normalizedSubmittedLocalSearchQuery.length > 0}
+            isPlaceSuggestionsLoading={isPlaceSuggestionsLoading}
+            selectedRestroom={expandedSelectedRestroom}
+            selectedRestroomId={expandedSelectedRestroomId}
+            selectedPopupVisible={showExpandedMapSelectionPopup && expandedSelectedRestroom !== null}
             sheetState={mapSheetState}
             statusContent={overlayMapStatusContent}
             onPressSelectedPopup={() => {
-              if (!selectedRestroom) {
+              if (!expandedSelectedRestroom) {
                 return;
               }
 
-              router.push(`/restrooms/${selectedRestroom.id}` as Href);
+              router.push(`/restrooms/${expandedSelectedRestroom.id}` as Href);
             }}
           />
         ) : null}

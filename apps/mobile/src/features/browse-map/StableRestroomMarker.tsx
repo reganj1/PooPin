@@ -4,11 +4,12 @@ import type { RenderedMarker } from "./reconcileMarkers";
 import { WCMarkerBubble } from "./WCMarkerBubble";
 
 interface StableRestroomMarkerProps {
+  isSelected: boolean;
   marker: RenderedMarker;
   onPressMarker: (restroomId: string) => void;
 }
 
-function StableRestroomMarkerComponent({ marker, onPressMarker }: StableRestroomMarkerProps) {
+function StableRestroomMarkerComponent({ isSelected, marker, onPressMarker }: StableRestroomMarkerProps) {
   const [tracksViewChanges, setTracksViewChanges] = useState(true);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -27,6 +28,7 @@ function StableRestroomMarkerComponent({ marker, onPressMarker }: StableRestroom
 
   useEffect(() => {
     clearRefreshTimers();
+    setTracksViewChanges(true);
 
     animationFrameRef.current = requestAnimationFrame(() => {
       refreshTimeoutRef.current = setTimeout(() => {
@@ -39,7 +41,7 @@ function StableRestroomMarkerComponent({ marker, onPressMarker }: StableRestroom
     return () => {
       clearRefreshTimers();
     };
-  }, [clearRefreshTimers]);
+  }, [clearRefreshTimers, isSelected]);
 
   const handlePress = useCallback(() => {
     onPressMarker(marker.id);
@@ -52,9 +54,9 @@ function StableRestroomMarkerComponent({ marker, onPressMarker }: StableRestroom
       identifier={marker.id}
       onPress={handlePress}
       tracksViewChanges={tracksViewChanges}
-      zIndex={1}
+      zIndex={isSelected ? 2 : 1}
     >
-      <WCMarkerBubble />
+      <WCMarkerBubble isSelected={isSelected} />
     </Marker>
   );
 }
@@ -62,6 +64,7 @@ function StableRestroomMarkerComponent({ marker, onPressMarker }: StableRestroom
 export const StableRestroomMarker = memo(
   StableRestroomMarkerComponent,
   (previousProps, nextProps) =>
+    previousProps.isSelected === nextProps.isSelected &&
     previousProps.marker === nextProps.marker &&
     previousProps.onPressMarker === nextProps.onPressMarker
 );

@@ -12,6 +12,19 @@ import { mobileEnv } from "./env";
 
 const restroomCache = new Map<string, NearbyBathroom>();
 
+export type PlaceSearchResultType = "address" | "poi" | "neighborhood" | "locality" | "place" | "region" | "unknown";
+
+export interface PlaceSearchResult {
+  id: string;
+  name: string;
+  secondaryName: string;
+  fullName: string;
+  lat: number;
+  lng: number;
+  zoom: number;
+  placeType: PlaceSearchResultType;
+}
+
 const createUrl = (path: string, params?: Record<string, string | number | undefined>) => {
   const url = new URL(path, mobileEnv.apiBaseUrl);
 
@@ -56,6 +69,10 @@ const fetchJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
 
   return readJson<T>(response);
 };
+
+interface PlaceSearchApiResponse {
+  results?: PlaceSearchResult[];
+}
 
 export const primeRestroomCache = (restrooms: NearbyBathroom[]) => {
   for (const restroom of restrooms) {
@@ -106,4 +123,30 @@ export const getRestroom = async (id: string): Promise<RestroomDetailResponse> =
   const response = await fetchJson<RestroomDetailResponse>(createUrl(`/api/restrooms/${encodeURIComponent(id)}`));
   restroomCache.set(response.restroom.id, response.restroom);
   return response;
+};
+
+export const searchPlaces = async (
+  query: string,
+  options?: { signal?: AbortSignal; proximity?: { lat: number; lng: number } | null }
+): Promise<PlaceSearchResult[]> => {
+  const trimmedQuery = query.trim();
+  if (trimmedQuery.length < 2) {
+    return [];
+  }
+
+  const response = await fetchJson<PlaceSearchApiResponse>(
+    createUrl("/api/geocode/search", {
+      q: trimmedQuery,
+      lat: options?.proximity?.lat,
+      lng: options?.proximity?.lng
+    }),
+    {
+      signal: options?.signal,
+      headers: {
+        accept: "application/json"
+      }
+    }
+  );
+
+  return Array.isArray(response.results) ? response.results : [];
 };

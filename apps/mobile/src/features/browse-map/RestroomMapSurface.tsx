@@ -23,6 +23,8 @@ interface RestroomMapSurfaceProps {
   permissionStatus: PermissionStatus;
   focusRequestKey: number;
   locationCenterRequestKey: number;
+  searchRegion: Region | null;
+  searchRegionRequestKey: number;
   onRegionSettled: (region: Region) => void;
   onSelectRestroom: (restroomId: string | null) => void;
 }
@@ -48,6 +50,8 @@ export function RestroomMapSurface({
   permissionStatus,
   focusRequestKey,
   locationCenterRequestKey,
+  searchRegion,
+  searchRegionRequestKey,
   onRegionSettled,
   onSelectRestroom
 }: RestroomMapSurfaceProps) {
@@ -133,7 +137,22 @@ export function RestroomMapSurface({
   }, [coordinates, locationCenterRequestKey, permissionStatus]);
 
   useEffect(() => {
-    if (restoredRegion || lastAutoCenteredOriginKeyRef.current === initialCenterKey) {
+    if (!searchRegion || searchRegionRequestKey === 0) {
+      return;
+    }
+
+    hasHandledInitialRegionChangeRef.current = true;
+    currentRegionRef.current = searchRegion;
+    mapRef.current?.animateToRegion(searchRegion, 700);
+  }, [searchRegion, searchRegionRequestKey]);
+
+  useEffect(() => {
+    const matchesLiveCoordinates =
+      permissionStatus === "granted" &&
+      coordinates !== null &&
+      initialCenterKey === `${coordinates.lat.toFixed(4)}:${coordinates.lng.toFixed(4)}`;
+
+    if (matchesLiveCoordinates || restoredRegion || lastAutoCenteredOriginKeyRef.current === initialCenterKey) {
       return;
     }
 
@@ -147,7 +166,7 @@ export function RestroomMapSurface({
       },
       700
     );
-  }, [initialCenter, initialCenterKey, restoredRegion]);
+  }, [coordinates, initialCenter, initialCenterKey, permissionStatus, restoredRegion]);
 
   useEffect(() => {
     if (!focusedRestroomId || focusRequestKey === 0) {
@@ -196,6 +215,7 @@ export function RestroomMapSurface({
       >
         {renderedMarkers.map((marker) => (
           <StableRestroomMarker
+            isSelected={marker.id === selectedRestroomId}
             key={marker.id}
             marker={marker}
             onPressMarker={handleMarkerPress}

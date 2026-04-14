@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { NearbyBathroom } from "@poopin/domain";
 import {
+  ActivityIndicator,
   Animated,
   LayoutChangeEvent,
   PanResponder,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useWindowDimensions
 } from "react-native";
 import type { Region } from "react-native-maps";
+import type { PlaceSearchResult } from "../../lib/api";
 import { mobileTheme } from "../../ui/theme";
 import { MapResultsSheet } from "./MapResultsSheet";
 import { RestroomMapSurface } from "./RestroomMapSurface";
@@ -24,6 +28,21 @@ interface Coordinates {
 
 type PermissionStatus = "requesting" | "granted" | "denied" | "unavailable";
 type MapSheetState = "collapsed" | "default" | "expanded";
+type SearchSuggestion =
+  | {
+      id: string;
+      type: "place";
+      title: string;
+      subtitle: string;
+      place: PlaceSearchResult;
+    }
+  | {
+      id: string;
+      type: "restroom";
+      title: string;
+      subtitle: string;
+      restroomId: string;
+    };
 
 interface ExpandedMapOverlayProps {
   canRecenter: boolean;
@@ -31,17 +50,28 @@ interface ExpandedMapOverlayProps {
   focusRequestKey: number;
   focusedRestroomId: string | null;
   initialCenter: Coordinates;
+  isPlaceSearchSubmitting: boolean;
+  isPlaceSuggestionsLoading: boolean;
   locationCenterRequestKey: number;
   onClose: () => void;
+  onChangeSearchQuery: (query: string) => void;
   onPressDetails: (restroomId: string) => void;
   onPressUseLocation: () => void;
   onRegionSettled: (region: Region) => void;
   onSelectRestroom: (restroomId: string | null) => void;
   onSelectRestroomFromSheet: (restroomId: string) => void;
+  onSelectSearchSuggestion: (suggestion: SearchSuggestion) => void;
+  onSubmitSearchQuery: () => void;
   onSheetStateChange: (nextState: MapSheetState) => void;
   permissionStatus: PermissionStatus;
   restoredRegion: Region | null;
   restrooms: NearbyBathroom[];
+  searchErrorMessage: string | null;
+  searchSuggestions: SearchSuggestion[];
+  searchPanRequestKey: number;
+  searchQuery: string;
+  searchTargetRegion: Region | null;
+  showSubmittedLocalSearchResults: boolean;
   selectedRestroom: NearbyBathroom | null;
   selectedRestroomId: string | null;
   selectedPopupVisible: boolean;
@@ -146,17 +176,28 @@ export function ExpandedMapOverlay({
   focusRequestKey,
   focusedRestroomId,
   initialCenter,
+  isPlaceSearchSubmitting,
+  isPlaceSuggestionsLoading,
   locationCenterRequestKey,
   onClose,
+  onChangeSearchQuery,
   onPressDetails,
   onPressUseLocation,
   onRegionSettled,
   onSelectRestroom,
   onSelectRestroomFromSheet,
+  onSelectSearchSuggestion,
+  onSubmitSearchQuery,
   onSheetStateChange,
   permissionStatus,
   restoredRegion,
   restrooms,
+  searchErrorMessage,
+  searchSuggestions,
+  searchPanRequestKey,
+  searchQuery,
+  searchTargetRegion,
+  showSubmittedLocalSearchResults,
   selectedRestroom,
   selectedRestroomId,
   selectedPopupVisible,
@@ -167,12 +208,18 @@ export function ExpandedMapOverlay({
   const { height: viewportHeight } = useWindowDimensions();
   const [topReservedHeight, setTopReservedHeight] = useState(96);
   const topStackRef = useRef<View>(null);
+  const searchInputRef = useRef<TextInput | null>(null);
   const sheetMetrics = useMemo(() => getMobileSheetMetrics(viewportHeight, topReservedHeight), [topReservedHeight, viewportHeight]);
   const sheetOffset = useRef(new Animated.Value(sheetMetrics.offsets[sheetState])).current;
   const currentOffsetRef = useRef(sheetMetrics.offsets[sheetState]);
   const dragStartOffsetRef = useRef(sheetMetrics.offsets[sheetState]);
   const didDragRef = useRef(false);
   const isMountedRef = useRef(false);
+  const searchBlurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const trimmedSearchQuery = searchQuery.trim();
+  const showSuggestionDropdown =
+    isSearchFocused && trimmedSearchQuery.length > 0 && (searchSuggestions.length > 0 || isPlaceSuggestionsLoading || showSubmittedLocalSearchResults);
 
   useEffect(() => {
     const listenerId = sheetOffset.addListener(({ value }) => {
@@ -183,6 +230,14 @@ export function ExpandedMapOverlay({
       sheetOffset.removeListener(listenerId);
     };
   }, [sheetOffset]);
+
+  useEffect(() => {
+    return () => {
+      if (searchBlurTimeoutRef.current) {
+        clearTimeout(searchBlurTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const nextOffset = sheetMetrics.offsets[sheetState];
@@ -302,26 +357,57 @@ export function ExpandedMapOverlay({
 
   useEffect(() => {
     measureTopOverlayBottom();
-  }, [measureTopOverlayBottom, statusContent, viewportHeight]);
+  }, [isPlaceSuggestionsLoading, measureTopOverlayBottom, searchSuggestions.length, showSuggestionDropdown, statusContent, viewportHeight]);
 
   const handleTopStackLayout = (_event: LayoutChangeEvent) => {
     measureTopOverlayBottom();
   };
+  const cancelSearchBlur = () => {
+    if (searchBlurTimeoutRef.current) {
+      clearTimeout(searchBlurTimeoutRef.current);
+      searchBlurTimeoutRef.current = null;
+    }
+  };
+  const scheduleSearchBlur = () => {
+    cancelSearchBlur();
+    searchBlurTimeoutRef.current = setTimeout(() => {
+      searchBlurTimeoutRef.current = null;
+      setIsSearchFocused(false);
+    }, 110);
+  };
+  const dismissSearchDropdown = useCallback(() => {
+    cancelSearchBlur();
+    setIsSearchFocused(false);
+    searchInputRef.current?.blur();
+  }, []);
 
   return (
     <View style={styles.overlay}>
-      <View style={styles.mapBackground}>
+      <View
+        onTouchStart={() => {
+          dismissSearchDropdown();
+        }}
+        style={styles.mapBackground}
+      >
         <RestroomMapSurface
           coordinates={coordinates}
           focusRequestKey={focusRequestKey}
           focusedRestroomId={focusedRestroomId}
           initialCenter={initialCenter}
           locationCenterRequestKey={locationCenterRequestKey}
-          onRegionSettled={onRegionSettled}
+          onRegionSettled={(region) => {
+            dismissSearchDropdown();
+            onRegionSettled(region);
+          }}
           restoredRegion={restoredRegion}
-          onSelectRestroom={onSelectRestroom}
+          onSelectRestroom={(restroomId) => {
+            dismissSearchDropdown();
+            onSelectRestroom(restroomId);
+          }}
           permissionStatus={permissionStatus}
           restrooms={restrooms}
+          searchRegion={searchTargetRegion}
+          searchRegionRequestKey={searchPanRequestKey}
           selectedRestroomId={selectedRestroomId}
         />
       </View>
@@ -339,17 +425,92 @@ export function ExpandedMapOverlay({
             </Pressable>
 
             <View style={styles.searchField}>
-              <Text style={styles.searchPlaceholder}>Search the map</Text>
+              <TextInput
+                autoCapitalize="none"
+                autoCorrect={false}
+                clearButtonMode="while-editing"
+                onChangeText={(nextQuery) => {
+                  cancelSearchBlur();
+                  setIsSearchFocused(true);
+                  onChangeSearchQuery(nextQuery);
+                }}
+                onFocus={() => {
+                  cancelSearchBlur();
+                  setIsSearchFocused(true);
+                }}
+                onBlur={scheduleSearchBlur}
+                onSubmitEditing={() => {
+                  dismissSearchDropdown();
+                  onSubmitSearchQuery();
+                }}
+                placeholder="Search a city or nearby restroom"
+                placeholderTextColor={mobileTheme.colors.textSecondary}
+                ref={searchInputRef}
+                returnKeyType="search"
+                style={styles.searchInput}
+                value={searchQuery}
+              />
 
-              {permissionStatus === "granted" && coordinates ? (
-                <Text style={styles.searchMetaText}>Current area</Text>
-              ) : (
-                <View style={styles.searchBadge}>
-                  <Text style={styles.searchBadgeText}>Soon</Text>
+              {isPlaceSearchSubmitting ? (
+                <View style={styles.searchMetaLoading}>
+                  <ActivityIndicator color={mobileTheme.colors.brandStrong} size="small" />
+                  <Text style={styles.searchMetaText}>Searching</Text>
                 </View>
+              ) : (
+                <Text style={styles.searchMetaText}>{showSubmittedLocalSearchResults ? "Filtered" : "Places"}</Text>
               )}
             </View>
           </View>
+
+          {showSuggestionDropdown ? (
+            <View style={styles.searchDropdown}>
+              <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.searchDropdownScroll}>
+                {isPlaceSuggestionsLoading ? (
+                  <View style={styles.searchSuggestionLoadingRow}>
+                    <ActivityIndicator color={mobileTheme.colors.brandStrong} size="small" />
+                    <Text style={styles.searchSuggestionLoadingText}>Finding place suggestions…</Text>
+                  </View>
+                ) : null}
+
+                {searchSuggestions.map((suggestion) => (
+                  <Pressable
+                    key={suggestion.id}
+                    onPressIn={() => {
+                      dismissSearchDropdown();
+                      onSelectSearchSuggestion(suggestion);
+                    }}
+                    style={({ pressed }) => [styles.searchSuggestionRow, pressed ? styles.buttonPressed : null]}
+                  >
+                    <View style={styles.searchSuggestionCopy}>
+                      <Text numberOfLines={1} style={styles.searchSuggestionTitle}>
+                        {suggestion.title}
+                      </Text>
+                      {suggestion.subtitle ? (
+                        <Text numberOfLines={1} style={styles.searchSuggestionSubtitle}>
+                          {suggestion.subtitle}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <View style={styles.searchSuggestionBadge}>
+                      <Text style={styles.searchSuggestionBadgeText}>{suggestion.type === "place" ? "Place" : "Visible"}</Text>
+                    </View>
+                  </Pressable>
+                ))}
+
+                {!isPlaceSuggestionsLoading && searchSuggestions.length === 0 && showSubmittedLocalSearchResults ? (
+                  <View style={styles.searchSuggestionEmptyState}>
+                    <Text style={styles.searchSuggestionEmptyStateText}>Press search to keep this visible-restroom filter applied.</Text>
+                  </View>
+                ) : null}
+              </ScrollView>
+            </View>
+          ) : null}
+
+          {searchErrorMessage ? (
+            <View style={styles.searchFeedbackCard}>
+              <Text style={styles.searchFeedbackText}>{searchErrorMessage}</Text>
+            </View>
+          ) : null}
 
           {statusContent ? <View style={styles.statusWrap}>{statusContent}</View> : null}
         </View>
@@ -360,14 +521,29 @@ export function ExpandedMapOverlay({
           </View>
         ) : null}
 
-        <View pointerEvents="box-none" style={styles.sheetLayer}>
+        <View
+          onTouchStart={() => {
+            dismissSearchDropdown();
+          }}
+          pointerEvents="box-none"
+          style={styles.sheetLayer}
+        >
           <MapResultsSheet
             canUseLocation={canRecenter}
             handlePanHandlers={panResponder.panHandlers}
             onPressDetails={onPressDetails}
-            onPressUseLocation={onPressUseLocation}
-            onSelectRestroom={onSelectRestroomFromSheet}
-            onSheetHeaderPress={handleSheetHeaderPress}
+            onPressUseLocation={() => {
+              dismissSearchDropdown();
+              onPressUseLocation();
+            }}
+            onSelectRestroom={(restroomId) => {
+              dismissSearchDropdown();
+              onSelectRestroomFromSheet(restroomId);
+            }}
+            onSheetHeaderPress={() => {
+              dismissSearchDropdown();
+              handleSheetHeaderPress();
+            }}
             restrooms={restrooms}
             selectedRestroom={selectedRestroom}
             selectedRestroomId={selectedRestroomId}
@@ -434,32 +610,109 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8
   },
-  searchPlaceholder: {
-    color: mobileTheme.colors.textSecondary,
+  searchInput: {
+    color: mobileTheme.colors.textPrimary,
     flex: 1,
     fontSize: 13,
     fontWeight: "600"
   },
+  searchMetaLoading: {
+    alignItems: "center",
+    flexDirection: "row",
+    marginLeft: 10
+  },
   searchMetaText: {
     color: mobileTheme.colors.textMuted,
     fontSize: 11,
-    fontWeight: "700",
-    marginLeft: 10
+    fontWeight: "700"
   },
-  searchBadge: {
+  searchFeedbackCard: {
+    backgroundColor: "rgba(254,242,242,0.95)",
+    borderColor: mobileTheme.colors.errorBorder,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginTop: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  searchFeedbackText: {
+    color: mobileTheme.colors.errorText,
+    fontSize: 12,
+    lineHeight: 17
+  },
+  searchDropdown: {
+    backgroundColor: "rgba(255,255,255,0.98)",
+    borderColor: mobileTheme.colors.border,
+    borderRadius: 18,
+    borderWidth: 1,
+    marginTop: 6,
+    maxHeight: 228,
+    overflow: "hidden",
+    ...mobileTheme.shadows.card
+  },
+  searchDropdownScroll: {
+    maxHeight: 228
+  },
+  searchSuggestionLoadingRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12
+  },
+  searchSuggestionLoadingText: {
+    color: mobileTheme.colors.textSecondary,
+    fontSize: 13,
+    fontWeight: "600"
+  },
+  searchSuggestionRow: {
+    alignItems: "center",
+    borderTopColor: mobileTheme.colors.borderSubtle,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingVertical: 12
+  },
+  searchSuggestionCopy: {
+    flex: 1
+  },
+  searchSuggestionTitle: {
+    color: mobileTheme.colors.textPrimary,
+    fontSize: 14,
+    fontWeight: "700"
+  },
+  searchSuggestionSubtitle: {
+    color: mobileTheme.colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 2
+  },
+  searchSuggestionBadge: {
     alignItems: "center",
     backgroundColor: mobileTheme.colors.surfaceMuted,
     borderColor: mobileTheme.colors.border,
     borderRadius: mobileTheme.radii.pill,
     borderWidth: 1,
     justifyContent: "center",
-    paddingHorizontal: 8,
-    paddingVertical: 4
+    minWidth: 62,
+    paddingHorizontal: 10,
+    paddingVertical: 6
   },
-  searchBadgeText: {
+  searchSuggestionBadgeText: {
     color: mobileTheme.colors.textSecondary,
     fontSize: 10,
     fontWeight: "700"
+  },
+  searchSuggestionEmptyState: {
+    paddingHorizontal: 14,
+    paddingVertical: 12
+  },
+  searchSuggestionEmptyStateText: {
+    color: mobileTheme.colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17
   },
   statusWrap: {
     marginTop: 6
