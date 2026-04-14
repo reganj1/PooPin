@@ -18,9 +18,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
+  formatPointEventLabel,
   getMyContributionCounts,
   getMyProfile,
+  getMyRecentActivity,
   type MyProfile,
+  type PointEventSummary,
   updateMyActiveCard,
   updateMyDisplayName
 } from "../../src/lib/api";
@@ -41,9 +44,21 @@ import { mobileTheme } from "../../src/ui/theme";
 type IoniconsName = ComponentProps<typeof Ionicons>["name"];
 
 const { width: SCREEN_W } = Dimensions.get("window");
-const GRID_PADDING = mobileTheme.spacing.screenX;
+const SCREEN_PAD = mobileTheme.spacing.screenX;
 const GRID_GAP = 10;
-const CARD_W = Math.floor((SCREEN_W - GRID_PADDING * 2 - GRID_GAP) / 2);
+const CARD_W = Math.floor((SCREEN_W - SCREEN_PAD * 2 - GRID_GAP) / 2);
+
+type Counts = { reviewCount: number; photoCount: number; restroomAddCount: number };
+
+const formatRelativeDate = (iso: string): string => {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+};
 
 // ─── Rarity pill ─────────────────────────────────────────────────────────────
 
@@ -55,6 +70,278 @@ function RarityPill({ rarity, size = "sm" }: { rarity: CollectibleCardRarity; si
       <Text style={[styles.rarityPillText, { color: c.text, fontSize: size === "md" ? 12 : 10 }]}>
         {rarity}
       </Text>
+    </View>
+  );
+}
+
+// ─── Contribution stat chip ───────────────────────────────────────────────────
+
+function StatChip({
+  value,
+  label,
+  weight,
+  accentColor
+}: {
+  value: number;
+  label: string;
+  weight: string;
+  accentColor: string;
+}) {
+  return (
+    <View style={styles.statChip}>
+      <Text style={[styles.statChipValue, { color: accentColor }]}>{value}</Text>
+      <Text style={styles.statChipLabel}>{label}</Text>
+      <Text style={[styles.statChipWeight, { color: accentColor }]}>{weight} ea.</Text>
+    </View>
+  );
+}
+
+// ─── Progress hero card ───────────────────────────────────────────────────────
+// The central reward surface — shows score, tier, active card, progress, and
+// contribution breakdown. Mirrors the web's ProfileCollectiblesPanel.
+
+function ProgressHeroCard({
+  activeCard,
+  currentTierCard,
+  score,
+  counts
+}: {
+  activeCard: CollectibleCard;
+  currentTierCard: CollectibleCard;
+  score: number;
+  counts: Counts;
+}) {
+  const c = RARITY_COLORS[activeCard.rarity] ?? RARITY_COLORS.Common;
+  const nextCard = getNextCard(score);
+  const remaining = nextCard ? Math.max(0, nextCard.threshold - score) : 0;
+
+  // Progress always tracks from the current earned tier, not the active showcase card
+  const base = currentTierCard.threshold;
+  const peak = nextCard?.threshold ?? base;
+  const range = Math.max(1, peak - base);
+  const progressPct = nextCard
+    ? Math.min(100, Math.max(0, Math.round(((score - base) / range) * 100)))
+    : 100;
+
+  const isDifferentCard = activeCard.key !== currentTierCard.key;
+
+  return (
+    <View style={styles.heroCard}>
+      {/* ── Score + tier row ── */}
+      <View style={styles.heroScoreRow}>
+        <View style={styles.heroScoreLeft}>
+          <Text style={styles.heroScoreEyebrow}>COLLECTION SCORE</Text>
+          <View style={styles.heroScoreValueRow}>
+            <Text style={styles.heroScoreNum}>{score}</Text>
+            <Text style={styles.heroScoreUnit}> pts</Text>
+          </View>
+        </View>
+        <View style={styles.heroScoreRight}>
+          <RarityPill rarity={currentTierCard.rarity} />
+          <Text style={styles.heroTierLabel}>Tier {currentTierCard.tier}</Text>
+        </View>
+      </View>
+
+      {/* ── Separator ── */}
+      <View style={styles.heroDivider} />
+
+      {/* ── Active card showcase ── */}
+      <View style={styles.heroShowcase}>
+        <View style={[styles.heroEmojiWrap, { borderColor: c.border }]}>
+          <Text style={styles.heroEmoji}>{activeCard.mascot}</Text>
+        </View>
+        <View style={styles.heroShowcaseText}>
+          {/* Title uses rarity color — small, intentional collectible accent */}
+          <Text style={[styles.heroCardTitle, { color: c.text }]} numberOfLines={1}>
+            {activeCard.title}
+          </Text>
+          <Text style={styles.heroCardFlavor} numberOfLines={2}>
+            {activeCard.flavorLine}
+          </Text>
+          {isDifferentCard && (
+            <Text style={styles.heroCardNote}>
+              Showcasing · earned {currentTierCard.rarity}
+            </Text>
+          )}
+        </View>
+      </View>
+
+      {/* ── Progress bar ── */}
+      <View style={styles.heroProgressSection}>
+        <View style={styles.heroProgressLabelRow}>
+          <Text style={styles.heroProgressLabel}>{score} pts</Text>
+          {nextCard && (
+            <Text style={styles.heroProgressLabel}>{nextCard.threshold} pts</Text>
+          )}
+        </View>
+        {/* Track is neutral; fill uses rarity accent — progress indicator only */}
+        <View style={styles.heroProgressTrack}>
+          <View
+            style={[
+              styles.heroProgressFill,
+              { width: `${progressPct}%` as `${number}%`, backgroundColor: c.text }
+            ]}
+          />
+        </View>
+        {nextCard ? (
+          <Text style={styles.heroProgressHint}>
+            {remaining} more pt{remaining !== 1 ? "s" : ""} to unlock{" "}
+            <Text style={styles.heroProgressHintBold}>{nextCard.title}</Text>
+            {" · "}
+            <Text style={styles.heroProgressRarity}>{nextCard.rarity}</Text>
+          </Text>
+        ) : (
+          <Text style={styles.heroProgressHint}>
+            Every launch card unlocked. 🎉 More variants may land later.
+          </Text>
+        )}
+      </View>
+
+      {/* ── Contribution stats (collection weights) ── */}
+      <Text style={styles.heroStatsTitle}>Collection contributions</Text>
+      <View style={styles.heroStatsRow}>
+        <StatChip
+          value={counts.reviewCount}
+          label="Reviews"
+          weight="+1"
+          accentColor={mobileTheme.colors.brandStrong}
+        />
+        <View style={styles.heroStatsDivider} />
+        <StatChip
+          value={counts.photoCount}
+          label="Photos"
+          weight="+1"
+          accentColor={mobileTheme.colors.brandStrong}
+        />
+        <View style={styles.heroStatsDivider} />
+        <StatChip
+          value={counts.restroomAddCount}
+          label="Restrooms"
+          weight="+3"
+          accentColor={mobileTheme.colors.brandStrong}
+        />
+      </View>
+
+      {/* ── Clarifying note ── */}
+      <Text style={styles.heroScoringNote}>
+        Collection score unlocks title cards · separate from leaderboard points
+      </Text>
+    </View>
+  );
+}
+
+// ─── Collection card ──────────────────────────────────────────────────────────
+
+function CollectionCard({
+  card,
+  isActive,
+  isUnlocked,
+  onSelect,
+  selecting
+}: {
+  card: CollectibleCard;
+  isActive: boolean;
+  isUnlocked: boolean;
+  onSelect: () => void;
+  selecting: boolean;
+}) {
+  const c = RARITY_COLORS[card.rarity] ?? RARITY_COLORS.Common;
+  const locked = !isUnlocked;
+
+  return (
+    <Pressable
+      onPress={() => !isActive && !locked && !selecting && onSelect()}
+      disabled={isActive || locked || selecting}
+      style={({ pressed }) => [
+        styles.collCard,
+        { width: CARD_W },
+        // State communicated via border weight + color, not background fill
+        isActive
+          ? { backgroundColor: mobileTheme.colors.surface, borderColor: c.text, borderWidth: 2.5 }
+          : locked
+          ? { backgroundColor: mobileTheme.colors.surface, borderColor: mobileTheme.colors.border, borderWidth: 1 }
+          : { backgroundColor: mobileTheme.colors.surface, borderColor: c.border, borderWidth: 1.5 },
+        locked && styles.collCardLocked,
+        pressed && !isActive && !locked && styles.collCardPressed
+      ]}
+    >
+      {/* Top-right state badge: checkmark (equipped) or lock (locked) */}
+      {isActive ? (
+        <View style={[styles.collActiveBadge, { backgroundColor: c.text }]}>
+          <Ionicons name="checkmark" size={10} color="#ffffff" />
+        </View>
+      ) : locked ? (
+        <View style={styles.collLockBadge}>
+          <Ionicons name="lock-closed" size={9} color={mobileTheme.colors.textFaint} />
+        </View>
+      ) : null}
+
+      {/* Emoji */}
+      <Text style={styles.collCardEmoji}>{card.mascot}</Text>
+
+      {/* Title */}
+      <Text
+        style={[
+          styles.collCardTitle,
+          isActive && { color: c.text },
+          locked && styles.collCardTitleLocked
+        ]}
+        numberOfLines={2}
+      >
+        {card.title}
+      </Text>
+
+      {/* Bottom row — icon + text cues for every state, not color alone */}
+      <View style={styles.collCardBottom}>
+        {locked ? (
+          // Lock icon + threshold make state clear in grayscale
+          <View style={styles.collCardLockedInfo}>
+            <Ionicons name="lock-closed-outline" size={10} color={mobileTheme.colors.textFaint} />
+            <Text style={styles.collCardThreshold}>{card.threshold} pts</Text>
+          </View>
+        ) : (
+          <RarityPill rarity={card.rarity} />
+        )}
+        {!locked && (
+          <View>
+            {isActive ? (
+              // "Equipped" is unambiguous even without color
+              <Text style={[styles.collCardActionActive, { color: c.text }]}>Equipped</Text>
+            ) : selecting ? (
+              <ActivityIndicator size="small" color={mobileTheme.colors.textFaint} />
+            ) : (
+              <Text style={styles.collCardActionEquip}>Equip</Text>
+            )}
+          </View>
+        )}
+      </View>
+    </Pressable>
+  );
+}
+
+// ─── Activity event row ───────────────────────────────────────────────────────
+
+function ActivityEventRow({ event }: { event: PointEventSummary }) {
+  const iconName: IoniconsName =
+    event.eventType === "review_created"
+      ? "star-outline"
+      : event.eventType === "photo_uploaded"
+      ? "camera-outline"
+      : "location-outline";
+
+  return (
+    <View style={styles.activityRow}>
+      <View style={styles.activityIconBox}>
+        <Ionicons name={iconName} size={16} color={mobileTheme.colors.brandStrong} />
+      </View>
+      <View style={styles.activityContent}>
+        <Text style={styles.activityLabel}>{formatPointEventLabel(event.eventType)}</Text>
+        <Text style={styles.activityDate}>{formatRelativeDate(event.createdAt)}</Text>
+      </View>
+      <View style={styles.activityPointsBadge}>
+        <Text style={styles.activityPoints}>+{event.pointsDelta}</Text>
+        <Text style={styles.activityPtsLabel}> pts</Text>
+      </View>
     </View>
   );
 }
@@ -98,7 +385,7 @@ function EditNameModal({
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View style={styles.modalHeader}>
           <Pressable onPress={onClose} style={styles.modalHeaderBtn}>
-            <Text style={styles.modalHeaderBtnCancel}>Cancel</Text>
+            <Text style={styles.modalBtnCancel}>Cancel</Text>
           </Pressable>
           <Text style={styles.modalTitle}>Edit display name</Text>
           <Pressable
@@ -109,7 +396,7 @@ function EditNameModal({
             {saving ? (
               <ActivityIndicator size="small" color={mobileTheme.colors.brandStrong} />
             ) : (
-              <Text style={styles.modalHeaderBtnSave}>Save</Text>
+              <Text style={styles.modalBtnSave}>Save</Text>
             )}
           </Pressable>
         </View>
@@ -137,127 +424,6 @@ function EditNameModal({
   );
 }
 
-// ─── Active title showcase card ───────────────────────────────────────────────
-
-function ActiveTitleCard({ card, score }: { card: CollectibleCard; score: number }) {
-  const c = RARITY_COLORS[card.rarity] ?? RARITY_COLORS.Common;
-  const nextCard = getNextCard(score);
-  const divisor = nextCard && nextCard.threshold !== card.threshold
-    ? nextCard.threshold - card.threshold
-    : 1;
-  const progressToNext = nextCard
-    ? Math.min(100, Math.max(0, Math.round(((score - card.threshold) / divisor) * 100)))
-    : 100;
-
-  return (
-    <View style={[styles.activeTitleCard, { backgroundColor: c.bg, borderColor: c.border }]}>
-      {/* Header row */}
-      <View style={styles.activeTitleHeader}>
-        <RarityPill rarity={card.rarity} size="sm" />
-        <View style={[styles.activeBadge, { backgroundColor: c.text }]}>
-          <Text style={styles.activeBadgeText}>Active</Text>
-        </View>
-      </View>
-
-      {/* Emoji + info */}
-      <View style={styles.activeTitleBody}>
-        <View style={[styles.activeTitleEmojiWrap, { backgroundColor: c.border }]}>
-          <Text style={styles.activeTitleEmoji}>{card.mascot}</Text>
-        </View>
-        <View style={styles.activeTitleMeta}>
-          <Text style={[styles.activeTitleName, { color: c.text }]}>{card.title}</Text>
-          <Text style={styles.activeTitleFlavor} numberOfLines={3}>{card.flavorLine}</Text>
-        </View>
-      </View>
-
-      {/* Progress */}
-      <View style={styles.progressSection}>
-        <View style={styles.progressBg}>
-          <View
-            style={[
-              styles.progressFill,
-              { width: `${progressToNext}%` as `${number}%`, backgroundColor: c.text }
-            ]}
-          />
-        </View>
-        {nextCard ? (
-          <Text style={[styles.progressHint, { color: c.text }]}>
-            {Math.max(0, nextCard.threshold - score)} pts to unlock{" "}
-            <Text style={styles.progressHintBold}>{nextCard.title}</Text>
-          </Text>
-        ) : (
-          <Text style={[styles.progressHint, { color: c.text }]}>Maximum tier reached 🎉</Text>
-        )}
-      </View>
-    </View>
-  );
-}
-
-// ─── Collection card (grid item) ──────────────────────────────────────────────
-
-function CollectionCard({
-  card,
-  isActive,
-  isUnlocked,
-  onSelect,
-  selecting
-}: {
-  card: CollectibleCard;
-  isActive: boolean;
-  isUnlocked: boolean;
-  onSelect: () => void;
-  selecting: boolean;
-}) {
-  const c = RARITY_COLORS[card.rarity] ?? RARITY_COLORS.Common;
-  const locked = !isUnlocked;
-
-  return (
-    <Pressable
-      onPress={() => !isActive && !locked && !selecting && onSelect()}
-      disabled={isActive || locked || selecting}
-      style={({ pressed }) => [
-        styles.collCard,
-        { width: CARD_W, borderColor: isActive ? c.text : locked ? mobileTheme.colors.border : c.border },
-        isActive && { backgroundColor: c.bg },
-        locked && styles.collCardLocked,
-        pressed && !isActive && !locked && styles.collCardPressed
-      ]}
-    >
-      {/* Rarity stripe */}
-      <View style={[styles.collCardStripe, { backgroundColor: locked ? mobileTheme.colors.border : c.text }]} />
-
-      {/* Emoji */}
-      <Text style={[styles.collCardEmoji, locked && styles.collCardEmojiLocked]}>
-        {locked ? "🔒" : card.mascot}
-      </Text>
-
-      {/* Title */}
-      <Text
-        style={[styles.collCardTitle, isActive && { color: c.text }, locked && styles.collCardTitleLocked]}
-        numberOfLines={2}
-      >
-        {card.title}
-      </Text>
-
-      {/* Bottom row: rarity + status */}
-      <View style={styles.collCardBottom}>
-        {!locked ? (
-          <RarityPill rarity={card.rarity} />
-        ) : (
-          <Text style={styles.collCardLockedLabel}>Locked</Text>
-        )}
-        {isActive ? (
-          <Ionicons name="checkmark-circle" size={18} color={c.text} />
-        ) : selecting ? (
-          <ActivityIndicator size="small" color={mobileTheme.colors.textFaint} />
-        ) : locked ? null : (
-          <Ionicons name="ellipse-outline" size={18} color={mobileTheme.colors.textFaint} />
-        )}
-      </View>
-    </Pressable>
-  );
-}
-
 // ─── Settings row ─────────────────────────────────────────────────────────────
 
 function SettingsRow({
@@ -265,14 +431,12 @@ function SettingsRow({
   label,
   onPress,
   destructive,
-  detail,
   loading
 }: {
   icon: IoniconsName;
   label: string;
   onPress: () => void;
   destructive?: boolean;
-  detail?: string;
   loading?: boolean;
 }) {
   return (
@@ -290,7 +454,6 @@ function SettingsRow({
       <Text style={[styles.settingsRowLabel, destructive && styles.settingsRowLabelDestructive]}>
         {label}
       </Text>
-      {detail ? <Text style={styles.settingsRowDetail}>{detail}</Text> : null}
       {loading ? (
         <ActivityIndicator size="small" color={mobileTheme.colors.textFaint} />
       ) : !destructive ? (
@@ -300,15 +463,17 @@ function SettingsRow({
   );
 }
 
-// ─── Signed-out preview cards ─────────────────────────────────────────────────
+// ─── Signed-out preview card ──────────────────────────────────────────────────
 
 function PreviewCard({ card }: { card: CollectibleCard }) {
   const c = RARITY_COLORS[card.rarity] ?? RARITY_COLORS.Common;
   return (
     <View style={[styles.previewCard, { borderColor: c.border, backgroundColor: c.bg }]}>
-      <View style={[styles.previewCardStripe, { backgroundColor: c.text }]} />
       <Text style={styles.previewCardEmoji}>{card.mascot}</Text>
-      <Text style={[styles.previewCardTitle, { color: c.text }]} numberOfLines={1}>{card.title}</Text>
+      <Text style={[styles.previewCardTitle, { color: c.text }]} numberOfLines={1}>
+        {card.title}
+      </Text>
+      <RarityPill rarity={card.rarity} />
     </View>
   );
 }
@@ -322,9 +487,11 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<MyProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [score, setScore] = useState(0);
+  const [counts, setCounts] = useState<Counts>({ reviewCount: 0, photoCount: 0, restroomAddCount: 0 });
   const [unlockedCards, setUnlockedCards] = useState<CollectibleCard[]>([
     collectibleCards[0] as CollectibleCard
   ]);
+  const [recentEvents, setRecentEvents] = useState<PointEventSummary[]>([]);
 
   const [showEditName, setShowEditName] = useState(false);
   const [selectingCardKey, setSelectingCardKey] = useState<string | null>(null);
@@ -340,10 +507,15 @@ export default function ProfileScreen() {
         return;
       }
       setProfile(p);
-      const c = await getMyContributionCounts(p.id);
+      const [c, events] = await Promise.all([
+        getMyContributionCounts(p.id),
+        getMyRecentActivity(p.id)
+      ]);
       const s = buildContributionScore(c);
+      setCounts(c);
       setScore(s);
       setUnlockedCards(getUnlockedCards(s));
+      setRecentEvents(events);
     } catch {
       // show stale data silently
     } finally {
@@ -355,18 +527,15 @@ export default function ProfileScreen() {
     if (user) void loadProfile();
   }, [user, loadProfile]);
 
-  const handleSaveName = useCallback(
-    async (newName: string) => {
-      const result = await updateMyDisplayName(newName);
-      if ("error" in result) {
-        Alert.alert("Could not update name", result.error);
-        return;
-      }
-      setProfile((prev) => (prev ? { ...prev, displayName: result.displayName } : prev));
-      setShowEditName(false);
-    },
-    []
-  );
+  const handleSaveName = useCallback(async (newName: string) => {
+    const result = await updateMyDisplayName(newName);
+    if ("error" in result) {
+      Alert.alert("Could not update name", result.error);
+      return;
+    }
+    setProfile((prev) => (prev ? { ...prev, displayName: result.displayName } : prev));
+    setShowEditName(false);
+  }, []);
 
   const handleSelectCard = useCallback(
     async (cardKey: string) => {
@@ -419,16 +588,15 @@ export default function ProfileScreen() {
     return (
       <SafeAreaView style={styles.root}>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {/* Hero CTA */}
           <View style={styles.ctaCard}>
-            <View style={styles.ctaAvatarRow}>
+            <View style={styles.ctaAvatarWrap}>
               <View style={styles.ctaAvatar}>
                 <Ionicons name="person" size={36} color={mobileTheme.colors.textFaint} />
               </View>
             </View>
             <Text style={styles.ctaTitle}>Your Poopin Profile</Text>
             <Text style={styles.ctaBody}>
-              Sign in to write reviews, earn collectible titles, and see your standing on the leaderboard.
+              Sign in to write reviews, earn contribution points, and unlock collectible titles.
             </Text>
             <View style={styles.ctaBenefits}>
               {(
@@ -455,13 +623,12 @@ export default function ProfileScreen() {
             </Pressable>
           </View>
 
-          {/* Collectible preview strip */}
-          <View style={styles.collectionPreviewSection}>
-            <Text style={styles.collectionPreviewLabel}>Collectible titles to unlock</Text>
+          <View style={styles.previewSection}>
+            <Text style={styles.previewLabel}>Collectible titles to unlock</Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.collectionPreviewScroll}
+              contentContainerStyle={styles.previewScroll}
             >
               {(collectibleCards as readonly CollectibleCard[]).map((card) => (
                 <PreviewCard key={card.key} card={card} />
@@ -469,15 +636,10 @@ export default function ProfileScreen() {
             </ScrollView>
           </View>
 
-          {/* Support */}
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Support</Text>
             <View style={styles.settingsCard}>
-              <SettingsRow
-                icon="mail-outline"
-                label="Contact us"
-                onPress={() => router.push("/contact")}
-              />
+              <SettingsRow icon="mail-outline" label="Contact us" onPress={() => router.push("/contact")} />
             </View>
           </View>
         </ScrollView>
@@ -490,6 +652,8 @@ export default function ProfileScreen() {
   const activeCardKey = profile?.activeCardKey ?? null;
   const currentTierCard = getCurrentCard(score);
   const activeCard = (activeCardKey ? getCardByKey(activeCardKey) : null) ?? currentTierCard;
+  const activeColors = RARITY_COLORS[activeCard.rarity] ?? RARITY_COLORS.Common;
+
   const displayInitials = profile
     ? (
         profile.displayName
@@ -502,32 +666,32 @@ export default function ProfileScreen() {
       )
     : (user.email?.[0]?.toUpperCase() ?? "?");
 
-  const activeColors = activeCard ? RARITY_COLORS[activeCard.rarity] : RARITY_COLORS.Common;
-
   return (
     <SafeAreaView style={styles.root}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
-        {/* ── Profile header card ── */}
+        {/* ── Profile identity card ── */}
         <View style={styles.profileCard}>
-          {/* Avatar */}
           <View style={styles.profileAvatarWrap}>
             <View style={[styles.profileAvatar, { borderColor: activeColors.border }]}>
               <Text style={styles.profileAvatarText}>{displayInitials}</Text>
             </View>
-            {activeCard && (
-              <View style={[styles.profileAvatarBadge, { backgroundColor: activeColors.bg, borderColor: activeColors.border }]}>
-                <Text style={styles.profileAvatarBadgeEmoji}>{activeCard.mascot}</Text>
-              </View>
-            )}
+            {/* Active card emoji badge */}
+            <View
+              style={[
+                styles.profileAvatarBadge,
+                { backgroundColor: activeColors.bg, borderColor: activeColors.border }
+              ]}
+            >
+              <Text style={styles.profileAvatarBadgeEmoji}>{activeCard.mascot}</Text>
+            </View>
           </View>
 
-          {/* Name + edit */}
           {profileLoading && !profile ? (
             <ActivityIndicator
               size="small"
               color={mobileTheme.colors.brandStrong}
-              style={{ marginTop: 4 }}
+              style={{ marginTop: 6 }}
             />
           ) : (
             <>
@@ -537,52 +701,62 @@ export default function ProfileScreen() {
                 </Text>
                 <Pressable
                   onPress={() => setShowEditName(true)}
-                  style={({ pressed }) => [styles.editBtn, pressed && { opacity: 0.7 }]}
-                  hitSlop={8}
+                  style={({ pressed }) => [styles.editBtn, pressed && { opacity: 0.65 }]}
+                  hitSlop={10}
                 >
                   <Ionicons name="pencil" size={12} color={mobileTheme.colors.brandStrong} />
                   <Text style={styles.editBtnText}>Edit</Text>
                 </Pressable>
               </View>
+
               <Text style={styles.profileEmail} numberOfLines={1}>{user.email}</Text>
-              {activeCard && (
-                <View style={styles.profileTitlePillWrap}>
-                  <RarityPill rarity={activeCard.rarity} size="md" />
-                  <Text style={[styles.profileTitleText, { color: activeColors.text }]}>
+
+              {/* Score + active title summary row */}
+              <View style={styles.profileSummaryRow}>
+                <View style={[styles.profileScoreChip, { borderColor: activeColors.border, backgroundColor: activeColors.bg }]}>
+                  <Text style={[styles.profileScoreChipText, { color: activeColors.text }]}>
+                    {score} pts · Tier {currentTierCard.tier}
+                  </Text>
+                </View>
+                <View style={styles.profileTitleChip}>
+                  <Text style={styles.profileTitleChipEmoji}>{activeCard.mascot}</Text>
+                  <Text
+                    style={[styles.profileTitleChipText, { color: activeColors.text }]}
+                    numberOfLines={1}
+                  >
                     {activeCard.title}
                   </Text>
                 </View>
-              )}
+              </View>
             </>
           )}
         </View>
 
-        {/* ── Active title ── */}
-        {activeCard && (
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Active title</Text>
-            <ActiveTitleCard card={activeCard} score={score} />
-          </View>
-        )}
+        {/* ── Progress hero card (the main reward surface) ── */}
+        <ProgressHeroCard
+          activeCard={activeCard}
+          currentTierCard={currentTierCard}
+          score={score}
+          counts={counts}
+        />
 
         {/* ── Collection ── */}
         <View style={styles.section}>
-          <View style={styles.sectionLabelRow}>
+          <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionLabel}>Your collection</Text>
-            <Text style={styles.sectionLabelMeta}>
+            <Text style={styles.sectionMeta}>
               {unlockedCards.length} / {collectibleCards.length} unlocked
             </Text>
           </View>
 
-          {/* 2-column grid — all 6 cards */}
-          <View style={styles.collectionGrid}>
+          <View style={styles.collGrid}>
             {(collectibleCards as readonly CollectibleCard[]).map((card) => {
               const isUnlocked = unlockedCards.some((u) => u.key === card.key);
               return (
                 <CollectionCard
                   key={card.key}
                   card={card}
-                  isActive={card.key === activeCard?.key}
+                  isActive={card.key === activeCard.key}
                   isUnlocked={isUnlocked}
                   onSelect={() => void handleSelectCard(card.key)}
                   selecting={selectingCardKey === card.key}
@@ -591,12 +765,50 @@ export default function ProfileScreen() {
             })}
           </View>
 
-          <Text style={styles.collectionHint}>
-            Tap any unlocked title to make it your active display title.
+          <Text style={styles.collHint}>
+            Tap any unlocked card to set it as your active title.
           </Text>
         </View>
 
-        {/* ── Account ── */}
+        {/* ── Recent leaderboard activity ── */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionLabel}>Recent activity</Text>
+            <View style={styles.activityHeaderBadge}>
+              <View style={styles.activityHeaderBadgeDot} />
+              <Text style={styles.activityHeaderBadgeText}>Leaderboard pts</Text>
+            </View>
+          </View>
+          <View style={styles.activityCard}>
+            <Text style={styles.activityExplainer}>
+              Leaderboard points rank contributors publicly. Separate from your collection score.
+            </Text>
+            <View style={styles.activityDivider} />
+            {profileLoading ? (
+              <ActivityIndicator
+                size="small"
+                color={mobileTheme.colors.brandStrong}
+                style={{ paddingVertical: 18 }}
+              />
+            ) : recentEvents.length === 0 ? (
+              <View style={styles.activityEmpty}>
+                <Ionicons name="pulse-outline" size={26} color={mobileTheme.colors.textFaint} />
+                <Text style={styles.activityEmptyText}>
+                  No leaderboard activity yet.{"\n"}Post a review, upload a photo, or add a restroom to start earning points.
+                </Text>
+              </View>
+            ) : (
+              recentEvents.map((event, i) => (
+                <View key={event.id}>
+                  {i > 0 && <View style={styles.activityRowDivider} />}
+                  <ActivityEventRow event={event} />
+                </View>
+              ))
+            )}
+          </View>
+        </View>
+
+        {/* ── Account (secondary) ── */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Account</Text>
           <View style={styles.settingsCard}>
@@ -643,14 +855,20 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     gap: mobileTheme.spacing.sectionGap,
-    paddingBottom: 56,
-    paddingHorizontal: GRID_PADDING,
+    paddingBottom: 60,
+    paddingHorizontal: SCREEN_PAD,
     paddingTop: mobileTheme.spacing.screenTop
   },
 
   // ── Section ──
   section: {
     gap: 10
+  },
+  sectionHeaderRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 2
   },
   sectionLabel: {
     color: mobileTheme.colors.textMuted,
@@ -660,19 +878,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     textTransform: "uppercase"
   },
-  sectionLabelRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 2
-  },
-  sectionLabelMeta: {
+  sectionMeta: {
     color: mobileTheme.colors.textFaint,
     fontSize: 12,
     fontWeight: "500"
   },
 
-  // ── Profile header card ──
+  // ── Profile identity card ──
   profileCard: {
     alignItems: "center",
     backgroundColor: mobileTheme.colors.surface,
@@ -680,7 +892,7 @@ const styles = StyleSheet.create({
     borderRadius: mobileTheme.radii.xl,
     borderWidth: 1,
     gap: 8,
-    paddingBottom: 24,
+    paddingBottom: 22,
     paddingHorizontal: 24,
     paddingTop: 28,
     ...mobileTheme.shadows.hero
@@ -692,30 +904,31 @@ const styles = StyleSheet.create({
   profileAvatar: {
     alignItems: "center",
     backgroundColor: mobileTheme.colors.brandDeep,
-    borderRadius: 40,
+    borderRadius: 44,
     borderWidth: 3,
-    height: 80,
+    height: 88,
     justifyContent: "center",
-    width: 80
+    width: 88
   },
   profileAvatarText: {
     color: "#ffffff",
-    fontSize: 30,
-    fontWeight: "700"
+    fontSize: 32,
+    fontWeight: "700",
+    letterSpacing: -0.5
   },
   profileAvatarBadge: {
     alignItems: "center",
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 2,
-    bottom: -4,
-    height: 28,
+    bottom: -2,
+    height: 30,
     justifyContent: "center",
     position: "absolute",
     right: -4,
-    width: 28
+    width: 30
   },
   profileAvatarBadgeEmoji: {
-    fontSize: 14
+    fontSize: 15
   },
   profileNameRow: {
     alignItems: "center",
@@ -724,8 +937,9 @@ const styles = StyleSheet.create({
   },
   profileName: {
     color: mobileTheme.colors.textPrimary,
-    fontSize: 20,
+    fontSize: 21,
     fontWeight: "700",
+    letterSpacing: -0.3,
     maxWidth: "80%"
   },
   editBtn: {
@@ -749,13 +963,33 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: -2
   },
-  profileTitlePillWrap: {
+  profileSummaryRow: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 6,
+    justifyContent: "center",
     marginTop: 2
   },
-  profileTitleText: {
+  profileScoreChip: {
+    borderRadius: mobileTheme.radii.pill,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 4
+  },
+  profileScoreChipText: {
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  profileTitleChip: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 4
+  },
+  profileTitleChipEmoji: {
+    fontSize: 14
+  },
+  profileTitleChipText: {
     fontSize: 13,
     fontWeight: "600"
   },
@@ -781,115 +1015,341 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2
   },
 
-  // ── Active title card ──
-  activeTitleCard: {
+  // ── Stat chip ──
+  statChip: {
+    alignItems: "center",
+    flex: 1,
+    gap: 2
+  },
+  heroStatsTitle: {
+    color: mobileTheme.colors.textMuted,
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 1,
+    textTransform: "uppercase"
+  },
+  heroScoringNote: {
+    color: mobileTheme.colors.textFaint,
+    fontSize: 11,
+    fontWeight: "500",
+    textAlign: "center"
+  },
+
+  // ── Recent activity ──
+  activityHeaderBadge: {
+    alignItems: "center",
+    backgroundColor: mobileTheme.colors.infoTint,
+    borderColor: mobileTheme.colors.infoBorder,
+    borderRadius: mobileTheme.radii.pill,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 3
+  },
+  activityHeaderBadgeDot: {
+    backgroundColor: mobileTheme.colors.brandStrong,
+    borderRadius: 99,
+    height: 5,
+    width: 5
+  },
+  activityHeaderBadgeText: {
+    color: mobileTheme.colors.brandStrong,
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.2
+  },
+  activityCard: {
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.lg,
+    borderWidth: 1,
+    overflow: "hidden",
+    ...mobileTheme.shadows.card
+  },
+  activityExplainer: {
+    color: mobileTheme.colors.textFaint,
+    fontSize: 12,
+    lineHeight: 17,
+    padding: 14,
+    paddingBottom: 8
+  },
+  activityDivider: {
+    backgroundColor: mobileTheme.colors.border,
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 14
+  },
+  activityRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11
+  },
+  activityRowDivider: {
+    backgroundColor: mobileTheme.colors.border,
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 14
+  },
+  activityIconBox: {
+    alignItems: "center",
+    backgroundColor: mobileTheme.colors.infoTint,
+    borderRadius: 7,
+    height: 30,
+    justifyContent: "center",
+    width: 30
+  },
+  activityContent: {
+    flex: 1,
+    gap: 2
+  },
+  activityLabel: {
+    color: mobileTheme.colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "600"
+  },
+  activityDate: {
+    color: mobileTheme.colors.textFaint,
+    fontSize: 11
+  },
+  activityPointsBadge: {
+    alignItems: "baseline",
+    flexDirection: "row"
+  },
+  activityPoints: {
+    color: mobileTheme.colors.brandStrong,
+    fontSize: 15,
+    fontWeight: "800"
+  },
+  activityPtsLabel: {
+    color: mobileTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: "600"
+  },
+  activityEmpty: {
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 24
+  },
+  activityEmptyText: {
+    color: mobileTheme.colors.textFaint,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: "center"
+  },
+  statChipValue: {
+    fontSize: 20,
+    fontWeight: "800",
+    letterSpacing: -0.5
+  },
+  statChipLabel: {
+    color: mobileTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: "600"
+  },
+  statChipWeight: {
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.2
+  },
+
+  // ── Progress hero card ──
+  heroCard: {
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.border,
     borderRadius: mobileTheme.radii.xl,
     borderWidth: 1.5,
     gap: 14,
-    padding: 18,
-    ...mobileTheme.shadows.card
+    padding: 20,
+    ...mobileTheme.shadows.hero
   },
-  activeTitleHeader: {
-    alignItems: "center",
+  heroScoreRow: {
+    alignItems: "flex-start",
     flexDirection: "row",
     justifyContent: "space-between"
   },
-  activeBadge: {
-    borderRadius: 99,
-    paddingHorizontal: 10,
-    paddingVertical: 4
+  heroScoreLeft: {
+    gap: 2
   },
-  activeBadgeText: {
-    color: "#ffffff",
+  heroScoreRight: {
+    alignItems: "flex-end",
+    gap: 5
+  },
+  heroScoreEyebrow: {
+    color: mobileTheme.colors.textMuted,
     fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 0.8,
+    fontWeight: "700",
+    letterSpacing: 1.4,
     textTransform: "uppercase"
   },
-  activeTitleBody: {
+  heroScoreValueRow: {
+    alignItems: "baseline",
+    flexDirection: "row"
+  },
+  heroScoreNum: {
+    color: mobileTheme.colors.textPrimary,
+    fontSize: 38,
+    fontWeight: "800",
+    letterSpacing: -1.5
+  },
+  heroScoreUnit: {
+    color: mobileTheme.colors.textMuted,
+    fontSize: 14,
+    fontWeight: "700",
+    letterSpacing: -0.2,
+    marginBottom: 3
+  },
+  heroTierLabel: {
+    color: mobileTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.2
+  },
+  heroDivider: {
+    backgroundColor: mobileTheme.colors.border,
+    height: 1,
+    marginVertical: -2
+  },
+  heroShowcase: {
     alignItems: "flex-start",
     flexDirection: "row",
     gap: 14
   },
-  activeTitleEmojiWrap: {
+  heroEmojiWrap: {
     alignItems: "center",
+    backgroundColor: mobileTheme.colors.surfaceMuted,
     borderRadius: mobileTheme.radii.md,
+    borderWidth: 1,
     height: 64,
     justifyContent: "center",
     width: 64
   },
-  activeTitleEmoji: {
+  heroEmoji: {
     fontSize: 34
   },
-  activeTitleMeta: {
+  heroShowcaseText: {
     flex: 1,
-    gap: 5,
+    gap: 4,
     justifyContent: "center"
   },
-  activeTitleName: {
-    fontSize: 20,
+  heroCardTitle: {
+    fontSize: 19,
     fontWeight: "800",
-    letterSpacing: -0.3
+    letterSpacing: -0.4
   },
-  activeTitleFlavor: {
+  heroCardFlavor: {
     color: mobileTheme.colors.textMuted,
     fontSize: 13,
     lineHeight: 18
   },
-  progressSection: {
+  heroCardNote: {
+    color: mobileTheme.colors.textFaint,
+    fontSize: 11,
+    fontWeight: "500",
+    marginTop: 2
+  },
+  heroProgressSection: {
     gap: 6
   },
-  progressBg: {
-    backgroundColor: "rgba(0,0,0,0.08)",
+  heroProgressLabelRow: {
+    flexDirection: "row",
+    justifyContent: "space-between"
+  },
+  heroProgressLabel: {
+    color: mobileTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: "700"
+  },
+  heroProgressTrack: {
+    backgroundColor: mobileTheme.colors.surfaceMuted,
     borderRadius: 99,
-    height: 5,
+    height: 8,
     overflow: "hidden"
   },
-  progressFill: {
+  heroProgressFill: {
     borderRadius: 99,
-    height: 5
+    height: 8
   },
-  progressHint: {
+  heroProgressHint: {
+    color: mobileTheme.colors.textMuted,
     fontSize: 12,
-    fontWeight: "500"
+    fontWeight: "500",
+    lineHeight: 17
   },
-  progressHintBold: {
-    fontWeight: "700"
+  heroProgressHintBold: {
+    color: mobileTheme.colors.textPrimary,
+    fontWeight: "800"
+  },
+  heroProgressRarity: {
+    fontWeight: "600",
+    fontStyle: "italic"
+  },
+  heroStatsRow: {
+    backgroundColor: mobileTheme.colors.surfaceMuted,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    paddingVertical: 10
+  },
+  heroStatsDivider: {
+    backgroundColor: mobileTheme.colors.border,
+    width: 1
   },
 
   // ── Collection grid ──
-  collectionGrid: {
+  collGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: GRID_GAP
   },
   collCard: {
-    backgroundColor: mobileTheme.colors.surface,
     borderRadius: mobileTheme.radii.lg,
     borderWidth: 1.5,
-    gap: 8,
+    gap: 6,
     overflow: "hidden",
-    padding: 14,
+    padding: 13,
+    position: "relative",
     ...mobileTheme.shadows.card
   },
   collCardLocked: {
-    opacity: 0.45
+    opacity: 0.62
   },
   collCardPressed: {
-    opacity: 0.82
+    opacity: 0.78
   },
-  collCardStripe: {
-    borderRadius: 2,
-    height: 3,
-    marginBottom: 2,
-    width: "100%"
+  collActiveBadge: {
+    alignItems: "center",
+    borderRadius: 10,
+    height: 20,
+    justifyContent: "center",
+    position: "absolute",
+    right: 10,
+    top: 10,
+    width: 20
+  },
+  collLockBadge: {
+    alignItems: "center",
+    backgroundColor: mobileTheme.colors.surfaceMuted,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: 10,
+    borderWidth: 1,
+    height: 20,
+    justifyContent: "center",
+    position: "absolute",
+    right: 10,
+    top: 10,
+    width: 20
+  },
+  collCardLockedInfo: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 3
   },
   collCardEmoji: {
-    fontSize: 34,
+    fontSize: 36,
     textAlign: "center"
-  },
-  collCardEmojiLocked: {
-    fontSize: 28
   },
   collCardTitle: {
     color: mobileTheme.colors.textPrimary,
@@ -898,7 +1358,7 @@ const styles = StyleSheet.create({
     lineHeight: 17
   },
   collCardTitleLocked: {
-    color: mobileTheme.colors.textFaint
+    color: mobileTheme.colors.textSecondary
   },
   collCardBottom: {
     alignItems: "center",
@@ -906,14 +1366,23 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginTop: 2
   },
-  collCardLockedLabel: {
-    color: mobileTheme.colors.textFaint,
+  collCardThreshold: {
+    color: mobileTheme.colors.textSecondary,
     fontSize: 10,
     fontWeight: "600",
-    letterSpacing: 0.4,
-    textTransform: "uppercase"
+    letterSpacing: 0.2
   },
-  collectionHint: {
+  collCardActionActive: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.2
+  },
+  collCardActionEquip: {
+    color: mobileTheme.colors.brandStrong,
+    fontSize: 11,
+    fontWeight: "700"
+  },
+  collHint: {
     color: mobileTheme.colors.textFaint,
     fontSize: 12,
     lineHeight: 16,
@@ -964,11 +1433,6 @@ const styles = StyleSheet.create({
   settingsRowLabelDestructive: {
     color: mobileTheme.colors.errorText
   },
-  settingsRowDetail: {
-    color: mobileTheme.colors.textFaint,
-    fontSize: 14,
-    marginRight: 4
-  },
 
   // ── Signed-out CTA ──
   ctaCard: {
@@ -981,7 +1445,7 @@ const styles = StyleSheet.create({
     padding: 28,
     ...mobileTheme.shadows.hero
   },
-  ctaAvatarRow: {
+  ctaAvatarWrap: {
     marginBottom: 4
   },
   ctaAvatar: {
@@ -1042,10 +1506,10 @@ const styles = StyleSheet.create({
   },
 
   // ── Collection preview (signed-out) ──
-  collectionPreviewSection: {
+  previewSection: {
     gap: 10
   },
-  collectionPreviewLabel: {
+  previewLabel: {
     color: mobileTheme.colors.textMuted,
     fontSize: 11,
     fontWeight: "700",
@@ -1053,7 +1517,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     textTransform: "uppercase"
   },
-  collectionPreviewScroll: {
+  previewScroll: {
     gap: 10,
     paddingHorizontal: 2
   },
@@ -1062,19 +1526,12 @@ const styles = StyleSheet.create({
     borderRadius: mobileTheme.radii.md,
     borderWidth: 1.5,
     gap: 6,
-    overflow: "hidden",
     padding: 14,
-    width: 110,
+    width: 112,
     ...mobileTheme.shadows.card
   },
-  previewCardStripe: {
-    borderRadius: 2,
-    height: 3,
-    width: "100%",
-    marginBottom: 2
-  },
   previewCardEmoji: {
-    fontSize: 32
+    fontSize: 30
   },
   previewCardTitle: {
     fontSize: 11,
@@ -1095,11 +1552,11 @@ const styles = StyleSheet.create({
   modalHeaderBtn: {
     minWidth: 64
   },
-  modalHeaderBtnCancel: {
+  modalBtnCancel: {
     color: mobileTheme.colors.textSecondary,
     fontSize: 16
   },
-  modalHeaderBtnSave: {
+  modalBtnSave: {
     color: mobileTheme.colors.brandStrong,
     fontSize: 16,
     fontWeight: "700",

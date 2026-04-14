@@ -534,6 +534,74 @@ export const getMyContributionCounts = async (
   };
 };
 
+// ─── Point events (leaderboard activity) ─────────────────────────────────────
+// Queries the `point_events` table directly via the authenticated Supabase
+// client. RLS should allow `SELECT WHERE profile_id = auth.uid()` since the
+// web also uses the auth client (not admin) for the same query.
+// If RLS blocks the query, the function returns silently empty — no crash.
+
+export type PointEventType = "review_created" | "photo_uploaded" | "restroom_added";
+
+export interface PointEventSummary {
+  id: string;
+  eventType: PointEventType;
+  pointsDelta: number;
+  createdAt: string;
+}
+
+/** Leaderboard point values (review +5, photo +7, restroom +10). */
+export const LEADERBOARD_POINT_VALUES: Record<PointEventType, number> = {
+  review_created: 5,
+  photo_uploaded: 7,
+  restroom_added: 10
+};
+
+export const formatPointEventLabel = (eventType: PointEventType): string => {
+  switch (eventType) {
+    case "review_created":
+      return "Review posted";
+    case "photo_uploaded":
+      return "Photo uploaded";
+    case "restroom_added":
+      return "Restroom added";
+    default:
+      return "Contribution";
+  }
+};
+
+export const getMyRecentActivity = async (
+  profileId: string,
+  limit = 6
+): Promise<PointEventSummary[]> => {
+  try {
+    const { data } = await supabase
+      .from("point_events")
+      .select("id, event_type, points_delta, created_at")
+      .eq("profile_id", profileId)
+      .eq("status", "awarded")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (!data) return [];
+
+    return (
+      data as Array<{
+        id: string;
+        event_type: string;
+        points_delta: number;
+        created_at: string;
+      }>
+    ).map((row) => ({
+      id: row.id,
+      eventType: row.event_type as PointEventType,
+      pointsDelta: row.points_delta,
+      createdAt: row.created_at
+    }));
+  } catch {
+    return [];
+  }
+};
+
 // ─── Contact form ────────────────────────────────────────────────────────────
 
 export const CONTACT_TOPICS = [
