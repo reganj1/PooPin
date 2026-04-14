@@ -1,5 +1,7 @@
 import type { NearbyBathroom } from "@poopin/domain";
+import { useEffect, useState } from "react";
 import { Image, Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { getRestroomPreviewPhotoUrl } from "../../lib/api";
 import { mobileTheme } from "../../ui/theme";
 
 interface SelectedRestroomPreviewCardProps {
@@ -29,7 +31,35 @@ const openNavigation = (lat: number, lng: number) => {
 
 export function SelectedRestroomPreviewCard({ restroom, onPress, variant = "standalone" }: SelectedRestroomPreviewCardProps) {
   const isCompact = variant === "compact";
-  const photoUri = restroom.previewPhotoUrl ?? null;
+
+  // If the bounds/nearby API already included previewPhotoUrl (undefined means it was omitted),
+  // use it immediately. Otherwise lazy-fetch from /api/restrooms/[id]/preview — the same
+  // pattern the web app uses. Result is cached 45 min so Vercel only sees ~1 call per
+  // restroom per session.
+  const seedUrl = restroom.previewPhotoUrl !== undefined ? (restroom.previewPhotoUrl ?? null) : null;
+  const [photoUri, setPhotoUri] = useState<string | null>(seedUrl);
+  const [photoLoading, setPhotoLoading] = useState(restroom.previewPhotoUrl === undefined);
+
+  useEffect(() => {
+    // Seed URL was provided — nothing to fetch.
+    if (restroom.previewPhotoUrl !== undefined) {
+      setPhotoUri(restroom.previewPhotoUrl ?? null);
+      setPhotoLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setPhotoLoading(true);
+    void getRestroomPreviewPhotoUrl(restroom.id).then((url) => {
+      if (!cancelled) {
+        setPhotoUri(url);
+        setPhotoLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [restroom.id, restroom.previewPhotoUrl]);
 
   return (
     <Pressable
@@ -41,8 +71,12 @@ export function SelectedRestroomPreviewCard({ restroom, onPress, variant = "stan
         {photoUri ? (
           <Image source={{ uri: photoUri }} style={[styles.thumbnail, isCompact && styles.thumbnailCompact]} resizeMode="cover" />
         ) : (
-          <View style={[styles.thumbnailPlaceholder, isCompact && styles.thumbnailCompact]}>
-            <Text style={styles.thumbnailPlaceholderText}>WC</Text>
+          <View style={[
+            styles.thumbnailPlaceholder,
+            isCompact && styles.thumbnailCompact,
+            photoLoading && styles.thumbnailLoading
+          ]}>
+            {!photoLoading && <Text style={styles.thumbnailPlaceholderText}>WC</Text>}
           </View>
         )}
 
@@ -123,6 +157,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0
+  },
+  thumbnailLoading: {
+    backgroundColor: mobileTheme.colors.surfaceMuted,
+    borderColor: mobileTheme.colors.borderSubtle
   },
   thumbnailPlaceholderText: {
     color: mobileTheme.colors.brandStrong,

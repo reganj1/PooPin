@@ -15,6 +15,52 @@ const RESTROOM_PHOTOS_BUCKET = "restroom-photos";
 const PHOTO_SIGNED_URL_EXPIRY_SECONDS = 3600;
 const PHOTO_LIMIT = 24;
 
+// ─── Preview photo lazy-fetch cache ─────────────────────────────────────────
+// Mirrors lib/utils/restroomPreviewClient.ts in the web app.
+// Only called when the user taps a specific marker — never in bulk.
+// Keeps Vercel invocations to ~1 per restroom per 45 min.
+
+const PREVIEW_CACHE_TTL_MS = 45 * 60_000;
+const EMPTY_PREVIEW_CACHE_TTL_MS = 5 * 60_000;
+const previewPhotoCache = new Map<string, { url: string | null; cachedAt: number }>();
+const inFlightPreviewRequests = new Map<string, Promise<string | null>>();
+
+const isCacheEntryFresh = (entry: { url: string | null; cachedAt: number }) => {
+  const ttl = entry.url ? PREVIEW_CACHE_TTL_MS : EMPTY_PREVIEW_CACHE_TTL_MS;
+  return Date.now() - entry.cachedAt < ttl;
+};
+
+export const getRestroomPreviewPhotoUrl = async (restroomId: string): Promise<string | null> => {
+  const cached = previewPhotoCache.get(restroomId);
+  if (cached && isCacheEntryFresh(cached)) {
+    return cached.url;
+  }
+  previewPhotoCache.delete(restroomId);
+
+  // Deduplicate in-flight requests for the same restroom.
+  const existing = inFlightPreviewRequests.get(restroomId);
+  if (existing) return existing;
+
+  const request = fetchJson<{ success?: boolean; photoUrl?: string | null }>(
+    createUrl(`/api/restrooms/${encodeURIComponent(restroomId)}/preview`)
+  )
+    .then((data) => {
+      const url = data.success ? (data.photoUrl ?? null) : null;
+      previewPhotoCache.set(restroomId, { url, cachedAt: Date.now() });
+      return url;
+    })
+    .catch(() => {
+      previewPhotoCache.set(restroomId, { url: null, cachedAt: Date.now() });
+      return null;
+    })
+    .finally(() => {
+      inFlightPreviewRequests.delete(restroomId);
+    });
+
+  inFlightPreviewRequests.set(restroomId, request);
+  return request;
+};
+
 export interface RestroomPhotoItem {
   id: string;
   /** Signed or public URL suitable for full-size lightbox display. */
