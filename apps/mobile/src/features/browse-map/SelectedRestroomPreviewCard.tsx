@@ -1,5 +1,5 @@
 import type { NearbyBathroom } from "@poopin/domain";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { mobileTheme } from "../../ui/theme";
 
 interface SelectedRestroomPreviewCardProps {
@@ -8,93 +8,74 @@ interface SelectedRestroomPreviewCardProps {
   variant?: "standalone" | "sheet" | "compact";
 }
 
-const toLocationLine = (restroom: NearbyBathroom) => [restroom.address, restroom.city, restroom.state].filter(Boolean).join(", ");
-
-const getAccessLabel = (accessType: NearbyBathroom["access_type"]) => {
-  switch (accessType) {
-    case "customer_only":
-      return "Customer only";
-    case "code_required":
-      return "Code required";
-    case "staff_assisted":
-      return "Staff assisted";
-    default:
-      return "Public";
-  }
-};
+const toLocationLine = (restroom: NearbyBathroom) => [restroom.city, restroom.state].filter(Boolean).join(", ");
 
 const formatRatingLabel = (restroom: NearbyBathroom) => {
   if (restroom.ratings.reviewCount <= 0 || restroom.ratings.overall <= 0) {
     return "No reviews yet";
   }
 
-  return `${restroom.ratings.overall.toFixed(1)} overall • ${restroom.ratings.reviewCount} review${restroom.ratings.reviewCount === 1 ? "" : "s"}`;
+  return `⭐ ${restroom.ratings.overall.toFixed(1)} · ${restroom.ratings.reviewCount} review${restroom.ratings.reviewCount === 1 ? "" : "s"}`;
 };
 
-export function SelectedRestroomPreviewCard({
-  restroom,
-  onPress,
-  variant = "standalone"
-}: SelectedRestroomPreviewCardProps) {
-  const metadataChips = [getAccessLabel(restroom.access_type)];
-  const isSheetVariant = variant === "sheet";
-  const isCompactVariant = variant === "compact";
+const openNavigation = (lat: number, lng: number) => {
+  const mapsUrl =
+    Platform.OS === "ios" ? `maps://maps.apple.com/?daddr=${lat},${lng}&dirflg=d` : `geo:${lat},${lng}`;
 
-  if (restroom.is_accessible) {
-    metadataChips.push("Accessible");
-  }
+  void Linking.openURL(mapsUrl).catch(() => {
+    void Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
+  });
+};
 
-  if (restroom.is_gender_neutral) {
-    metadataChips.push("Gender neutral");
-  }
-
-  const visibleMetadataChips = isCompactVariant ? metadataChips.slice(0, 2) : metadataChips;
+export function SelectedRestroomPreviewCard({ restroom, onPress, variant = "standalone" }: SelectedRestroomPreviewCardProps) {
+  const isCompact = variant === "compact";
+  const photoUri = restroom.previewPhotoUrl ?? null;
 
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.card,
-        isSheetVariant ? styles.cardSheet : null,
-        isCompactVariant ? styles.cardCompact : null,
-        pressed ? styles.cardPressed : null
-      ]}
+      style={({ pressed }) => [styles.card, isCompact && styles.cardCompact, pressed && styles.cardPressed]}
     >
+      {/* Header: photo + info + distance */}
       <View style={styles.headerRow}>
-        <View style={styles.copyColumn}>
-          <Text style={[styles.eyebrow, isCompactVariant ? styles.eyebrowCompact : null]}>Selected restroom</Text>
-          <Text numberOfLines={1} style={[styles.title, isCompactVariant ? styles.titleCompact : null]}>
+        {photoUri ? (
+          <Image source={{ uri: photoUri }} style={[styles.thumbnail, isCompact && styles.thumbnailCompact]} resizeMode="cover" />
+        ) : (
+          <View style={[styles.thumbnailPlaceholder, isCompact && styles.thumbnailCompact]}>
+            <Text style={styles.thumbnailPlaceholderText}>WC</Text>
+          </View>
+        )}
+
+        <View style={styles.infoColumn}>
+          <Text numberOfLines={1} style={[styles.title, isCompact && styles.titleCompact]}>
             {restroom.name}
           </Text>
-          <Text numberOfLines={1} style={[styles.location, isCompactVariant ? styles.locationCompact : null]}>
+          <Text numberOfLines={1} style={[styles.location, isCompact && styles.locationCompact]}>
             {toLocationLine(restroom)}
           </Text>
+          <Text style={[styles.rating, isCompact && styles.ratingCompact]}>{formatRatingLabel(restroom)}</Text>
         </View>
 
-        <View style={[styles.distanceBadge, isCompactVariant ? styles.distanceBadgeCompact : null]}>
-          <Text style={[styles.distanceText, isCompactVariant ? styles.distanceTextCompact : null]}>
+        <View style={[styles.distanceBadge, isCompact && styles.distanceBadgeCompact]}>
+          <Text style={[styles.distanceText, isCompact && styles.distanceTextCompact]}>
             {typeof restroom.distanceMiles === "number" ? `${restroom.distanceMiles.toFixed(1)} mi` : "Nearby"}
           </Text>
         </View>
       </View>
 
-      <View style={[styles.metadataRow, isCompactVariant ? styles.metadataRowCompact : null]}>
-        {visibleMetadataChips.map((chip) => (
-          <View key={chip} style={[styles.metadataChip, isCompactVariant ? styles.metadataChipCompact : null]}>
-            <Text style={[styles.metadataChipText, isCompactVariant ? styles.metadataChipTextCompact : null]}>{chip}</Text>
-          </View>
-        ))}
-      </View>
-
-      <Text style={[styles.rating, isCompactVariant ? styles.ratingCompact : null]}>{formatRatingLabel(restroom)}</Text>
-
-      <View style={[styles.ctaRow, isCompactVariant ? styles.ctaRowCompact : null]}>
-        <Text style={[styles.detailHint, isCompactVariant ? styles.detailHintCompact : null]}>View restroom details</Text>
-        <Text style={[styles.ctaHint, isCompactVariant ? styles.ctaHintCompact : null]}>Public listing</Text>
-      </View>
+      {/* Navigate button — nested Pressable so taps don't bubble to outer card */}
+      <Pressable
+        onPress={() => openNavigation(restroom.lat, restroom.lng)}
+        style={({ pressed }) => [styles.navigateBtn, pressed && styles.navigateBtnPressed]}
+      >
+        <Text style={styles.navigateBtnText}>▶  Navigate</Text>
+      </Pressable>
     </Pressable>
   );
 }
+
+const THUMBNAIL_SIZE = 68;
+const THUMBNAIL_SIZE_COMPACT = 58;
 
 const styles = StyleSheet.create({
   card: {
@@ -102,48 +83,62 @@ const styles = StyleSheet.create({
     borderColor: mobileTheme.colors.borderSubtle,
     borderRadius: mobileTheme.radii.lg,
     borderWidth: 1,
-    padding: 16,
-    ...mobileTheme.shadows.hero
-  },
-  cardSheet: {
-    borderRadius: mobileTheme.radii.md,
     padding: 14,
-    shadowRadius: 18
+    gap: 12,
+    ...mobileTheme.shadows.hero
   },
   cardCompact: {
     borderRadius: 18,
     padding: 12,
+    gap: 10,
     shadowRadius: 14
   },
   cardPressed: {
     opacity: 0.94
   },
   headerRow: {
-    alignItems: "flex-start",
     flexDirection: "row",
-    justifyContent: "space-between"
+    alignItems: "center",
+    gap: 12
   },
-  copyColumn: {
-    flex: 1,
-    paddingRight: 12
+  thumbnail: {
+    width: THUMBNAIL_SIZE,
+    height: THUMBNAIL_SIZE,
+    borderRadius: 12,
+    backgroundColor: mobileTheme.colors.surfaceMuted,
+    flexShrink: 0
   },
-  eyebrow: {
+  thumbnailCompact: {
+    width: THUMBNAIL_SIZE_COMPACT,
+    height: THUMBNAIL_SIZE_COMPACT,
+    borderRadius: 10
+  },
+  thumbnailPlaceholder: {
+    width: THUMBNAIL_SIZE,
+    height: THUMBNAIL_SIZE,
+    borderRadius: 12,
+    backgroundColor: mobileTheme.colors.surfaceBrandTint,
+    borderColor: mobileTheme.colors.infoBorder,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0
+  },
+  thumbnailPlaceholderText: {
     color: mobileTheme.colors.brandStrong,
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: "700",
-    letterSpacing: 1.1,
-    marginBottom: 6,
-    textTransform: "uppercase"
+    letterSpacing: 0.5
   },
-  eyebrowCompact: {
-    fontSize: 10,
-    letterSpacing: 0.9,
-    marginBottom: 4
+  infoColumn: {
+    flex: 1,
+    gap: 3
   },
   title: {
     color: mobileTheme.colors.textPrimary,
-    fontSize: 17,
-    fontWeight: "700"
+    fontSize: 16,
+    fontWeight: "700",
+    lineHeight: 20
   },
   titleCompact: {
     fontSize: 15
@@ -151,57 +146,32 @@ const styles = StyleSheet.create({
   location: {
     color: mobileTheme.colors.textSecondary,
     fontSize: 13,
-    lineHeight: 18,
-    marginTop: 4
+    lineHeight: 17
   },
   locationCompact: {
+    fontSize: 12
+  },
+  rating: {
+    color: mobileTheme.colors.textMuted,
     fontSize: 12,
     lineHeight: 16,
-    marginTop: 3
+    marginTop: 1
   },
-  metadataRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginTop: 12
-  },
-  metadataRowCompact: {
-    gap: 6,
-    marginTop: 10
-  },
-  metadataChip: {
-    backgroundColor: mobileTheme.colors.surfaceBrandTint,
-    borderColor: mobileTheme.colors.infoBorder,
-    borderRadius: mobileTheme.radii.pill,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 6
-  },
-  metadataChipCompact: {
-    paddingHorizontal: 8,
-    paddingVertical: 5
-  },
-  metadataChipText: {
-    color: mobileTheme.colors.textSecondary,
-    fontSize: 12,
-    fontWeight: "600"
-  },
-  metadataChipTextCompact: {
+  ratingCompact: {
     fontSize: 11
   },
   distanceBadge: {
-    alignItems: "center",
+    alignSelf: "flex-start",
     backgroundColor: mobileTheme.colors.surfaceBrandTintStrong,
     borderColor: mobileTheme.colors.infoBorder,
     borderRadius: mobileTheme.radii.pill,
     borderWidth: 1,
-    justifyContent: "center",
     paddingHorizontal: 10,
-    paddingVertical: 6
+    paddingVertical: 5
   },
   distanceBadgeCompact: {
-    paddingHorizontal: 9,
-    paddingVertical: 5
+    paddingHorizontal: 8,
+    paddingVertical: 4
   },
   distanceText: {
     color: mobileTheme.colors.brandStrong,
@@ -211,45 +181,20 @@ const styles = StyleSheet.create({
   distanceTextCompact: {
     fontSize: 11
   },
-  rating: {
-    color: mobileTheme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 10
-  },
-  ratingCompact: {
-    fontSize: 12,
-    lineHeight: 16,
-    marginTop: 8
-  },
-  ctaRow: {
+  navigateBtn: {
     alignItems: "center",
-    borderColor: mobileTheme.colors.border,
-    borderTopWidth: 1,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 12,
-    paddingTop: 12
+    backgroundColor: mobileTheme.colors.brandDeep,
+    borderRadius: mobileTheme.radii.sm,
+    justifyContent: "center",
+    paddingVertical: 11
   },
-  ctaRowCompact: {
-    marginTop: 10,
-    paddingTop: 10
+  navigateBtnPressed: {
+    opacity: 0.82
   },
-  detailHint: {
-    color: mobileTheme.colors.brandStrong,
-    fontSize: 13,
-    fontWeight: "700"
-  },
-  detailHintCompact: {
-    fontSize: 12,
-    fontWeight: "600"
-  },
-  ctaHint: {
-    color: mobileTheme.colors.textFaint,
-    fontSize: 12,
-    fontWeight: "600"
-  },
-  ctaHintCompact: {
-    fontSize: 11
+  navigateBtnText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "700",
+    letterSpacing: 0.3
   }
 });

@@ -1,11 +1,26 @@
-import { Link, useLocalSearchParams } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import type { NearbyBathroom } from "@poopin/domain";
-import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
-import { getCachedRestroom, getRestroom } from "../../src/lib/api";
+import type { NearbyBathroom, Review, ReviewQuickTag } from "@poopin/domain";
+import {
+  ActivityIndicator,
+  Image,
+  Linking,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View
+} from "react-native";
+import { getCachedRestroom, getRestroom, getRestroomPhotoUrls, getRestroomReviews } from "../../src/lib/api";
+import type { RestroomPhotoItem } from "../../src/lib/api";
+import { mobileEnv } from "../../src/lib/env";
 import { mobileTheme } from "../../src/ui/theme";
 
-const getLocationLine = (restroom: NearbyBathroom) => [restroom.address, restroom.city, restroom.state].filter(Boolean).join(", ");
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+const getLocationLine = (r: NearbyBathroom) => [r.address, r.city, r.state].filter(Boolean).join(", ");
 
 const getSourceLabel = (source: NearbyBathroom["source"]) => {
   switch (source) {
@@ -39,101 +54,177 @@ const getAccessLabel = (accessType: NearbyBathroom["access_type"]) => {
   }
 };
 
-const formatRatingSummary = (restroom: NearbyBathroom) => {
-  if (restroom.ratings.reviewCount <= 0 || restroom.ratings.overall <= 0) {
-    return "No rating summary yet";
-  }
-
-  return `${restroom.ratings.overall.toFixed(1)} overall from ${restroom.ratings.reviewCount} review${restroom.ratings.reviewCount === 1 ? "" : "s"}`;
-};
-
-const buildFeatureTags = (restroom: NearbyBathroom) => {
-  const tags = [getAccessLabel(restroom.access_type)];
-
-  if (restroom.is_accessible) {
-    tags.push("Accessible");
-  }
-
-  if (restroom.is_gender_neutral) {
-    tags.push("Gender neutral");
-  }
-
-  if (restroom.has_baby_station) {
-    tags.push("Baby station");
-  }
-
-  if (restroom.requires_purchase) {
-    tags.push("Requires purchase");
-  }
-
+const buildFeatureTags = (r: NearbyBathroom) => {
+  const tags = [getAccessLabel(r.access_type)];
+  if (r.is_accessible) tags.push("Accessible");
+  if (r.is_gender_neutral) tags.push("Gender neutral");
+  if (r.has_baby_station) tags.push("Baby station");
+  if (r.requires_purchase) tags.push("Requires purchase");
   return tags;
 };
 
+const QUICK_TAG_INFO: Record<ReviewQuickTag, { label: string; positive: boolean }> = {
+  clean: { label: "Clean", positive: true },
+  smelly: { label: "Smelly", positive: false },
+  no_line: { label: "No wait", positive: true },
+  crowded: { label: "Crowded", positive: false },
+  no_toilet_paper: { label: "No paper", positive: false },
+  locked: { label: "Often locked", positive: false }
+};
+
+const formatDate = (value: string) => {
+  try {
+    return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
+  } catch {
+    return value;
+  }
+};
+
+const openNavigation = (lat: number, lng: number) => {
+  const mapsUrl = Platform.OS === "ios" ? `maps://maps.apple.com/?daddr=${lat},${lng}&dirflg=d` : `geo:${lat},${lng}`;
+  void Linking.openURL(mapsUrl).catch(() => {
+    void Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
+  });
+};
+
+const openWebPage = (restroomId: string, hash?: string) => {
+  const base = mobileEnv.apiBaseUrl.replace(/\/$/, "");
+  void Linking.openURL(`${base}/restroom/${restroomId}${hash ?? ""}`);
+};
+
+// ─── Sub-components ──────────────────────────────────────────────────────────
+
+function RatingPill({ label, value }: { label: string; value: number }) {
+  return (
+    <View style={styles.ratingPill}>
+      <Text style={styles.ratingPillLabel}>{label}</Text>
+      <Text style={styles.ratingPillValue}>{value.toFixed(1)}</Text>
+    </View>
+  );
+}
+
+function ReviewCard({ review }: { review: Review }) {
+  const tags = (review.quick_tags ?? []) as ReviewQuickTag[];
+  return (
+    <View style={styles.reviewCard}>
+      <View style={styles.reviewHeader}>
+        <View style={styles.reviewHeaderLeft}>
+          <Text style={styles.reviewAuthor}>{review.author_display_name ?? "Anonymous"}</Text>
+          <Text style={styles.reviewDate}>Visited {formatDate(review.visit_time)}</Text>
+        </View>
+        <View style={styles.reviewRatingBadge}>
+          <Text style={styles.reviewRatingText}>Overall {review.overall_rating.toFixed(1)}</Text>
+        </View>
+      </View>
+
+      {tags.length > 0 && (
+        <View style={styles.tagRow}>
+          {tags.map((tag) => {
+            const info = QUICK_TAG_INFO[tag];
+            if (!info) return null;
+            return (
+              <View key={tag} style={[styles.signalChip, info.positive ? styles.signalChipPositive : styles.signalChipNegative]}>
+                <Text style={[styles.signalChipText, info.positive ? styles.signalChipTextPositive : styles.signalChipTextNegative]}>
+                  {info.label}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      {review.review_text ? (
+        <Text style={styles.reviewText}>{review.review_text}</Text>
+      ) : (
+        <Text style={styles.reviewTextEmpty}>No additional notes shared.</Text>
+      )}
+    </View>
+  );
+}
+
+// ─── Main screen ─────────────────────────────────────────────────────────────
+
 export default function RestroomDetailScreen() {
   const params = useLocalSearchParams<{ id?: string | string[] }>();
+  const router = useRouter();
+
   const restroomId = useMemo(() => {
     const resolved = Array.isArray(params.id) ? params.id[0] : params.id;
     return typeof resolved === "string" ? resolved : "";
   }, [params.id]);
+
   const initialCachedRestroom = restroomId ? getCachedRestroom(restroomId) : null;
   const [restroom, setRestroom] = useState<NearbyBathroom | null>(initialCachedRestroom);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [photos, setPhotos] = useState<RestroomPhotoItem[]>([]);
   const [isLoading, setIsLoading] = useState(!initialCachedRestroom);
+  const [isLoadingReviews, setIsLoadingReviews] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    const loadRestroom = async () => {
+    const loadAll = async () => {
       if (!restroomId) {
         setErrorMessage("Missing restroom id.");
         setIsLoading(false);
+        setIsLoadingReviews(false);
         return;
       }
 
-      const cachedRestroom = getCachedRestroom(restroomId);
-      setRestroom(cachedRestroom);
-      setErrorMessage(null);
-      setIsLoading(!cachedRestroom);
+      const cached = getCachedRestroom(restroomId);
+      setRestroom(cached);
+      setIsLoading(!cached);
 
-      try {
-        const response = await getRestroom(restroomId);
-        if (cancelled) {
-          return;
-        }
+      const [restroomResult, reviewsResult, photosResult] = await Promise.allSettled([
+        getRestroom(restroomId),
+        getRestroomReviews(restroomId),
+        getRestroomPhotoUrls(restroomId)
+      ]);
 
-        setRestroom(response.restroom);
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
+      if (cancelled) return;
 
-        if (cachedRestroom) {
-          return;
-        }
+      if (restroomResult.status === "fulfilled") {
+        setRestroom(restroomResult.value.restroom);
+        setErrorMessage(null);
+      } else if (!cached) {
+        const err = restroomResult.reason;
+        setErrorMessage(err instanceof Error ? err.message : "Could not load this restroom right now.");
+      }
+      setIsLoading(false);
 
-        setErrorMessage(error instanceof Error ? error.message : "Could not load this restroom right now.");
-      } finally {
-        if (!cancelled && !cachedRestroom) {
-          setIsLoading(false);
-        }
+      if (reviewsResult.status === "fulfilled") {
+        setReviews(reviewsResult.value);
+      }
+      setIsLoadingReviews(false);
+
+      if (photosResult.status === "fulfilled") {
+        setPhotos(photosResult.value);
       }
     };
 
-    void loadRestroom();
-
+    void loadAll();
     return () => {
       cancelled = true;
     };
   }, [restroomId]);
 
+  const heroPhotoUri = photos[0]?.url ?? restroom?.previewPhotoUrl ?? null;
+  const hasRatings = restroom && restroom.ratings.reviewCount > 0 && restroom.ratings.overall > 0;
+  const qualitySignals = (restroom?.ratings.qualitySignals ?? []) as ReviewQuickTag[];
+  const featureTags = restroom ? buildFeatureTags(restroom) : [];
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <Link href="/" style={styles.backLink}>
-          ← Back to nearby restrooms
-        </Link>
+      <Stack.Screen options={{ title: restroom?.name ?? "Restroom detail" }} />
 
-        {isLoading ? (
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Back link */}
+        <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.backLink, pressed && { opacity: 0.7 }]}>
+          <Text style={styles.backLinkText}>← Back</Text>
+        </Pressable>
+
+        {isLoading && !restroom ? (
           <View style={styles.stateCard}>
             <ActivityIndicator color={mobileTheme.colors.brandStrong} />
             <Text style={styles.stateText}>Loading restroom details…</Text>
@@ -144,62 +235,170 @@ export default function RestroomDetailScreen() {
             <Text style={styles.errorStateText}>{errorMessage}</Text>
           </View>
         ) : restroom ? (
-          <View style={styles.card}>
-            <Text style={styles.eyebrow}>Restroom listing</Text>
-            <Text style={styles.title}>{restroom.name}</Text>
-            <Text style={styles.location}>{getLocationLine(restroom)}</Text>
+          <>
+            {/* Hero photo */}
+            {heroPhotoUri ? (
+              <Image source={{ uri: heroPhotoUri }} style={styles.heroPhoto} resizeMode="cover" />
+            ) : null}
 
-            <View style={styles.metaRow}>
-              <View style={styles.sourcePill}>
-                <Text style={styles.sourcePillText}>{getSourceLabel(restroom.source)}</Text>
+            {/* Main content card */}
+            <View style={styles.mainCard}>
+              {/* Eyebrow + name + location */}
+              <Text style={styles.eyebrow}>Restroom listing</Text>
+              <Text style={styles.title}>{restroom.name}</Text>
+              <Text style={styles.locationText}>{getLocationLine(restroom)}</Text>
+
+              {/* Meta pills */}
+              <View style={styles.metaPillRow}>
+                <View style={styles.pill}>
+                  <Text style={styles.pillText}>{getSourceLabel(restroom.source)}</Text>
+                </View>
+                <View style={styles.pill}>
+                  <Text style={styles.pillText}>Added {formatDate(restroom.created_at)}</Text>
+                </View>
               </View>
+
+              {/* Navigate button */}
+              <Pressable
+                onPress={() => openNavigation(restroom.lat, restroom.lng)}
+                style={({ pressed }) => [styles.navigateBtn, pressed && styles.btnPressed]}
+              >
+                <Text style={styles.navigateBtnText}>▶  Navigate</Text>
+              </Pressable>
+
+              {/* Write a review button */}
+              <Pressable
+                onPress={() => openWebPage(restroom.id, "?intent=review#add-review")}
+                style={({ pressed }) => [styles.outlineBtn, pressed && styles.btnPressed]}
+              >
+                <Text style={styles.outlineBtnText}>✏  Write a review</Text>
+              </Pressable>
             </View>
 
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryLabel}>Rating summary</Text>
-              <Text style={styles.summaryValue}>{formatRatingSummary(restroom)}</Text>
-              <Text style={styles.summaryNote}>Source: {getSourceLabel(restroom.source)}</Text>
-            </View>
+            {/* Ratings card */}
+            {hasRatings ? (
+              <View style={styles.sectionCard}>
+                <Text style={styles.sectionTitle}>Ratings</Text>
+                <View style={styles.ratingPillRow}>
+                  <RatingPill label="Overall" value={restroom.ratings.overall} />
+                  {restroom.ratings.smell > 0 && <RatingPill label="Smell" value={restroom.ratings.smell} />}
+                  {restroom.ratings.cleanliness > 0 && <RatingPill label="Cleanliness" value={restroom.ratings.cleanliness} />}
+                </View>
+                <Text style={styles.reviewCountNote}>
+                  Based on {restroom.ratings.reviewCount} review{restroom.ratings.reviewCount === 1 ? "" : "s"}
+                </Text>
 
-            <View style={styles.featureGroup}>
-              <Text style={styles.sectionTitle}>Access and amenities</Text>
+                {/* Quality signals */}
+                {qualitySignals.length > 0 && (
+                  <View style={styles.signalRow}>
+                    {qualitySignals.map((tag) => {
+                      const info = QUICK_TAG_INFO[tag];
+                      if (!info) return null;
+                      return (
+                        <View key={tag} style={[styles.signalChip, info.positive ? styles.signalChipPositive : styles.signalChipNegative]}>
+                          <Text style={[styles.signalChipText, info.positive ? styles.signalChipTextPositive : styles.signalChipTextNegative]}>
+                            {info.label}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+            ) : null}
+
+            {/* Feature tags */}
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Access &amp; amenities</Text>
               <View style={styles.tagWrap}>
-                {buildFeatureTags(restroom).map((tag) => (
-                  <View key={tag} style={styles.tag}>
-                    <Text style={styles.tagText}>{tag}</Text>
+                {featureTags.map((tag) => (
+                  <View key={tag} style={styles.featureTag}>
+                    <Text style={styles.featureTagText}>{tag}</Text>
                   </View>
                 ))}
               </View>
             </View>
 
-            <View style={styles.infoCard}>
-              <Text style={styles.sectionTitle}>Coordinates</Text>
-              <Text style={styles.infoText}>
-                {restroom.lat.toFixed(5)}, {restroom.lng.toFixed(5)}
-              </Text>
+            {/* Photos section */}
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Photos</Text>
+
+              {photos.length > 0 ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoScroll}>
+                  {photos.map((photo) => (
+                    <Image key={photo.id} source={{ uri: photo.url }} style={styles.photoItem} resizeMode="cover" />
+                  ))}
+                </ScrollView>
+              ) : (
+                <Text style={styles.emptyNote}>No approved photos yet.</Text>
+              )}
+
+              <Pressable
+                onPress={() => openWebPage(restroom.id, "?intent=photo#photos")}
+                style={({ pressed }) => [styles.addPhotoBtn, pressed && styles.btnPressed]}
+              >
+                <Text style={styles.addPhotoBtnText}>📷  Add a photo</Text>
+              </Pressable>
+              <Text style={styles.addPhotoHint}>Sign in on the web to upload. Photos are reviewed before appearing publicly.</Text>
             </View>
-          </View>
+
+            {/* Reviews section */}
+            <View style={[styles.sectionCard, styles.sectionCardLast]}>
+              <View style={styles.reviewsHeader}>
+                <Text style={styles.sectionTitle}>
+                  {isLoadingReviews ? "Reviews" : `Recent reviews${reviews.length > 0 ? ` (${reviews.length})` : ""}`}
+                </Text>
+                <Pressable
+                  onPress={() => openWebPage(restroom.id, "?intent=review#add-review")}
+                  style={({ pressed }) => [styles.writeReviewLink, pressed && { opacity: 0.7 }]}
+                >
+                  <Text style={styles.writeReviewLinkText}>Write a review →</Text>
+                </Pressable>
+              </View>
+
+              {isLoadingReviews ? (
+                <ActivityIndicator color={mobileTheme.colors.brandStrong} style={{ marginTop: 8 }} />
+              ) : reviews.length === 0 ? (
+                <View style={styles.noReviewsCard}>
+                  <Text style={styles.noReviewsTitle}>Be the first to review</Text>
+                  <Text style={styles.noReviewsBody}>Share your experience to help others find clean, accessible restrooms.</Text>
+                  <Pressable
+                    onPress={() => openWebPage(restroom.id, "?intent=review#add-review")}
+                    style={({ pressed }) => [styles.navigateBtn, { marginTop: 12 }, pressed && styles.btnPressed]}
+                  >
+                    <Text style={styles.navigateBtnText}>Write a review</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                reviews.map((review) => <ReviewCard key={review.id} review={review} />)
+              )}
+            </View>
+          </>
         ) : null}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
+// ─── Styles ──────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: mobileTheme.colors.pageBackground
   },
-  content: {
-    paddingHorizontal: mobileTheme.spacing.screenX,
-    paddingBottom: 32,
-    paddingTop: mobileTheme.spacing.screenTop
+  scrollContent: {
+    paddingBottom: 48
   },
   backLink: {
+    paddingHorizontal: mobileTheme.spacing.screenX,
+    paddingTop: 14,
+    paddingBottom: 6
+  },
+  backLinkText: {
     color: mobileTheme.colors.brandStrong,
     fontSize: 14,
-    fontWeight: "600",
-    marginBottom: 18
+    fontWeight: "600"
   },
   stateCard: {
     alignItems: "center",
@@ -208,8 +407,15 @@ const styles = StyleSheet.create({
     borderRadius: mobileTheme.radii.lg,
     borderWidth: 1,
     gap: 12,
-    padding: 24,
+    margin: mobileTheme.spacing.screenX,
+    padding: 28,
     ...mobileTheme.shadows.card
+  },
+  stateText: {
+    color: mobileTheme.colors.textSecondary,
+    fontSize: 15,
+    lineHeight: 21,
+    textAlign: "center"
   },
   errorStateCard: {
     alignItems: "center",
@@ -218,134 +424,319 @@ const styles = StyleSheet.create({
     borderRadius: mobileTheme.radii.lg,
     borderWidth: 1,
     gap: 12,
+    margin: mobileTheme.spacing.screenX,
     padding: 24,
     ...mobileTheme.shadows.card
   },
   errorTitle: {
     color: mobileTheme.colors.errorText,
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: "700"
-  },
-  stateText: {
-    color: mobileTheme.colors.textSecondary,
-    fontSize: 15,
-    lineHeight: 21,
-    textAlign: "center"
   },
   errorStateText: {
     color: mobileTheme.colors.errorText,
-    fontSize: 15,
-    lineHeight: 21,
+    fontSize: 14,
+    lineHeight: 20,
     textAlign: "center"
   },
-  card: {
+  heroPhoto: {
+    width: "100%",
+    height: 220,
+    backgroundColor: mobileTheme.colors.surfaceMuted
+  },
+  mainCard: {
     backgroundColor: mobileTheme.colors.surface,
-    borderColor: mobileTheme.colors.borderSubtle,
-    borderRadius: mobileTheme.radii.xl,
-    borderWidth: 1,
-    padding: mobileTheme.spacing.heroPadding,
-    ...mobileTheme.shadows.hero
+    borderBottomColor: mobileTheme.colors.borderSubtle,
+    borderBottomWidth: 1,
+    paddingHorizontal: mobileTheme.spacing.screenX,
+    paddingVertical: 20,
+    gap: 14
   },
   eyebrow: {
     color: mobileTheme.colors.brandStrong,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "700",
-    letterSpacing: 1.4,
-    marginBottom: 10,
+    letterSpacing: 1.2,
     textTransform: "uppercase"
   },
   title: {
     color: mobileTheme.colors.textPrimary,
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: "700",
-    marginBottom: 10
+    lineHeight: 32,
+    marginTop: -2
   },
-  location: {
+  locationText: {
     color: mobileTheme.colors.textSecondary,
-    fontSize: 15,
-    lineHeight: 22
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: -4
   },
-  metaRow: {
+  metaPillRow: {
     flexDirection: "row",
-    marginTop: 16
+    flexWrap: "wrap",
+    gap: 8
   },
-  sourcePill: {
-    alignSelf: "flex-start",
+  pill: {
     backgroundColor: mobileTheme.colors.surfaceMuted,
     borderColor: mobileTheme.colors.border,
     borderRadius: mobileTheme.radii.pill,
     borderWidth: 1,
     paddingHorizontal: 12,
-    paddingVertical: 8
+    paddingVertical: 6
   },
-  sourcePillText: {
+  pillText: {
     color: mobileTheme.colors.textSecondary,
     fontSize: 12,
     fontWeight: "600"
   },
-  summaryCard: {
+  navigateBtn: {
+    alignItems: "center",
+    backgroundColor: mobileTheme.colors.brandDeep,
+    borderRadius: mobileTheme.radii.sm,
+    justifyContent: "center",
+    paddingVertical: 14
+  },
+  navigateBtnText: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "700",
+    letterSpacing: 0.3
+  },
+  outlineBtn: {
+    alignItems: "center",
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.sm,
+    borderWidth: 1.5,
+    justifyContent: "center",
+    paddingVertical: 13
+  },
+  outlineBtnText: {
+    color: mobileTheme.colors.textPrimary,
+    fontSize: 15,
+    fontWeight: "600"
+  },
+  btnPressed: {
+    opacity: 0.8
+  },
+  sectionCard: {
+    backgroundColor: mobileTheme.colors.surface,
+    borderTopColor: mobileTheme.colors.borderSubtle,
+    borderTopWidth: 1,
+    paddingHorizontal: mobileTheme.spacing.screenX,
+    paddingVertical: 20,
+    gap: 14
+  },
+  sectionCardLast: {
+    borderBottomColor: mobileTheme.colors.borderSubtle,
+    borderBottomWidth: 1
+  },
+  sectionTitle: {
+    color: mobileTheme.colors.textPrimary,
+    fontSize: 17,
+    fontWeight: "700"
+  },
+  ratingPillRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10
+  },
+  ratingPill: {
+    alignItems: "center",
     backgroundColor: mobileTheme.colors.surfaceBrandTint,
     borderColor: mobileTheme.colors.infoBorder,
     borderRadius: mobileTheme.radii.md,
     borderWidth: 1,
-    marginTop: 20,
-    padding: 16
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10
   },
-  summaryLabel: {
+  ratingPillLabel: {
+    color: mobileTheme.colors.textSecondary,
+    fontSize: 13,
+    fontWeight: "600"
+  },
+  ratingPillValue: {
     color: mobileTheme.colors.brandStrong,
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1.1,
-    marginBottom: 8,
-    textTransform: "uppercase"
+    fontSize: 17,
+    fontWeight: "700"
   },
-  summaryValue: {
-    color: mobileTheme.colors.textPrimary,
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 6
-  },
-  summaryNote: {
+  reviewCountNote: {
     color: mobileTheme.colors.textMuted,
-    fontSize: 13
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: -4
   },
-  featureGroup: {
-    marginTop: 22
+  signalRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8
   },
-  sectionTitle: {
-    color: mobileTheme.colors.textPrimary,
-    fontSize: 16,
-    fontWeight: "700",
-    marginBottom: 10
+  signalChip: {
+    borderRadius: mobileTheme.radii.pill,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 6
+  },
+  signalChipPositive: {
+    backgroundColor: "#f0fdf4",
+    borderColor: "#86efac"
+  },
+  signalChipNegative: {
+    backgroundColor: "#fef9ec",
+    borderColor: "#fcd34d"
+  },
+  signalChipText: {
+    fontSize: 13,
+    fontWeight: "600"
+  },
+  signalChipTextPositive: {
+    color: "#15803d"
+  },
+  signalChipTextNegative: {
+    color: "#92400e"
   },
   tagWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 10
   },
-  tag: {
+  featureTag: {
     backgroundColor: mobileTheme.colors.surface,
     borderColor: mobileTheme.colors.border,
     borderRadius: mobileTheme.radii.pill,
     borderWidth: 1,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 8
   },
-  tagText: {
+  featureTagText: {
     color: mobileTheme.colors.textSecondary,
     fontSize: 13,
     fontWeight: "600"
   },
-  infoCard: {
+  photoScroll: {
+    marginHorizontal: -mobileTheme.spacing.screenX,
+    paddingHorizontal: mobileTheme.spacing.screenX
+  },
+  photoItem: {
+    width: 160,
+    height: 120,
+    borderRadius: 12,
+    marginRight: 10,
+    backgroundColor: mobileTheme.colors.surfaceMuted
+  },
+  emptyNote: {
+    color: mobileTheme.colors.textFaint,
+    fontSize: 14,
+    fontStyle: "italic"
+  },
+  addPhotoBtn: {
+    alignItems: "center",
     backgroundColor: mobileTheme.colors.surfaceMuted,
     borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.sm,
+    borderWidth: 1,
+    justifyContent: "center",
+    paddingVertical: 12
+  },
+  addPhotoBtnText: {
+    color: mobileTheme.colors.textPrimary,
+    fontSize: 14,
+    fontWeight: "600"
+  },
+  addPhotoHint: {
+    color: mobileTheme.colors.textFaint,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: -4
+  },
+  reviewsHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between"
+  },
+  writeReviewLink: {
+    paddingVertical: 4
+  },
+  writeReviewLinkText: {
+    color: mobileTheme.colors.brandStrong,
+    fontSize: 13,
+    fontWeight: "600"
+  },
+  noReviewsCard: {
+    backgroundColor: mobileTheme.colors.pageBackground,
+    borderColor: mobileTheme.colors.borderSubtle,
     borderRadius: mobileTheme.radii.md,
     borderWidth: 1,
-    marginTop: 22,
+    padding: 18
+  },
+  noReviewsTitle: {
+    color: mobileTheme.colors.textPrimary,
+    fontSize: 15,
+    fontWeight: "700",
+    marginBottom: 6
+  },
+  noReviewsBody: {
+    color: mobileTheme.colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19
+  },
+  reviewCard: {
+    backgroundColor: mobileTheme.colors.pageBackground,
+    borderColor: mobileTheme.colors.borderSubtle,
+    borderRadius: mobileTheme.radii.md,
+    borderWidth: 1,
+    gap: 10,
     padding: 16
   },
-  infoText: {
-    color: mobileTheme.colors.textMuted,
-    fontSize: 14
+  reviewHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 8
+  },
+  reviewHeaderLeft: {
+    flex: 1,
+    gap: 2
+  },
+  reviewAuthor: {
+    color: mobileTheme.colors.textPrimary,
+    fontSize: 14,
+    fontWeight: "700"
+  },
+  reviewDate: {
+    color: mobileTheme.colors.textFaint,
+    fontSize: 12
+  },
+  reviewRatingBadge: {
+    backgroundColor: mobileTheme.colors.surfaceBrandTint,
+    borderColor: mobileTheme.colors.infoBorder,
+    borderRadius: mobileTheme.radii.pill,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 5
+  },
+  reviewRatingText: {
+    color: mobileTheme.colors.brandStrong,
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  tagRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6
+  },
+  reviewText: {
+    color: mobileTheme.colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 21,
+    fontStyle: "italic"
+  },
+  reviewTextEmpty: {
+    color: mobileTheme.colors.textFaint,
+    fontSize: 13,
+    fontStyle: "italic"
   }
 });

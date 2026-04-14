@@ -7,8 +7,17 @@ import type {
   RestroomDetailResponse,
   SendEmailOtpResponse
 } from "@poopin/api-client";
-import type { NearbyBathroom } from "@poopin/domain";
+import type { NearbyBathroom, Review } from "@poopin/domain";
 import { mobileEnv } from "./env";
+import { supabase } from "./supabase";
+
+const RESTROOM_PHOTOS_BUCKET = "restroom-photos";
+
+export interface RestroomPhotoItem {
+  id: string;
+  url: string;
+  createdAt: string;
+}
 
 const restroomCache = new Map<string, NearbyBathroom>();
 
@@ -123,6 +132,45 @@ export const getRestroom = async (id: string): Promise<RestroomDetailResponse> =
   const response = await fetchJson<RestroomDetailResponse>(createUrl(`/api/restrooms/${encodeURIComponent(id)}`));
   restroomCache.set(response.restroom.id, response.restroom);
   return response;
+};
+
+export const getRestroomReviews = async (bathroomId: string): Promise<Review[]> => {
+  const { data, error } = await supabase
+    .from("reviews")
+    .select("*")
+    .eq("bathroom_id", bathroomId)
+    .eq("status", "active")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as Review[];
+};
+
+export const getRestroomPhotoUrls = async (bathroomId: string): Promise<RestroomPhotoItem[]> => {
+  const { data, error } = await supabase
+    .from("photos")
+    .select("id, storage_path, created_at")
+    .eq("bathroom_id", bathroomId)
+    .eq("status", "active")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const rows = (data ?? []) as { id: string; storage_path: string; created_at: string }[];
+
+  return rows.map((row) => {
+    const { data: urlData } = supabase.storage.from(RESTROOM_PHOTOS_BUCKET).getPublicUrl(row.storage_path);
+    return {
+      id: row.id,
+      url: urlData.publicUrl,
+      createdAt: row.created_at
+    };
+  });
 };
 
 export const searchPlaces = async (
