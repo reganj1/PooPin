@@ -89,12 +89,12 @@ interface MobileSheetMetrics {
 
 const MOBILE_SHEET_COLLAPSED_VISIBLE_PX = 54;
 const MOBILE_SHEET_DEFAULT_VISIBLE_RATIO = 0.5;
-const MOBILE_SHEET_EXPANDED_VISIBLE_RATIO = 0.84;
-const MOBILE_SHEET_MAX_HEIGHT_RATIO = 0.86;
+const MOBILE_SHEET_EXPANDED_VISIBLE_RATIO = 0.91;
+const MOBILE_SHEET_MAX_HEIGHT_RATIO = 0.93;
 const MOBILE_SHEET_SWIPE_VELOCITY_THRESHOLD = 0.55;
 const SEARCH_ROW_TOP_OFFSET = 6;
-const SHEET_TOP_MIN_GAP = 20;
-const EXPANDED_SHEET_EXTRA_GAP = 20;
+const SHEET_TOP_MIN_GAP = 8;
+const EXPANDED_SHEET_EXTRA_GAP = 0;
 
 const clampNumber = (value: number, min: number, max: number) => {
   const lowerBound = Math.min(min, max);
@@ -205,7 +205,14 @@ export function ExpandedMapOverlay({
   statusContent,
   onPressSelectedPopup
 }: ExpandedMapOverlayProps) {
-  const { height: viewportHeight } = useWindowDimensions();
+  const { height: windowHeight } = useWindowDimensions();
+  // Use the overlay's actual rendered height rather than the window height.
+  // With the bottom tab bar present, absoluteFillObject fills only the content
+  // area above the tab bar. Using windowHeight causes snap points to be
+  // calculated against a larger value than the real container, pushing the
+  // expanded sheet up behind the search bar.
+  const [overlayHeight, setOverlayHeight] = useState(windowHeight);
+  const viewportHeight = overlayHeight;
   const [topReservedHeight, setTopReservedHeight] = useState(96);
   const topStackRef = useRef<View>(null);
   const searchInputRef = useRef<TextInput | null>(null);
@@ -382,7 +389,15 @@ export function ExpandedMapOverlay({
   }, []);
 
   return (
-    <View style={styles.overlay}>
+    <View
+      style={styles.overlay}
+      onLayout={(e) => {
+        const h = e.nativeEvent.layout.height;
+        if (h > 0) {
+          setOverlayHeight(h);
+        }
+      }}
+    >
       <View
         onTouchStart={() => {
           dismissSearchDropdown();

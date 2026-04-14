@@ -378,3 +378,45 @@ export const searchPlaces = async (
 
   return Array.isArray(response.results) ? response.results : [];
 };
+
+// ─── Leaderboard ─────────────────────────────────────────────────────────────
+// The leaderboard_profile_stats Supabase view requires the service-role key to
+// bypass the `profiles` table RLS (which restricts each user to their own row).
+// The mobile anon/authenticated client cannot read that view directly, so we
+// delegate to the web API which runs with the service-role key server-side.
+
+export interface LeaderboardEntry {
+  rank: number;
+  profileId: string;
+  displayName: string;
+  totalPoints: number;
+  reviewCount: number;
+  photoCount: number;
+  restroomAddCount: number;
+  contributionCount: number;
+  lastContributionAt: string | null;
+}
+
+export interface LeaderboardResult {
+  entries: LeaderboardEntry[];
+  totalContributors: number;
+  /** The signed-in user's own standing when they fall outside the top entries. */
+  currentViewerEntry: LeaderboardEntry | null;
+}
+
+export const getLeaderboard = async (limit = 50, profileId?: string | null): Promise<LeaderboardResult> => {
+  const params: Record<string, string | number | undefined> = { limit };
+  if (profileId) params.profileId = profileId;
+
+  const data = await fetchJson<{
+    entries: LeaderboardEntry[];
+    totalContributors: number;
+    currentViewerEntry: LeaderboardEntry | null;
+  }>(createUrl("/api/leaderboard", params));
+
+  return {
+    entries: data.entries ?? [],
+    totalContributors: data.totalContributors ?? (data.entries?.length ?? 0),
+    currentViewerEntry: data.currentViewerEntry ?? null
+  };
+};

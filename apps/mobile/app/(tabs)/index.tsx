@@ -4,14 +4,14 @@ import { useRouter, type Href } from "expo-router";
 import type { NearbyBathroom } from "@poopin/domain";
 import { ActivityIndicator, FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
 import type { Region } from "react-native-maps";
-import { getBoundsRestrooms, getNearbyRestrooms, primeRestroomCache, searchPlaces, type PlaceSearchResult } from "../src/lib/api";
-import { ExpandedMapOverlay } from "../src/features/browse-map/ExpandedMapOverlay";
-import { getRegionChangeMetrics, regionToBounds, toBoundsKey } from "../src/features/browse-map/mapBounds";
-import { RestroomMapSurface } from "../src/features/browse-map/RestroomMapSurface";
-import { SelectedRestroomPreviewCard } from "../src/features/browse-map/SelectedRestroomPreviewCard";
-import { useCurrentLocation } from "../src/hooks/use-current-location";
-import { useSession } from "../src/providers/session-provider";
-import { mobileTheme } from "../src/ui/theme";
+import { getBoundsRestrooms, getNearbyRestrooms, primeRestroomCache, searchPlaces, type PlaceSearchResult } from "../../src/lib/api";
+import { ExpandedMapOverlay } from "../../src/features/browse-map/ExpandedMapOverlay";
+import { getRegionChangeMetrics, regionToBounds, toBoundsKey } from "../../src/features/browse-map/mapBounds";
+import { RestroomMapSurface } from "../../src/features/browse-map/RestroomMapSurface";
+import { SelectedRestroomPreviewCard } from "../../src/features/browse-map/SelectedRestroomPreviewCard";
+import { useCurrentLocation } from "../../src/hooks/use-current-location";
+import { useSession } from "../../src/providers/session-provider";
+import { mobileTheme } from "../../src/ui/theme";
 
 const FALLBACK_QUERY = {
   lat: 37.7749,
