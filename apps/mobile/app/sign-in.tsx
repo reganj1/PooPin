@@ -1,4 +1,4 @@
-import { Link, useLocalSearchParams, useRouter, type Href } from "expo-router";
+import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -108,10 +108,6 @@ export default function SignInScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        <Link href="/" style={styles.backLink}>
-          ← Back to nearby restrooms
-        </Link>
-
         <View style={styles.card}>
           <View style={styles.accountBadge}>
             <View style={styles.accountBadgeIcon}>
@@ -216,13 +212,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: 24,
-    paddingTop: 18
-  },
-  backLink: {
-    color: mobileTheme.colors.brandStrong,
-    fontSize: 14,
-    fontWeight: "600",
-    marginBottom: 20
+    paddingTop: 8
   },
   title: {
     color: mobileTheme.colors.textPrimary,

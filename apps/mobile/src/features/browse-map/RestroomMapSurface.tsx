@@ -69,6 +69,14 @@ export function RestroomMapSurface({
   const hasHandledInitialRegionChangeRef = useRef(false);
   const ignoreNextRegionChangeRef = useRef(false);
   const lastAutoCenteredOriginKeyRef = useRef(`${initialCenter.lat.toFixed(4)}:${initialCenter.lng.toFixed(4)}`);
+  // Capture mount-time prop values so the locationCenterRequestKey effect can
+  // detect whether it fired because the key changed vs. because the component
+  // just mounted with an already-non-zero key (inherited from a previous map
+  // instance).  When the key is inherited and restoredRegion positions the map
+  // correctly we must NOT fire animateToRegion — doing so cancels any in-flight
+  // user-pan debounce 700 ms later and drops the user's first pan silently.
+  const mountLocationCenterRequestKeyRef = useRef(locationCenterRequestKey);
+  const mountRestoredRegionRef = useRef(restoredRegion);
   const initialRegion: Region =
     restoredRegion ?? {
       latitude: initialCenter.lat,
@@ -147,6 +155,25 @@ export function RestroomMapSurface({
 
   useEffect(() => {
     if (locationCenterRequestKey === 0 || permissionStatus !== "granted" || !coordinates) {
+      return;
+    }
+
+    // Skip the spurious mount-time fire.  When this component mounts with
+    // locationCenterRequestKey already > 0 (inherited from the compact map's
+    // initial GPS centering) AND restoredRegion already positions the map
+    // correctly, there is no need to call animateToRegion.  Doing so would
+    // produce an onRegionChangeComplete 700 ms later that could cancel a
+    // user-initiated pan debounce and silently discard the user's first fetch.
+    // We only animate when the key genuinely increments after mount (e.g. the
+    // user pressed Recenter).
+    if (
+      locationCenterRequestKey === mountLocationCenterRequestKeyRef.current &&
+      mountRestoredRegionRef.current !== null
+    ) {
+      logMapDebug("location center skipped on mount", {
+        locationCenterRequestKey,
+        reason: "inherited key with restoredRegion — map already positioned"
+      });
       return;
     }
 

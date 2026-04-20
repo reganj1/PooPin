@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { NearbyBathroom } from "@poopin/domain";
+import type { Region } from "react-native-maps";
 import {
   Animated,
   FlatList,
@@ -17,6 +18,7 @@ type SheetSortMode = "closest" | "recommended";
 
 interface MapResultsSheetProps {
   canUseLocation: boolean;
+  currentRegion: Region | null;
   handlePanHandlers: PanResponderInstance["panHandlers"];
   onPressDetails: (restroomId: string) => void;
   onPressUseLocation: () => void;
@@ -45,6 +47,7 @@ const formatDistanceLabel = (restroom: NearbyBathroom) =>
 
 export function MapResultsSheet({
   canUseLocation,
+  currentRegion,
   handlePanHandlers,
   onPressDetails,
   onPressUseLocation,
@@ -96,9 +99,32 @@ export function MapResultsSheet({
     return next;
   }, [restrooms, showAccessibleOnly, showBabyStationOnly, showPublicOnly, sortMode]);
 
+  // Count only the restrooms whose lat/lng falls inside the current viewport
+  // bounding box.  This reflects what the user can actually see on screen
+  // rather than the total number fetched for the broader bounds area.
+  const visibleCount = useMemo(() => {
+    if (!currentRegion) {
+      return filteredRestrooms.length;
+    }
+
+    const minLat = currentRegion.latitude - currentRegion.latitudeDelta / 2;
+    const maxLat = currentRegion.latitude + currentRegion.latitudeDelta / 2;
+    const minLng = currentRegion.longitude - currentRegion.longitudeDelta / 2;
+    const maxLng = currentRegion.longitude + currentRegion.longitudeDelta / 2;
+
+    return filteredRestrooms.filter(
+      (r) => r.lat >= minLat && r.lat <= maxLat && r.lng >= minLng && r.lng <= maxLng
+    ).length;
+  }, [filteredRestrooms, currentRegion]);
+
   const hasResults = filteredRestrooms.length > 0;
-  const resultsCountLabel = hasResults ? `${filteredRestrooms.length} visible` : "No visible results";
-  const listSubtitle = hasResults ? `${filteredRestrooms.length} in this map area` : "No visible results in this map area";
+  const resultsCountLabel = visibleCount > 0 ? `${visibleCount} visible` : "No visible results";
+  const listSubtitle =
+    visibleCount > 0
+      ? `${visibleCount} visible · ${filteredRestrooms.length} in area`
+      : filteredRestrooms.length > 0
+        ? `${filteredRestrooms.length} in area — pan to see`
+        : "No results in this area";
   const hasActiveFilters = showPublicOnly || showAccessibleOnly || showBabyStationOnly;
 
   const handleResultPress = (restroomId: string) => {

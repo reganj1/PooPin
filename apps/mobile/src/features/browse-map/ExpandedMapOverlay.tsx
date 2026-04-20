@@ -47,6 +47,7 @@ type SearchSuggestion =
 interface ExpandedMapOverlayProps {
   canRecenter: boolean;
   coordinates: Coordinates | null;
+  currentRegion: Region | null;
   focusRequestKey: number;
   focusedRestroomId: string | null;
   initialCenter: Coordinates;
@@ -173,6 +174,7 @@ const resolveSheetSnapState = (endOffset: number, velocityY: number, metrics: Mo
 export function ExpandedMapOverlay({
   canRecenter,
   coordinates,
+  currentRegion,
   focusRequestKey,
   focusedRestroomId,
   initialCenter,
@@ -545,6 +547,7 @@ export function ExpandedMapOverlay({
         >
           <MapResultsSheet
             canUseLocation={canRecenter}
+            currentRegion={currentRegion}
             handlePanHandlers={panResponder.panHandlers}
             onPressDetails={onPressDetails}
             onPressUseLocation={() => {
