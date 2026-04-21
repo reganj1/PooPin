@@ -16,13 +16,15 @@ import { getCardByTitle, getRarityColors } from "../../lib/cardCatalog";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const QUICK_TAG_INFO: Record<ReviewQuickTag, { label: string; icon: string; positive: boolean }> = {
-  clean: { label: "Clean", icon: "✨", positive: true },
-  smelly: { label: "Smelly", icon: "🤢", positive: false },
-  no_line: { label: "No line", icon: "🚫", positive: true },
-  crowded: { label: "Crowded", icon: "🚻", positive: false },
-  no_toilet_paper: { label: "No toilet paper", icon: "🧻", positive: false },
-  locked: { label: "Locked", icon: "🔒", positive: false }
+type QuickTagTone = "positive" | "negative";
+
+const QUICK_TAG_INFO: Record<ReviewQuickTag, { label: string; tone: QuickTagTone }> = {
+  clean: { label: "Clean", tone: "positive" },
+  smelly: { label: "Smelly", tone: "negative" },
+  no_line: { label: "No line", tone: "positive" },
+  crowded: { label: "Crowded", tone: "negative" },
+  no_toilet_paper: { label: "No toilet paper", tone: "negative" },
+  locked: { label: "Locked", tone: "negative" }
 };
 
 const formatDate = (value: string) => {
@@ -224,13 +226,13 @@ export function ReviewCard({ review, viewerProfileId, onRequireSignIn, restroomN
           {tags.map((tag) => {
             const info = QUICK_TAG_INFO[tag];
             if (!info) return null;
+            const isPositive = info.tone === "positive";
             return (
               <View
                 key={tag}
-                style={[styles.chip, info.positive ? styles.chipPositive : styles.chipNegative]}
+                style={[styles.chip, isPositive ? styles.chipPositive : styles.chipNegative]}
               >
-                <Text style={styles.chipIcon}>{info.icon}</Text>
-                <Text style={[styles.chipText, info.positive ? styles.chipTextPositive : styles.chipTextNegative]}>
+                <Text style={[styles.chipText, isPositive ? styles.chipTextPositive : styles.chipTextNegative]}>
                   {info.label}
                 </Text>
               </View>
@@ -430,31 +432,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderRadius: mobileTheme.radii.pill,
     borderWidth: 1,
-    flexDirection: "row",
-    gap: 5,
     paddingHorizontal: 10,
-    paddingVertical: 5
+    paddingVertical: 4
   },
   chipPositive: {
-    backgroundColor: "#f0fdf4",
-    borderColor: "#86efac"
+    backgroundColor: "#ecfdf5",
+    borderColor: "#a7f3d0"
   },
   chipNegative: {
-    backgroundColor: "#fef9ec",
-    borderColor: "#fcd34d"
-  },
-  chipIcon: {
-    fontSize: 12
+    backgroundColor: "#fff1f2",
+    borderColor: "#fecdd3"
   },
   chipText: {
     fontSize: 12,
     fontWeight: "600"
   },
   chipTextPositive: {
-    color: "#15803d"
+    color: "#047857"
   },
   chipTextNegative: {
-    color: "#92400e"
+    color: "#be123c"
   },
   body: {
     color: mobileTheme.colors.textSecondary,
