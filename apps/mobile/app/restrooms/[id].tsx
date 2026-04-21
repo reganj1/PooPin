@@ -388,8 +388,8 @@ export default function RestroomDetailScreen() {
   const hiddenPhotoCount = Math.max(0, photos.length - INLINE_PHOTO_LIMIT);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <Stack.Screen options={{ title: restroom?.name ?? "Restroom detail" }} />
+    <SafeAreaView style={styles.safeArea} edges={["bottom"]}>
+      <Stack.Screen options={{ title: restroom?.name ?? "Restroom detail", headerBackButtonDisplayMode: "minimal" }} />
 
       {/* Native review form modal */}
       {restroom && user ? (
@@ -404,11 +404,6 @@ export default function RestroomDetailScreen() {
       ) : null}
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Back */}
-        <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.backLink, pressed && { opacity: 0.7 }]}>
-          <Text style={styles.backLinkText}>← Back</Text>
-        </Pressable>
-
         {isLoading && !restroom ? (
           <View style={styles.stateCard}>
             <ActivityIndicator color={mobileTheme.colors.brandStrong} />
@@ -578,17 +573,8 @@ const styles = StyleSheet.create({
     backgroundColor: mobileTheme.colors.pageBackground
   },
   scrollContent: {
-    paddingBottom: 52
-  },
-  backLink: {
-    paddingHorizontal: mobileTheme.spacing.screenX,
-    paddingTop: 14,
-    paddingBottom: 6
-  },
-  backLinkText: {
-    color: mobileTheme.colors.brandStrong,
-    fontSize: 14,
-    fontWeight: "600"
+    paddingBottom: 52,
+    paddingTop: 16
   },
   stateCard: {
     alignItems: "center",

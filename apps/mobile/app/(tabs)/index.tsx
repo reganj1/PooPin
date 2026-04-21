@@ -21,6 +21,7 @@ const FALLBACK_QUERY = {
 } as const;
 const BOUNDS_FETCH_DEBOUNCE_MS = 120;
 const BOUNDS_FETCH_LIMIT = 400;
+const MAX_BOUNDS_FETCH_DELTA = 2.0; // skip fetch when viewport > ~220 km tall — markers at that scale are useless
 const MARKER_TAP_SUPPRESSION_MS = 1000;
 const SHEET_SELECTION_SUPPRESSION_MS = 600;
 const MARKER_EXPLORATION_IDLE_EXIT_MS = 1000;
@@ -137,10 +138,96 @@ export default function HomeScreen() {
   const skipNextBoundsFetchReasonRef = useRef<string | null>(null);
   const latestPlaceSearchRequestIdRef = useRef(0);
   const placeSuggestionAbortRef = useRef<AbortController | null>(null);
+  // Guards the one-shot initial bounds fetch that fires when the expanded map
+  // first opens.  Reset each time the overlay closes so re-expanding triggers
+  // a fresh fetch.
+  const expandedMapInitialFetchFiredRef = useRef(false);
+  // Mirrors latest values into refs so the initial-expand effect can read them
+  // without adding them as reactive deps (we only want to fire once per open).
+  const latestMapRegionRef = useRef<Region | null>(null);
+  const latestCoordinatesRef = useRef<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     browseDataModeRef.current = browseDataMode;
   }, [browseDataMode]);
+
+  // Keep mirror refs current on every render.
+  latestMapRegionRef.current = mapRegion;
+  latestCoordinatesRef.current = coordinates;
+
+  // ─── One-shot initial bounds fetch on expand ─────────────────────────────
+  // The first onRegionChangeComplete fired by RestroomMapSurface is always
+  // discarded (hasHandledInitialRegionChangeRef) to avoid double-fetching on
+  // the compact map.  That means the expanded map never gets an automatic
+  // viewport fetch unless the user pans.  This effect compensates by firing a
+  // single getBoundsRestrooms call the moment the overlay opens, using the
+  // map's current region (or the GPS / fallback origin as a safe default).
+  // It also resets the region-change baseline refs so the first user pan
+  // after opening is always treated as meaningful regardless of size.
+  useEffect(() => {
+    if (!isExpandedMapOpen) {
+      expandedMapInitialFetchFiredRef.current = false;
+      return;
+    }
+
+    if (expandedMapInitialFetchFiredRef.current) {
+      return;
+    }
+
+    expandedMapInitialFetchFiredRef.current = true;
+
+    // Reset movement baseline so the very first pan after opening is always
+    // treated as meaningful, no matter how small.
+    lastMeaningfulRegionRef.current = null;
+    lastAcceptedRegionRef.current = null;
+
+    const coords = latestCoordinatesRef.current;
+    const currentRegion: Region = latestMapRegionRef.current ?? {
+      latitude: coords?.lat ?? FALLBACK_QUERY.lat,
+      longitude: coords?.lng ?? FALLBACK_QUERY.lng,
+      latitudeDelta: 0.12,
+      longitudeDelta: 0.12
+    };
+
+    const fetchRegion: Region = {
+      ...currentRegion,
+      latitudeDelta: Math.min(currentRegion.latitudeDelta, MAX_BOUNDS_FETCH_DELTA),
+      longitudeDelta: Math.min(currentRegion.longitudeDelta, MAX_BOUNDS_FETCH_DELTA)
+    };
+
+    const bounds = regionToBounds(fetchRegion);
+    const boundsKey = toBoundsKey(bounds);
+
+    if (boundsKey === lastAppliedBoundsKeyRef.current || boundsKey === lastQueuedBoundsKeyRef.current) {
+      logMapDebug("initial expand fetch skipped", { reason: "already fetched or queued", boundsKey });
+      return;
+    }
+
+    lastQueuedBoundsKeyRef.current = boundsKey;
+    const requestId = latestBoundsRequestIdRef.current + 1;
+    latestBoundsRequestIdRef.current = requestId;
+    logMapDebug("initial expand fetch start", { requestId, boundsKey, latitudeDelta: fetchRegion.latitudeDelta });
+
+    void (async () => {
+      try {
+        const response = await getBoundsRestrooms({ ...bounds, limit: BOUNDS_FETCH_LIMIT });
+        // Use currentRegion (not fetchRegion) so refs store the real viewport
+        // delta for subsequent pan comparisons.
+        applyBoundsResult(response.restrooms, boundsKey, requestId, currentRegion);
+      } catch (error) {
+        if (requestId === latestBoundsRequestIdRef.current) {
+          setErrorMessage(error instanceof Error ? error.message : "Could not load restrooms for this map area.");
+        }
+      } finally {
+        if (lastQueuedBoundsKeyRef.current === boundsKey) {
+          lastQueuedBoundsKeyRef.current = null;
+        }
+      }
+    })();
+    // Intentionally omit mapRegion / coordinates from deps — this must fire
+    // exactly once per expand, capturing values at the moment of opening.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExpandedMapOpen]);
 
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
   const normalizedSubmittedLocalSearchQuery = submittedLocalSearchQuery.trim().toLowerCase();
@@ -580,6 +667,15 @@ export default function HomeScreen() {
   const handleMapRegionSettled = (region: Region) => {
     setMapRegion(region);
 
+    logMapDebug("region settled", {
+      latitude: region.latitude,
+      longitude: region.longitude,
+      latitudeDelta: region.latitudeDelta,
+      longitudeDelta: region.longitudeDelta,
+      previousLatitude: (lastMeaningfulRegionRef.current ?? lastAcceptedRegionRef.current)?.latitude,
+      previousLongitude: (lastMeaningfulRegionRef.current ?? lastAcceptedRegionRef.current)?.longitude
+    });
+
     const regionChange = getRegionChangeMetrics(lastMeaningfulRegionRef.current ?? lastAcceptedRegionRef.current, region);
     if (!regionChange.meaningful) {
       logMapDebug("bounds result skipped due to insignificant region change", {
@@ -636,7 +732,30 @@ export default function HomeScreen() {
       return;
     }
 
-    const bounds = regionToBounds(region);
+    // When the viewport is very large, cap the fetch area to the centre
+    // MAX_BOUNDS_FETCH_DELTA × MAX_BOUNDS_FETCH_DELTA degrees rather than
+    // silently returning nothing.  Markers appear in the centre of the screen;
+    // zooming in reveals the full picture.  The actual region (uncapped) is
+    // kept in lastMeaningfulRegionRef so subsequent pan comparisons are
+    // correct.
+    const isZoomedOut =
+      region.latitudeDelta > MAX_BOUNDS_FETCH_DELTA || region.longitudeDelta > MAX_BOUNDS_FETCH_DELTA;
+    const fetchRegion: Region = isZoomedOut
+      ? {
+          ...region,
+          latitudeDelta: Math.min(region.latitudeDelta, MAX_BOUNDS_FETCH_DELTA),
+          longitudeDelta: Math.min(region.longitudeDelta, MAX_BOUNDS_FETCH_DELTA)
+        }
+      : region;
+
+    if (isZoomedOut) {
+      logMapDebug("viewport capped for bounds fetch", {
+        originalLatDelta: region.latitudeDelta,
+        cappedLatDelta: fetchRegion.latitudeDelta
+      });
+    }
+
+    const bounds = regionToBounds(fetchRegion);
     const boundsKey = toBoundsKey(bounds);
     if (boundsKey === lastAppliedBoundsKeyRef.current || boundsKey === lastQueuedBoundsKeyRef.current) {
       return;
@@ -936,43 +1055,41 @@ export default function HomeScreen() {
   ) : null;
   const listHeaderContent = (
     <View style={styles.header}>
-      <View style={styles.heroCard}>
-        <Text style={styles.eyebrow}>Nearby restrooms</Text>
-        <Text style={styles.title}>Find a restroom</Text>
-        <Text style={styles.copy}>
-          Browse trusted restroom listings nearby with the same clean Poopin experience you already have on the web.
-        </Text>
+      <View style={styles.screenHeader}>
+        <Text style={styles.screenTitle}>Find a restroom</Text>
 
-        {user ? <Text style={styles.sessionLabel}>{user.email ?? "Signed in"}</Text> : null}
-
-        <View style={styles.headerActions}>
-          {user ? (
+        {user ? (
+          <View style={styles.screenHeaderAuth}>
+            <Text style={[styles.sessionLabel, styles.sessionLabelInline]} numberOfLines={1}>
+              {user.email ?? "Signed in"}
+            </Text>
             <Pressable
               onPress={handleSignOut}
               disabled={isSigningOut}
-              style={({ pressed }) => [styles.secondaryButton, pressed ? styles.buttonPressed : null]}
+              style={({ pressed }) => [styles.screenHeaderSignOut, pressed ? styles.buttonPressed : null]}
             >
-              <Text style={styles.secondaryButtonText}>{isSigningOut ? "Signing out…" : "Sign out"}</Text>
+              <Text style={styles.screenHeaderSignOutText}>{isSigningOut ? "Signing out…" : "Sign out"}</Text>
             </Pressable>
-          ) : (
-            <Pressable
-              onPress={() => router.push("/sign-in?returnTo=%2F" as Href)}
-              style={({ pressed }) => [styles.primaryButton, pressed ? styles.buttonPressed : null]}
-            >
-              <Text style={styles.primaryButtonText}>Sign in</Text>
-            </Pressable>
-          )}
-        </View>
+          </View>
+        ) : (
+          <Pressable
+            onPress={() => router.push("/sign-in?returnTo=%2F" as Href)}
+            style={({ pressed }) => [styles.screenHeaderSignIn, pressed ? styles.buttonPressed : null]}
+          >
+            <Text style={styles.screenHeaderSignInText}>Sign in</Text>
+          </Pressable>
+        )}
       </View>
 
-      {homeMapStatusContent}
       <View style={styles.compactMapPreviewCard}>
         <View style={styles.compactMapPreviewHeader}>
           <Text style={styles.compactMapPreviewTitle}>Restroom map</Text>
           <Pressable onPress={openExpandedMap} style={({ pressed }) => [styles.expandMapButton, pressed ? styles.buttonPressed : null]}>
-            <Text style={styles.expandMapButtonText}>Expand map</Text>
+            <Text style={styles.expandMapButtonText}>Explore map</Text>
           </Pressable>
         </View>
+
+        {homeMapStatusContent}
 
         <View style={styles.compactMapPreviewSurface}>
           {!isExpandedMapOpen ? <RestroomMapSurface {...mapSurfaceProps} /> : null}
@@ -1068,6 +1185,7 @@ export default function HomeScreen() {
             onSelectSearchSuggestion={handleSelectSearchSuggestion}
             onSubmitSearchQuery={handleExpandedMapSearchSubmit}
             onSheetStateChange={handleMapSheetStateChange}
+            currentRegion={mapRegion}
             permissionStatus={permissionStatus}
             restoredRegion={mapRegion}
             restrooms={expandedMapRestrooms}
@@ -1111,10 +1229,10 @@ const styles = StyleSheet.create({
     paddingTop: mobileTheme.spacing.screenTop
   },
   header: {
-    marginBottom: mobileTheme.spacing.sectionGap
+    marginBottom: 12
   },
   compactMapPreviewCard: {
-    marginTop: 14
+    marginTop: 10
   },
   compactMapPreviewHeader: {
     alignItems: "center",
@@ -1130,23 +1248,21 @@ const styles = StyleSheet.create({
   },
   expandMapButton: {
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.88)",
-    borderColor: mobileTheme.colors.border,
+    backgroundColor: mobileTheme.colors.brand,
     borderRadius: mobileTheme.radii.pill,
-    borderWidth: 1,
     justifyContent: "center",
-    minWidth: 98,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingVertical: 8
   },
   expandMapButtonText: {
-    color: mobileTheme.colors.textSecondary,
-    fontSize: 12,
-    fontWeight: "600"
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "700"
   },
   compactMapPreviewSurface: {
     borderRadius: mobileTheme.radii.xl,
     height: 236,
+    marginTop: 8,
     overflow: "hidden",
     position: "relative",
     ...mobileTheme.shadows.hero
@@ -1185,39 +1301,46 @@ const styles = StyleSheet.create({
   mapControlButtonTextDisabled: {
     color: mobileTheme.colors.textFaint
   },
-  heroCard: {
-    backgroundColor: mobileTheme.colors.surface,
-    borderColor: mobileTheme.colors.borderSubtle,
-    borderRadius: mobileTheme.radii.xl,
-    borderWidth: 1,
-    marginBottom: 16,
-    padding: mobileTheme.spacing.heroPadding,
-    ...mobileTheme.shadows.hero
-  },
-  eyebrow: {
-    color: mobileTheme.colors.brandStrong,
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1.4,
-    marginBottom: 10,
-    textTransform: "uppercase"
-  },
-  title: {
-    color: mobileTheme.colors.textPrimary,
-    fontSize: 32,
-    fontWeight: "700",
-    marginBottom: 10
-  },
-  copy: {
-    color: mobileTheme.colors.textSecondary,
-    fontSize: 15,
-    lineHeight: 22
-  },
-  headerActions: {
-    alignItems: "flex-start",
+  screenHeader: {
+    alignItems: "center",
     flexDirection: "row",
-    gap: 10,
-    marginTop: 16
+    justifyContent: "space-between",
+    marginBottom: 14
+  },
+  screenTitle: {
+    color: mobileTheme.colors.textPrimary,
+    flex: 1,
+    fontSize: 22,
+    fontWeight: "700"
+  },
+  screenHeaderSignIn: {
+    backgroundColor: mobileTheme.colors.surface,
+    borderColor: mobileTheme.colors.border,
+    borderRadius: mobileTheme.radii.pill,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 8
+  },
+  screenHeaderSignInText: {
+    color: mobileTheme.colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "600"
+  },
+  screenHeaderAuth: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexShrink: 1,
+    gap: 8,
+    marginLeft: 10
+  },
+  screenHeaderSignOut: {
+    paddingHorizontal: 2,
+    paddingVertical: 4
+  },
+  screenHeaderSignOutText: {
+    color: mobileTheme.colors.textMuted,
+    fontSize: 13,
+    fontWeight: "500"
   },
   sessionLabel: {
     alignSelf: "flex-start",
@@ -1232,30 +1355,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8
   },
-  primaryButton: {
-    alignItems: "center",
-    backgroundColor: mobileTheme.colors.brandDeep,
-    borderRadius: mobileTheme.radii.xs,
-    paddingHorizontal: 16,
-    paddingVertical: 13
-  },
-  primaryButtonText: {
-    color: mobileTheme.colors.surface,
-    fontSize: 14,
-    fontWeight: "700"
-  },
-  secondaryButton: {
-    backgroundColor: mobileTheme.colors.surface,
-    borderColor: mobileTheme.colors.border,
-    borderRadius: mobileTheme.radii.xs,
-    borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 13
-  },
-  secondaryButtonText: {
-    color: mobileTheme.colors.textPrimary,
-    fontSize: 14,
-    fontWeight: "700"
+  sessionLabelInline: {
+    alignSelf: "center",
+    flexShrink: 1,
+    marginTop: 0
   },
   buttonPressed: {
     opacity: 0.85
