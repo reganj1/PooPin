@@ -65,6 +65,7 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="sign-in" options={{ title: "Sign in", headerBackButtonDisplayMode: "minimal" }} />
           <Stack.Screen name="restrooms/[id]" options={{ title: "Restroom detail", headerBackButtonDisplayMode: "minimal" }} />
+          <Stack.Screen name="u/[id]" options={{ title: "Reviewer", headerBackButtonDisplayMode: "minimal" }} />
           <Stack.Screen name="contact" options={{ headerShown: false }} />
           <Stack.Screen name="add-restroom" options={{ headerShown: false }} />
           <Stack.Screen name="add-review" options={{ headerShown: false }} />

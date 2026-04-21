@@ -9,8 +9,10 @@ import {
   TextInput,
   View
 } from "react-native";
+import { useRouter } from "expo-router";
 import { mobileTheme } from "../../ui/theme";
 import { addReviewComment, getReviewComments, likeRestroomReview, unlikeRestroomReview } from "../../lib/api";
+import { getCardByTitle, getRarityColors } from "../../lib/cardCatalog";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -48,7 +50,17 @@ interface ReviewCardProps {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function ReviewCard({ review, viewerProfileId, onRequireSignIn, restroomName, restroomCity }: ReviewCardProps) {
+  const router = useRouter();
   const tags = (review.quick_tags ?? []) as ReviewQuickTag[];
+
+  const accountProfileId = review.profile_id;
+  const hasProfile = Boolean(accountProfileId);
+  const authorLabel =
+    review.author_display_name?.trim() || (hasProfile ? "Contributor" : "Anonymous");
+  const collectibleTitle = review.author_collectible_title?.trim() ?? null;
+  const collectibleRarity = review.author_collectible_rarity?.trim() ?? null;
+  const cardEntry = getCardByTitle(collectibleTitle);
+  const rarityColors = getRarityColors(collectibleRarity ?? cardEntry?.rarity);
 
   // ── Like state (optimistic) ─────────────────────────────────────────────
   const [localLikeCount, setLocalLikeCount] = useState(review.like_count ?? 0);
@@ -169,14 +181,38 @@ export function ReviewCard({ review, viewerProfileId, onRequireSignIn, restroomN
   // ── Render ──────────────────────────────────────────────────────────────
   return (
     <View style={styles.card}>
-      {/* Header row: author · rating pill · date */}
+      {/* Header row: identity (tappable when profile exists) · rating pill */}
       <View style={styles.headerRow}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.author} numberOfLines={1}>
-            {review.author_display_name?.trim() || "Anonymous"}
+        <Pressable
+          style={({ pressed }) => [styles.headerLeft, hasProfile && pressed && styles.identityPressed]}
+          onPress={hasProfile ? () => router.push(`/u/${accountProfileId}`) : undefined}
+          disabled={!hasProfile}
+          accessibilityRole={hasProfile ? "button" : "text"}
+          accessibilityLabel={hasProfile ? `View ${authorLabel}'s profile` : undefined}
+        >
+          <Text style={[styles.author, hasProfile && styles.authorTappable]} numberOfLines={1}>
+            {authorLabel}
           </Text>
+          {collectibleTitle ? (
+            <View
+              style={[
+                styles.collectiblePill,
+                { backgroundColor: rarityColors.bg, borderColor: rarityColors.border }
+              ]}
+            >
+              {cardEntry ? (
+                <Text style={styles.collectiblePillMascot}>{cardEntry.mascot}</Text>
+              ) : null}
+              <Text
+                style={[styles.collectiblePillText, { color: rarityColors.text }]}
+                numberOfLines={1}
+              >
+                {collectibleTitle}
+              </Text>
+            </View>
+          ) : null}
           <Text style={styles.date}>Visited {formatDate(review.visit_time)}</Text>
-        </View>
+        </Pressable>
         <View style={styles.ratingPill}>
           <Text style={styles.ratingPillText}>Overall {review.overall_rating.toFixed(1)}</Text>
         </View>
@@ -342,6 +378,31 @@ const styles = StyleSheet.create({
     color: mobileTheme.colors.textPrimary,
     fontSize: 14,
     fontWeight: "700"
+  },
+  authorTappable: {
+    color: mobileTheme.colors.brandStrong
+  },
+  identityPressed: {
+    opacity: 0.6
+  },
+  collectiblePill: {
+    alignSelf: "flex-start",
+    borderRadius: mobileTheme.radii.pill,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3
+  },
+  collectiblePillMascot: {
+    fontSize: 10,
+    lineHeight: 14
+  },
+  collectiblePillText: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.1
   },
   date: {
     color: mobileTheme.colors.textFaint,

@@ -243,7 +243,10 @@ export const getRestroom = async (id: string): Promise<RestroomDetailResponse> =
 export const getRestroomReviews = async (bathroomId: string, viewerProfileId?: string | null): Promise<Review[]> => {
   // Step 1: fetch review rows, attempting a profile join for display names.
   // The join relies on a FK from reviews.profile_id → profiles.id.
-  // If the join fails (wrong constraint name or RLS), fall back to select("*").
+  // RLS on `profiles` only allows each user to read their own row, so for most
+  // reviewers the embed is empty even though `profile_id` is set — same as web,
+  // we merge display names from `/api/leaderboard` (service-role snapshot) below.
+  // If the join fails (wrong constraint name), fall back to select("*").
   let baseData: Record<string, unknown>[] = [];
   let joinSucceeded = false;
 
@@ -269,20 +272,32 @@ export const getRestroomReviews = async (bathroomId: string, viewerProfileId?: s
     baseData = (fallback.data ?? []) as Record<string, unknown>[];
   }
 
-  // Flatten joined profile display_name onto the review row
+  // Flatten joined profile display_name onto the review row; mirror web `toReview`
+  // by treating legacy `user_id` as `profile_id` when `profile_id` is absent.
   const reviews: Review[] = baseData.map((row) => {
-    const profileJoin = joinSucceeded ? (row.profiles as { display_name?: string | null } | null) : null;
+    const { profiles: rawProfiles, ...rest } = row;
+    const profileJoin = joinSucceeded
+      ? ((Array.isArray(rawProfiles) ? rawProfiles[0] : rawProfiles) as { display_name?: string | null } | null)
+      : null;
+    const normalizedId =
+      (rest.profile_id as string | null | undefined) ?? (rest.user_id as string | null | undefined) ?? null;
+    const profileId = typeof normalizedId === "string" && normalizedId.length > 0 ? normalizedId : null;
+
     return {
-      ...(row as unknown as Review),
-      author_display_name: (row.author_display_name as string | null | undefined) ?? profileJoin?.display_name ?? null
+      ...(rest as unknown as Review),
+      profile_id: profileId,
+      author_display_name:
+        (rest.author_display_name as string | null | undefined) ?? profileJoin?.display_name ?? null
     };
   });
 
-  if (reviews.length === 0) return reviews;
+  const enriched = await mergeLeaderboardIdentityIntoReviews(reviews, viewerProfileId);
+
+  if (enriched.length === 0) return enriched;
 
   // Step 2: aggregate engagement counts — bounded to this restroom's review IDs.
   // Degrades gracefully: if these queries fail, reviews still render with counts at 0.
-  const reviewIds = reviews.map((r) => r.id);
+  const reviewIds = enriched.map((r) => r.id);
 
   try {
     const parallelQueries: [
@@ -290,11 +305,11 @@ export const getRestroomReviews = async (bathroomId: string, viewerProfileId?: s
       Promise<{ data: { review_id: string }[] | null; error: unknown }>,
       Promise<{ data: { review_id: string }[] | null; error: unknown } | null>
     ] = [
-      supabase.from("review_likes").select("review_id").in("review_id", reviewIds) as Promise<{
+      supabase.from("review_likes").select("review_id").in("review_id", reviewIds) as unknown as Promise<{
         data: { review_id: string }[] | null;
         error: unknown;
       }>,
-      supabase.from("review_comments").select("review_id").in("review_id", reviewIds).eq("status", "active") as Promise<{
+      supabase.from("review_comments").select("review_id").in("review_id", reviewIds).eq("status", "active") as unknown as Promise<{
         data: { review_id: string }[] | null;
         error: unknown;
       }>,
@@ -303,7 +318,7 @@ export const getRestroomReviews = async (bathroomId: string, viewerProfileId?: s
             .from("review_likes")
             .select("review_id")
             .in("review_id", reviewIds)
-            .eq("profile_id", viewerProfileId) as Promise<{ data: { review_id: string }[] | null; error: unknown }>)
+            .eq("profile_id", viewerProfileId) as unknown as Promise<{ data: { review_id: string }[] | null; error: unknown }>)
         : Promise.resolve(null)
     ];
 
@@ -324,7 +339,7 @@ export const getRestroomReviews = async (bathroomId: string, viewerProfileId?: s
     // Build viewer_has_liked set
     const viewerLikedIds = new Set<string>((viewerLikesResult?.data ?? []).map((r) => r.review_id));
 
-    return reviews.map((r) => ({
+    return enriched.map((r) => ({
       ...r,
       like_count: likeCounts[r.id] ?? 0,
       comment_count: commentCounts[r.id] ?? 0,
@@ -332,7 +347,7 @@ export const getRestroomReviews = async (bathroomId: string, viewerProfileId?: s
     }));
   } catch {
     // Engagement fetch failed — return reviews with zero counts, still usable
-    return reviews.map((r) => ({ ...r, like_count: 0, comment_count: 0, viewer_has_liked: false }));
+    return enriched.map((r) => ({ ...r, like_count: 0, comment_count: 0, viewer_has_liked: false }));
   }
 };
 
@@ -372,6 +387,134 @@ export const addReviewComment = async (reviewId: string, profileId: string, body
   if (!data) throw new Error("Comment insert returned no data.");
 
   return { ...(data as ReviewComment), author_display_name: null };
+};
+
+// ─── Public reviewer profile ──────────────────────────────────────────────────
+
+export interface PublicReviewerProfile {
+  profileId: string;
+  /** Resolved via profiles join (own row only), then `/api/leaderboard` snapshot when ranked. */
+  displayName: string | null;
+  /** From leaderboard collectible enrichment when this profile appears in the snapshot. */
+  collectibleTitle: string | null;
+  collectibleRarity: string | null;
+  /** Contribution mix when this profile is present on the server leaderboard view (total_points > 0). */
+  stats: {
+    totalPoints: number;
+    reviewCount: number;
+    photoCount: number;
+    restroomAddCount: number;
+    contributionCount: number;
+  } | null;
+}
+
+export interface PublicProfileReview {
+  id: string;
+  bathroom_id: string;
+  restroomName: string | null;
+  restroomCity: string | null;
+  overall_rating: number;
+  review_text: string;
+  quick_tags: ReviewQuickTag[];
+  visit_time: string;
+  created_at: string;
+}
+
+export const getPublicProfileReviews = async (
+  profileId: string
+): Promise<{ profile: PublicReviewerProfile; reviews: PublicProfileReview[] }> => {
+  type ProfileJoin = { display_name: string | null } | null;
+  type BathroomJoin = { name: string | null; city: string | null } | null;
+  type ReviewRow = {
+    id: string;
+    bathroom_id: string;
+    overall_rating: number;
+    review_text: string;
+    quick_tags: ReviewQuickTag[] | null;
+    visit_time: string;
+    created_at: string;
+    profiles?: ProfileJoin | ProfileJoin[];
+    bathrooms?: BathroomJoin | BathroomJoin[] | null;
+  };
+
+  const [joinResult, lbResult] = await Promise.all([
+    supabase
+      .from("reviews")
+      .select(
+        "id, bathroom_id, overall_rating, review_text, quick_tags, visit_time, created_at, profiles!reviews_profile_id_fkey(display_name), bathrooms(name, city)"
+      )
+      .eq("profile_id", profileId)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(20),
+    getLeaderboard(100, profileId).catch(() => null as LeaderboardResult | null)
+  ]);
+
+  let rows: ReviewRow[] = [];
+
+  if (!joinResult.error) {
+    rows = (joinResult.data ?? []) as unknown as ReviewRow[];
+  } else {
+    const fallback = await supabase
+      .from("reviews")
+      .select("id, bathroom_id, overall_rating, review_text, quick_tags, visit_time, created_at, bathrooms(name, city)")
+      .eq("profile_id", profileId)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    if (fallback.error) throw new Error(fallback.error.message);
+    rows = (fallback.data ?? []) as unknown as ReviewRow[];
+  }
+
+  const rawProf = rows[0]?.profiles;
+  const profRow = Array.isArray(rawProf) ? rawProf[0] : rawProf;
+  const joinDisplayName = profRow?.display_name?.trim() || null;
+
+  const lbHit =
+    lbResult?.currentViewerEntry?.profileId === profileId
+      ? lbResult.currentViewerEntry
+      : lbResult?.entries.find((e) => e.profileId === profileId);
+
+  const displayName = joinDisplayName || lbHit?.displayName?.trim() || null;
+  const collectibleTitle = lbHit?.collectibleTitle?.trim() || null;
+  const collectibleRarity = lbHit?.collectibleRarity ?? null;
+
+  const stats = lbHit
+    ? {
+        totalPoints: lbHit.totalPoints,
+        reviewCount: lbHit.reviewCount,
+        photoCount: lbHit.photoCount,
+        restroomAddCount: lbHit.restroomAddCount,
+        contributionCount: lbHit.contributionCount
+      }
+    : null;
+
+  const profile: PublicReviewerProfile = {
+    profileId,
+    displayName,
+    collectibleTitle,
+    collectibleRarity,
+    stats
+  };
+
+  const reviews: PublicProfileReview[] = rows.map((r) => {
+    const rawBath = r.bathrooms;
+    const bath = Array.isArray(rawBath) ? rawBath[0] : rawBath;
+    return {
+      id: r.id,
+      bathroom_id: r.bathroom_id,
+      restroomName: bath?.name ?? null,
+      restroomCity: bath?.city ?? null,
+      overall_rating: r.overall_rating,
+      review_text: r.review_text,
+      quick_tags: r.quick_tags ?? [],
+      visit_time: r.visit_time,
+      created_at: r.created_at
+    };
+  });
+
+  return { profile, reviews };
 };
 
 export const getRestroomPhotoUrls = async (bathroomId: string): Promise<RestroomPhotoItem[]> => {
@@ -665,6 +808,46 @@ export const getLeaderboard = async (limit = 50, profileId?: string | null): Pro
     currentViewerEntry: data.currentViewerEntry ?? null
   };
 };
+
+/** Fills author_display_name / collectible fields using the server leaderboard snapshot (bypasses profiles RLS). */
+async function mergeLeaderboardIdentityIntoReviews(
+  reviews: Review[],
+  viewerProfileId?: string | null
+): Promise<Review[]> {
+  const needsName = reviews.some((r) => r.profile_id && !r.author_display_name?.trim());
+  const needsCollectible = reviews.some((r) => r.profile_id && !r.author_collectible_title?.trim());
+  if (!needsName && !needsCollectible) {
+    return reviews;
+  }
+
+  try {
+    const lb = await getLeaderboard(100, viewerProfileId ?? null);
+    const byId = new Map<string, LeaderboardEntry>();
+    for (const e of lb.entries) {
+      byId.set(e.profileId, e);
+    }
+    if (lb.currentViewerEntry) {
+      byId.set(lb.currentViewerEntry.profileId, lb.currentViewerEntry);
+    }
+
+    return reviews.map((r) => {
+      if (!r.profile_id) return r;
+      const hit = byId.get(r.profile_id);
+      if (!hit) return r;
+      const next: Review = { ...r };
+      if (!r.author_display_name?.trim() && hit.displayName?.trim()) {
+        next.author_display_name = hit.displayName.trim();
+      }
+      if (!r.author_collectible_title?.trim() && hit.collectibleTitle?.trim()) {
+        next.author_collectible_title = hit.collectibleTitle.trim();
+        next.author_collectible_rarity = hit.collectibleRarity ?? r.author_collectible_rarity ?? null;
+      }
+      return next;
+    });
+  } catch {
+    return reviews;
+  }
+}
 
 // ─── Profile (mobile-direct Supabase mutations) ──────────────────────────────
 // The web profile API routes use cookie-based session auth, which mobile cannot
