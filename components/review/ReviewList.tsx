@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { buildLoginHref } from "@/lib/auth/login";
 import { CollectibleTitlePill } from "@/components/profile/CollectibleTitlePill";
@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils/cn";
 import { toReviewQuickTagChips } from "@/lib/utils/reviewPresentation";
 import { getReviewQuickTagDescriptor, reviewQuickTagToneClassName } from "@/lib/utils/reviewSignals";
 import { ReviewReportAction } from "@/components/review/ReviewReportAction";
+import { isReviewWithinFreshDeleteWindow } from "@/lib/reviews/policy";
 import type { Review, ReviewComment } from "@/types";
 
 interface ReviewListProps {
@@ -26,6 +27,12 @@ interface ReviewLikeResponse {
 interface ReviewCommentResponse {
   success?: boolean;
   comment?: ReviewComment;
+  error?: string;
+}
+
+interface ReviewDeleteResponse {
+  success?: boolean;
+  reviewId?: string;
   error?: string;
 }
 
@@ -147,15 +154,37 @@ interface ReviewCardProps {
   isHighlighted: boolean;
   buildPublicProfileHref: (profileId: string) => string;
   onReviewChange: (reviewId: string, updater: (review: ReviewWithEngagement) => ReviewWithEngagement) => void;
+  onReviewDelete: (reviewId: string) => void;
 }
 
-function ReviewCard({ review, isAuthConfigured, viewerProfileId, isHighlighted, buildPublicProfileHref, onReviewChange }: ReviewCardProps) {
+function ReviewCard({
+  review,
+  isAuthConfigured,
+  viewerProfileId,
+  isHighlighted,
+  buildPublicProfileHref,
+  onReviewChange,
+  onReviewDelete
+}: ReviewCardProps) {
   const [isCommentsExpanded, setIsCommentsExpanded] = useState(false);
   const [isLikePending, setIsLikePending] = useState(false);
   const [isCommentPending, setIsCommentPending] = useState(false);
+  const [isDeletePending, setIsDeletePending] = useState(false);
   const [commentBody, setCommentBody] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<"idle" | "copied">("idle");
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
+  const isOwnReview = Boolean(viewerProfileId && review.profile_id === viewerProfileId);
+  const canDeleteFreshReview = isOwnReview && isReviewWithinFreshDeleteWindow(review.created_at, currentTime);
+
+  useEffect(() => {
+    if (!isOwnReview) {
+      return undefined;
+    }
+
+    const interval = window.setInterval(() => setCurrentTime(Date.now()), 30_000);
+    return () => window.clearInterval(interval);
+  }, [isOwnReview]);
 
   useEffect(() => {
     if (!isHighlighted) {
@@ -301,6 +330,39 @@ function ReviewCard({ review, isAuthConfigured, viewerProfileId, isHighlighted, 
     }
   };
 
+  const handleDelete = async () => {
+    if (!canDeleteFreshReview || isDeletePending) {
+      return;
+    }
+
+    const confirmed = window.confirm("Delete this fresh review? This cannot be undone.");
+    if (!confirmed) {
+      return;
+    }
+
+    setActionError(null);
+    setIsDeletePending(true);
+
+    try {
+      const response = await fetch(`/api/reviews/${review.id}`, {
+        method: "DELETE"
+      });
+      const result = (await response.json()) as ReviewDeleteResponse;
+
+      if (!response.ok) {
+        setActionError(result.error ?? "Could not delete this review right now.");
+        return;
+      }
+
+      onReviewDelete(review.id);
+    } catch (error) {
+      console.error("[Poopin] review delete failed", error);
+      setActionError("Could not delete this review right now.");
+    } finally {
+      setIsDeletePending(false);
+    }
+  };
+
   return (
     <article
       id={getReviewHashId(review.id)}
@@ -385,6 +447,17 @@ function ReviewCard({ review, isAuthConfigured, viewerProfileId, isHighlighted, 
           <ShareIcon />
           <span>{shareStatus === "copied" ? "Copied" : "Share"}</span>
         </button>
+
+        {canDeleteFreshReview ? (
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={isDeletePending}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-rose-50 px-3 text-xs font-semibold text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isDeletePending ? "Deleting..." : "Delete"}
+          </button>
+        ) : null}
       </div>
 
       {!isCommentsExpanded && review.comment_count > 0 && review.featured_comment ? (
@@ -491,6 +564,7 @@ function ReviewCard({ review, isAuthConfigured, viewerProfileId, isHighlighted, 
 }
 
 export function ReviewList({ reviews, isAuthConfigured, viewerProfileId }: ReviewListProps) {
+  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [reviewItems, setReviewItems] = useState<ReviewWithEngagement[]>(() => reviews.map(normalizeReview));
@@ -525,6 +599,11 @@ export function ReviewList({ reviews, isAuthConfigured, viewerProfileId }: Revie
     setReviewItems((currentReviews) => currentReviews.map((review) => (review.id === reviewId ? updater(review) : review)));
   };
 
+  const deleteReview = (reviewId: string) => {
+    setReviewItems((currentReviews) => currentReviews.filter((review) => review.id !== reviewId));
+    router.refresh();
+  };
+
   if (reviewItems.length === 0) {
     return (
       <div className="rounded-2xl bg-slate-50/80 px-4 py-5 text-sm text-slate-600 ring-1 ring-slate-200/80">
@@ -545,6 +624,7 @@ export function ReviewList({ reviews, isAuthConfigured, viewerProfileId }: Revie
           isHighlighted={highlightedReviewId === review.id}
           buildPublicProfileHref={buildPublicProfileHref}
           onReviewChange={updateReview}
+          onReviewDelete={deleteReview}
         />
       ))}
     </div>

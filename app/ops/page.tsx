@@ -85,6 +85,12 @@ interface ReportRow {
   bathrooms: BathroomReferenceRow | BathroomReferenceRow[] | null;
 }
 
+interface ReportNoteRow {
+  id: string;
+  report_id: string;
+  comment: string;
+}
+
 interface ParsedReviewReport {
   reviewId: string;
   reasonCode: string;
@@ -308,6 +314,19 @@ const renderEmptyState = (label: string) => (
   <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">{label}</p>
 );
 
+function ReportNoteBlock({ comment }: { comment?: string | null }) {
+  if (!comment) {
+    return null;
+  }
+
+  return (
+    <p className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-600">
+      <span className="font-semibold text-slate-800">Reporter note: </span>
+      {comment}
+    </p>
+  );
+}
+
 export default async function OpsPage({ searchParams }: OpsPageProps) {
   const resolvedSearchParams = await searchParams;
   const authState = toStringParam(resolvedSearchParams.auth).trim();
@@ -373,7 +392,8 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
     );
   }
 
-  const supabase = getSupabaseAdminClient() ?? getSupabaseServerClient();
+  const supabaseAdmin = getSupabaseAdminClient();
+  const supabase = supabaseAdmin ?? getSupabaseServerClient();
   if (!supabase) {
     return (
       <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
@@ -393,7 +413,8 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
     removedPhotosResponse,
     activeReviewsResponse,
     moderatedReviewsResponse,
-    reportsResponse
+    reportsResponse,
+    reportNotesResponse
   ] = await Promise.all([
     supabase
       .from("bathrooms")
@@ -450,7 +471,10 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
       .from("reports")
       .select("id, bathroom_id, reason, created_at, bathrooms(id, name, city, address, lat, lng, status)")
       .order("created_at", { ascending: false })
-      .limit(260)
+      .limit(260),
+    supabaseAdmin
+      ? supabaseAdmin.from("report_notes").select("id, report_id, comment").limit(260)
+      : Promise.resolve({ data: [], error: null })
   ]);
 
   const queueErrors = [
@@ -462,7 +486,8 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
     removedPhotosResponse.error ? `Removed photo queue: ${removedPhotosResponse.error.message}` : null,
     activeReviewsResponse.error ? `Active review queue: ${activeReviewsResponse.error.message}` : null,
     moderatedReviewsResponse.error ? `Removed review queue: ${moderatedReviewsResponse.error.message}` : null,
-    reportsResponse.error ? `Reports queue: ${reportsResponse.error.message}` : null
+    reportsResponse.error ? `Reports queue: ${reportsResponse.error.message}` : null,
+    reportNotesResponse.error ? `Report notes: ${reportNotesResponse.error.message}` : null
   ].filter((value): value is string => Boolean(value));
 
   const pendingBathrooms = (pendingBathroomsResponse.data ?? []) as BathroomRow[];
@@ -477,6 +502,13 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
   const moderatedReviews = (moderatedReviewsResponse.data ?? []) as ReviewRow[];
 
   const reportRows = (reportsResponse.data ?? []) as ReportRow[];
+  const reportNotes = (reportNotesResponse.data ?? []) as ReportNoteRow[];
+  const reportNoteByReportId = new Map<string, string>();
+  for (const note of reportNotes) {
+    if (!reportNoteByReportId.has(note.report_id)) {
+      reportNoteByReportId.set(note.report_id, note.comment);
+    }
+  }
 
   const allSubmissionBathrooms = [...pendingBathrooms, ...activeBathrooms, ...removedBathrooms];
   const bathroomDuplicateClues = new Map(
@@ -496,6 +528,7 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
         ...parsed,
         storedReason: row.reason,
         isReviewed: parsedReason.isReviewed,
+        note: reportNoteByReportId.get(row.id) ?? null,
         bathroom: normalizeBathroomReference(row.bathrooms)
       };
     })
@@ -514,6 +547,7 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
         ...parsed,
         storedReason: row.reason,
         isReviewed: parsedReason.isReviewed,
+        note: reportNoteByReportId.get(row.id) ?? null,
         bathroom: normalizeBathroomReference(row.bathrooms)
       };
     })
@@ -1072,6 +1106,7 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                       </div>
 
                       <p className="mt-2 text-xs text-slate-500">Warning opened {formatDateTime(report.created_at)}</p>
+                      <ReportNoteBlock comment={report.note} />
 
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <Link
@@ -1131,6 +1166,7 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                       </div>
 
                       <p className="mt-2 text-xs text-slate-500">Decision recorded {formatDateTime(report.created_at)}</p>
+                      <ReportNoteBlock comment={report.note} />
 
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <Link
@@ -1206,6 +1242,7 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                       <p className="mt-1 text-xs text-slate-600">
                         {issueReasonLabelByCode.get(report.issueCode) ?? report.issueCode} • {formatDateTime(report.created_at)}
                       </p>
+                      <ReportNoteBlock comment={report.note} />
 
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <Link

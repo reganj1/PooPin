@@ -18,7 +18,8 @@ export const restroomIssueOptions = [
   { value: "wrong_location", label: "Wrong location" },
   { value: "closed_restroom", label: "Closed restroom" },
   { value: "duplicate_listing", label: "Duplicate listing" },
-  { value: "not_a_restroom", label: "Not a restroom" }
+  { value: "not_a_restroom", label: "Not a restroom" },
+  { value: "other", label: "Other" }
 ] as const;
 
 export type RestroomIssueCode = (typeof restroomIssueOptions)[number]["value"];
@@ -126,4 +127,3 @@ export const buildReviewReportReasonPrefix = (reviewId: string, browserId: strin
 
 export const buildRestroomIssueReason = (issueCode: RestroomIssueCode, browserId: string) =>
   `${RESTROOM_ISSUE_REASON_PREFIX}${issueCode}:${browserId}`;
-

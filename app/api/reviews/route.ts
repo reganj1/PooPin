@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerAuthClient, getAuthenticatedProfile } from "@/lib/auth/server";
 import { awardPointsForContribution } from "@/lib/points/pointEvents";
-import { insertReview, toAddReviewErrorMessage } from "@/lib/supabase/reviews";
+import { getReviewDuplicateCutoffIso } from "@/lib/reviews/policy";
+import { findRecentActiveReviewForProfile, insertReview, toAddReviewErrorMessage } from "@/lib/supabase/reviews";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { reviewCreateSchema } from "@/lib/validations/review";
 
@@ -40,6 +41,24 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const recentReview = await findRecentActiveReviewForProfile(
+      supabase,
+      parsed.data.bathroom_id,
+      profile.id,
+      getReviewDuplicateCutoffIso()
+    );
+
+    if (recentReview) {
+      return NextResponse.json(
+        {
+          error: "You already reviewed this restroom recently. Delete your recent review if it was a mistake, or review again after another visit.",
+          code: "recent_review_exists",
+          recentReviewId: recentReview.reviewId
+        },
+        { status: 409 }
+      );
+    }
+
     const result = await insertReview(supabase, parsed.data, { profileId: profile.id });
     if (supabaseAdmin) {
       try {

@@ -24,6 +24,11 @@ export interface InsertReviewResult {
   reviewId: string;
 }
 
+export interface RecentActiveReviewResult {
+  reviewId: string;
+  createdAt: string;
+}
+
 interface InsertReviewOptions {
   profileId?: string | null;
 }
@@ -61,6 +66,37 @@ export const insertReview = async (
   }
 
   return { reviewId };
+};
+
+export const findRecentActiveReviewForProfile = async (
+  supabaseClient: SupabaseClient,
+  bathroomId: string,
+  profileId: string,
+  cutoffIso: string
+): Promise<RecentActiveReviewResult | null> => {
+  const { data, error } = await supabaseClient
+    .from("reviews")
+    .select("id, created_at")
+    .eq("bathroom_id", bathroomId)
+    .eq("profile_id", profileId)
+    .eq("status", "active")
+    .gte("created_at", cutoffIso)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data?.id || !data.created_at) {
+    return null;
+  }
+
+  return {
+    reviewId: data.id,
+    createdAt: data.created_at
+  };
 };
 
 export const toAddReviewErrorMessage = (error: unknown): string => {
