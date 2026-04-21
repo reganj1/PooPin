@@ -148,18 +148,6 @@ export function PhotoUploadForm({ bathroomId, defaultOpen = false, viewerDisplay
         return;
       }
 
-      console.groupCollapsed("[Poopin] restroom photo upload payload");
-      console.log("bathroomId:", bathroomId);
-      console.log("file:", {
-        name: safeFileName,
-        type: selectedFile.type,
-        size: selectedFile.size,
-        dimensions
-      });
-      console.log("moderation:", moderation);
-      console.log("insert result:", result);
-      console.groupEnd();
-
       captureAnalyticsEvent("photo_uploaded", {
         bathroom_id: bathroomId,
         moderation_state: "pending",

@@ -505,11 +505,6 @@ export function AddRestroomForm({ viewerDisplayName }: AddRestroomFormProps) {
 
       const payload = (await response.json()) as SubmitRestroomResponse;
 
-      console.groupCollapsed("[Poopin] restroom submission");
-      console.log("Submitted payload:", values);
-      console.log("API response:", payload);
-      console.groupEnd();
-
       if (!response.ok) {
         setServerFieldErrors(toFirstFieldErrors(payload.fieldErrors));
         setSubmitError(payload.error ?? "Could not submit this restroom right now. Please try again.");
