@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { AuthStatusNav } from "@/components/auth/AuthStatusNav";
+import { AppStoreComingSoonBadge } from "@/components/layout/AppStoreComingSoonBadge";
 import { cn } from "@/lib/utils/cn";
 
 interface SiteHeaderProps {
@@ -94,6 +95,11 @@ export function SiteHeader({ isAuthConfigured, viewerDisplayName }: SiteHeaderPr
                   </Link>
                 </div>
 
+                <AppStoreComingSoonBadge
+                  compact
+                  className="w-full justify-center rounded-xl border-slate-200/80 bg-slate-50/90 px-3 py-1.5 shadow-none ring-0"
+                />
+
                 <nav className="grid grid-cols-3 gap-2">
                   <Link
                     href="/leaderboard"
@@ -112,15 +118,18 @@ export function SiteHeader({ isAuthConfigured, viewerDisplayName }: SiteHeaderPr
               </div>
 
               <div className="hidden items-center justify-between gap-4 px-3.5 py-2.5 lg:flex">
-                <Link href="/" className="inline-flex min-w-0 items-center gap-2.5 text-slate-900">
-                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-[10px] font-bold tracking-[0.16em] text-white">
-                    WC
-                  </span>
-                  <div className="min-w-0">
-                    <span className="block truncate text-lg font-semibold tracking-tight">Poopin</span>
-                    <span className="block text-[11px] font-medium text-slate-500">California beta</span>
-                  </div>
-                </Link>
+                <div className="flex min-w-0 items-center gap-3">
+                  <Link href="/" className="inline-flex min-w-0 items-center gap-2.5 text-slate-900">
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-[10px] font-bold tracking-[0.16em] text-white">
+                      WC
+                    </span>
+                    <div className="min-w-0">
+                      <span className="block truncate text-lg font-semibold tracking-tight">Poopin</span>
+                      <span className="block text-[11px] font-medium text-slate-500">California beta</span>
+                    </div>
+                  </Link>
+                  <AppStoreComingSoonBadge className="shrink-0" />
+                </div>
 
                 <nav className="flex flex-wrap items-center justify-end gap-0.5">
                   <Link
