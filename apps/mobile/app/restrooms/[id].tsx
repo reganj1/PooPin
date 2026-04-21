@@ -28,6 +28,7 @@ import type { RestroomPhotoItem } from "../../src/lib/api";
 import { mobileTheme } from "../../src/ui/theme";
 import { useSession } from "../../src/providers/session-provider";
 import { ReviewFormModal } from "../../src/features/restroom-detail/ReviewFormModal";
+import { ReviewCard } from "../../src/features/restroom-detail/ReviewCard";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -111,46 +112,6 @@ function RatingPill({ label, value }: { label: string; value: number }) {
     <View style={styles.ratingPill}>
       <Text style={styles.ratingPillLabel}>{label}</Text>
       <Text style={styles.ratingPillValue}>{value.toFixed(1)}</Text>
-    </View>
-  );
-}
-
-function ReviewCard({ review }: { review: Review }) {
-  const tags = (review.quick_tags ?? []) as ReviewQuickTag[];
-  return (
-    <View style={styles.reviewCard}>
-      <View style={styles.reviewHeader}>
-        <View style={styles.reviewHeaderLeft}>
-          <Text style={styles.reviewAuthor}>{review.author_display_name ?? "Anonymous"}</Text>
-          <Text style={styles.reviewDate}>Visited {formatDate(review.visit_time)}</Text>
-        </View>
-        <View style={styles.reviewRatingBadge}>
-          <Text style={styles.reviewRatingText}>Overall {review.overall_rating.toFixed(1)}</Text>
-        </View>
-      </View>
-
-      {tags.length > 0 && (
-        <View style={styles.tagRow}>
-          {tags.map((tag) => {
-            const info = QUICK_TAG_INFO[tag];
-            if (!info) return null;
-            return (
-              <View key={tag} style={[styles.signalChip, info.positive ? styles.signalChipPositive : styles.signalChipNegative]}>
-                <Text style={styles.signalIcon}>{info.icon}</Text>
-                <Text style={[styles.signalChipText, info.positive ? styles.signalChipTextPositive : styles.signalChipTextNegative]}>
-                  {info.label}
-                </Text>
-              </View>
-            );
-          })}
-        </View>
-      )}
-
-      {review.review_text ? (
-        <Text style={styles.reviewText}>"{review.review_text}"</Text>
-      ) : (
-        <Text style={styles.reviewTextEmpty}>No additional notes shared.</Text>
-      )}
     </View>
   );
 }
@@ -291,7 +252,7 @@ export default function RestroomDetailScreen() {
 
       const [restroomResult, reviewsResult, photosResult] = await Promise.allSettled([
         getRestroom(restroomId),
-        getRestroomReviews(restroomId),
+        getRestroomReviews(restroomId, user?.id ?? null),
         getRestroomPhotoUrls(restroomId)
       ]);
 
@@ -322,9 +283,16 @@ export default function RestroomDetailScreen() {
     // Refresh reviews after a short delay to let Supabase propagate
     setTimeout(() => {
       if (!restroomId) return;
-      void getRestroomReviews(restroomId).then((updated) => setReviews(updated)).catch(() => null);
+      void getRestroomReviews(restroomId, user?.id ?? null).then((updated) => setReviews(updated)).catch(() => null);
     }, 600);
-  }, [restroomId]);
+  }, [restroomId, user?.id]);
+
+  const handleRequireSignIn = useCallback(() => {
+    Alert.alert("Sign in required", "Please sign in to interact with reviews.", [
+      { text: "Cancel" },
+      { text: "Sign in", onPress: () => router.push("/sign-in") }
+    ]);
+  }, [router]);
 
   const handleAddPhoto = useCallback(async () => {
     if (!user) {
@@ -553,7 +521,14 @@ export default function RestroomDetailScreen() {
               ) : (
                 <View style={styles.reviewList}>
                   {reviews.map((review) => (
-                    <ReviewCard key={review.id} review={review} />
+                    <ReviewCard
+                      key={review.id}
+                      review={review}
+                      viewerProfileId={user?.id ?? null}
+                      onRequireSignIn={handleRequireSignIn}
+                      restroomName={restroom?.name ?? ""}
+                      restroomCity={restroom?.city ?? ""}
+                    />
                   ))}
                 </View>
               )}
@@ -573,8 +548,7 @@ const styles = StyleSheet.create({
     backgroundColor: mobileTheme.colors.pageBackground
   },
   scrollContent: {
-    paddingBottom: 52,
-    paddingTop: 16
+    paddingBottom: 52
   },
   stateCard: {
     alignItems: "center",
@@ -887,62 +861,6 @@ const styles = StyleSheet.create({
   reviewList: {
     gap: 12
   },
-  reviewCard: {
-    backgroundColor: mobileTheme.colors.pageBackground,
-    borderColor: mobileTheme.colors.borderSubtle,
-    borderRadius: mobileTheme.radii.md,
-    borderWidth: 1,
-    gap: 10,
-    padding: 16
-  },
-  reviewHeader: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 8
-  },
-  reviewHeaderLeft: {
-    flex: 1,
-    gap: 2
-  },
-  reviewAuthor: {
-    color: mobileTheme.colors.textPrimary,
-    fontSize: 14,
-    fontWeight: "700"
-  },
-  reviewDate: {
-    color: mobileTheme.colors.textFaint,
-    fontSize: 12
-  },
-  reviewRatingBadge: {
-    backgroundColor: mobileTheme.colors.surfaceBrandTint,
-    borderColor: mobileTheme.colors.infoBorder,
-    borderRadius: mobileTheme.radii.pill,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 5
-  },
-  reviewRatingText: {
-    color: mobileTheme.colors.brandStrong,
-    fontSize: 12,
-    fontWeight: "700"
-  },
-  tagRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6
-  },
-  reviewText: {
-    color: mobileTheme.colors.textSecondary,
-    fontSize: 14,
-    fontStyle: "italic",
-    lineHeight: 21
-  },
-  reviewTextEmpty: {
-    color: mobileTheme.colors.textFaint,
-    fontSize: 13,
-    fontStyle: "italic"
-  }
 });
 
 const lightboxStyles = StyleSheet.create({

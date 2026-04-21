@@ -7,7 +7,7 @@ import type {
   RestroomDetailResponse,
   SendEmailOtpResponse
 } from "@poopin/api-client";
-import type { NearbyBathroom, Review, ReviewQuickTag } from "@poopin/domain";
+import type { NearbyBathroom, Review, ReviewComment, ReviewQuickTag } from "@poopin/domain";
 import { mobileEnv } from "./env";
 import { supabase } from "./supabase";
 
@@ -240,19 +240,138 @@ export const getRestroom = async (id: string): Promise<RestroomDetailResponse> =
   return response;
 };
 
-export const getRestroomReviews = async (bathroomId: string): Promise<Review[]> => {
-  const { data, error } = await supabase
+export const getRestroomReviews = async (bathroomId: string, viewerProfileId?: string | null): Promise<Review[]> => {
+  // Step 1: fetch review rows, attempting a profile join for display names.
+  // The join relies on a FK from reviews.profile_id → profiles.id.
+  // If the join fails (wrong constraint name or RLS), fall back to select("*").
+  let baseData: Record<string, unknown>[] = [];
+  let joinSucceeded = false;
+
+  const joinResult = await supabase
     .from("reviews")
-    .select("*")
+    .select("*, profiles!reviews_profile_id_fkey(display_name)")
     .eq("bathroom_id", bathroomId)
     .eq("status", "active")
     .order("created_at", { ascending: false });
 
-  if (error) {
-    throw new Error(error.message);
+  if (!joinResult.error) {
+    baseData = (joinResult.data ?? []) as Record<string, unknown>[];
+    joinSucceeded = true;
+  } else {
+    // FK join not available — fall back to plain select
+    const fallback = await supabase
+      .from("reviews")
+      .select("*")
+      .eq("bathroom_id", bathroomId)
+      .eq("status", "active")
+      .order("created_at", { ascending: false });
+    if (fallback.error) throw new Error(fallback.error.message);
+    baseData = (fallback.data ?? []) as Record<string, unknown>[];
   }
 
-  return (data ?? []) as Review[];
+  // Flatten joined profile display_name onto the review row
+  const reviews: Review[] = baseData.map((row) => {
+    const profileJoin = joinSucceeded ? (row.profiles as { display_name?: string | null } | null) : null;
+    return {
+      ...(row as unknown as Review),
+      author_display_name: (row.author_display_name as string | null | undefined) ?? profileJoin?.display_name ?? null
+    };
+  });
+
+  if (reviews.length === 0) return reviews;
+
+  // Step 2: aggregate engagement counts — bounded to this restroom's review IDs.
+  // Degrades gracefully: if these queries fail, reviews still render with counts at 0.
+  const reviewIds = reviews.map((r) => r.id);
+
+  try {
+    const parallelQueries: [
+      Promise<{ data: { review_id: string }[] | null; error: unknown }>,
+      Promise<{ data: { review_id: string }[] | null; error: unknown }>,
+      Promise<{ data: { review_id: string }[] | null; error: unknown } | null>
+    ] = [
+      supabase.from("review_likes").select("review_id").in("review_id", reviewIds) as Promise<{
+        data: { review_id: string }[] | null;
+        error: unknown;
+      }>,
+      supabase.from("review_comments").select("review_id").in("review_id", reviewIds).eq("status", "active") as Promise<{
+        data: { review_id: string }[] | null;
+        error: unknown;
+      }>,
+      viewerProfileId
+        ? (supabase
+            .from("review_likes")
+            .select("review_id")
+            .in("review_id", reviewIds)
+            .eq("profile_id", viewerProfileId) as Promise<{ data: { review_id: string }[] | null; error: unknown }>)
+        : Promise.resolve(null)
+    ];
+
+    const [likesResult, commentsResult, viewerLikesResult] = await Promise.all(parallelQueries);
+
+    // Build like_count map
+    const likeCounts: Record<string, number> = {};
+    for (const row of likesResult.data ?? []) {
+      likeCounts[row.review_id] = (likeCounts[row.review_id] ?? 0) + 1;
+    }
+
+    // Build comment_count map
+    const commentCounts: Record<string, number> = {};
+    for (const row of commentsResult.data ?? []) {
+      commentCounts[row.review_id] = (commentCounts[row.review_id] ?? 0) + 1;
+    }
+
+    // Build viewer_has_liked set
+    const viewerLikedIds = new Set<string>((viewerLikesResult?.data ?? []).map((r) => r.review_id));
+
+    return reviews.map((r) => ({
+      ...r,
+      like_count: likeCounts[r.id] ?? 0,
+      comment_count: commentCounts[r.id] ?? 0,
+      viewer_has_liked: viewerLikedIds.has(r.id)
+    }));
+  } catch {
+    // Engagement fetch failed — return reviews with zero counts, still usable
+    return reviews.map((r) => ({ ...r, like_count: 0, comment_count: 0, viewer_has_liked: false }));
+  }
+};
+
+export const getReviewComments = async (reviewId: string): Promise<ReviewComment[]> => {
+  const { data, error } = await supabase
+    .from("review_comments")
+    .select("*")
+    .eq("review_id", reviewId)
+    .eq("status", "active")
+    .order("created_at", { ascending: true });
+
+  if (error) throw new Error(error.message);
+  return (data ?? []) as ReviewComment[];
+};
+
+export const likeRestroomReview = async (reviewId: string, profileId: string): Promise<void> => {
+  const { error } = await supabase.from("review_likes").insert({ review_id: reviewId, profile_id: profileId });
+  if (error && !error.message.toLowerCase().includes("duplicate") && !error.message.toLowerCase().includes("unique")) {
+    throw new Error(error.message);
+  }
+};
+
+export const unlikeRestroomReview = async (reviewId: string, profileId: string): Promise<void> => {
+  const { error } = await supabase.from("review_likes").delete().eq("review_id", reviewId).eq("profile_id", profileId);
+  if (error) throw new Error(error.message);
+};
+
+export const addReviewComment = async (reviewId: string, profileId: string, body: string): Promise<ReviewComment> => {
+  const id = generateUUID();
+  const { data, error } = await supabase
+    .from("review_comments")
+    .insert({ id, review_id: reviewId, profile_id: profileId, body: body.trim(), status: "active" })
+    .select("id, review_id, profile_id, body, created_at, updated_at, status")
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Comment insert returned no data.");
+
+  return { ...(data as ReviewComment), author_display_name: null };
 };
 
 export const getRestroomPhotoUrls = async (bathroomId: string): Promise<RestroomPhotoItem[]> => {
@@ -376,6 +495,9 @@ export interface BathroomSearchResult {
   address: string;
   city: string;
   state: string;
+  lat: number;
+  lng: number;
+  placeType: string;
 }
 
 export const searchBathrooms = async (query: string): Promise<BathroomSearchResult[]> => {
@@ -384,13 +506,47 @@ export const searchBathrooms = async (query: string): Promise<BathroomSearchResu
   try {
     const { data } = await supabase
       .from("bathrooms")
-      .select("id, name, address, city, state")
+      .select("id, name, address, city, state, lat, lng, place_type")
       .or(`name.ilike.%${trimmed}%,address.ilike.%${trimmed}%`)
       .eq("status", "active")
       .limit(15);
-    return (data ?? []) as BathroomSearchResult[];
+
+    type RawRow = { id: string; name: string; address: string; city: string; state: string; lat: number; lng: number; place_type: string };
+    return ((data ?? []) as RawRow[]).map((r) => ({
+      id: r.id,
+      name: r.name,
+      address: r.address ?? "",
+      city: r.city ?? "",
+      state: r.state ?? "",
+      lat: r.lat ?? 0,
+      lng: r.lng ?? 0,
+      placeType: r.place_type ?? "other"
+    }));
   } catch {
     return [];
+  }
+};
+
+// ─── Reverse geocode (via web /api/geocode/reverse proxy) ─────────────────────
+
+export interface ReverseGeocodeResult {
+  address: string;
+  city: string;
+  state: string;
+}
+
+export const reverseGeocode = async (
+  lat: number,
+  lng: number
+): Promise<ReverseGeocodeResult | null> => {
+  try {
+    const data = await fetchJson<{ success: boolean; address: string; city: string; state: string }>(
+      createUrl("/api/geocode/reverse", { lat, lng })
+    );
+    if (!data.success) return null;
+    return { address: data.address ?? "", city: data.city ?? "", state: data.state ?? "" };
+  } catch {
+    return null;
   }
 };
 
