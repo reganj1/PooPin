@@ -133,11 +133,6 @@ export function ReviewForm({ bathroomId, viewerDisplayName }: ReviewFormProps) {
         return;
       }
 
-      console.groupCollapsed("[Poopin] review payload");
-      console.log("Form values:", values);
-      console.log("Payload submitted:", payload);
-      console.log("API review response:", result);
-      console.groupEnd();
 
       captureAnalyticsEvent("review_submitted", {
         bathroom_id: bathroomId,
