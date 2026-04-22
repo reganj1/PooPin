@@ -89,9 +89,10 @@ export default async function PublicProfilePage({ params, searchParams }: Public
   const reviewsResponse = supabase
     ? await supabase
         .from("reviews")
-        .select("id, bathroom_id, overall_rating, review_text, quick_tags, created_at, bathrooms(name, city)")
+        .select("id, bathroom_id, overall_rating, review_text, quick_tags, created_at, bathrooms!inner(name, city, status)")
         .eq("profile_id", id)
         .eq("status", "active")
+        .eq("bathrooms.status", "active")
         .order("created_at", { ascending: false })
         .limit(4)
     : { data: null, error: null };

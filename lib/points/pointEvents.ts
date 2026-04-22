@@ -128,6 +128,36 @@ const toPointEventSummary = (row: PointEventRow): PointEventSummary => ({
   createdAt: row.created_at
 });
 
+const filterPointEventsForActiveListingContributions = async (supabase: SupabaseClient, rows: PointEventRow[]) => {
+  const reviewEventIds = [
+    ...new Set(
+      rows
+        .filter((row) => row.event_type === "review_created" && typeof row.entity_id === "string")
+        .map((row) => row.entity_id)
+    )
+  ];
+
+  if (reviewEventIds.length === 0) {
+    return rows;
+  }
+
+  const { data, error } = await supabase
+    .from("reviews")
+    .select("id, bathrooms!inner(id)")
+    .in("id", reviewEventIds)
+    .eq("status", "active")
+    .eq("bathrooms.status", "active");
+
+  if (error) {
+    console.warn("[Poopin] Could not filter review point events by active listings.", error.message);
+    return rows.filter((row) => row.event_type !== "review_created");
+  }
+
+  const activeReviewIds = new Set(((data ?? []) as Array<{ id?: string | null }>).map((row) => row.id).filter((id): id is string => Boolean(id)));
+
+  return rows.filter((row) => row.event_type !== "review_created" || activeReviewIds.has(row.entity_id));
+};
+
 const toLeaderboardEntry = (row: LeaderboardStatsRow): LeaderboardEntry => {
   const reviewCount = toNumber(row.review_count);
   const photoCount = toNumber(row.photo_count);
@@ -235,7 +265,11 @@ export const getProfilePointsSummary = async (profileId: string, recentLimit = 5
           .eq("profile_id", normalizedProfileId)
           .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
-    supabase.from("point_events").select("points_delta").eq("profile_id", normalizedProfileId).eq("status", "awarded"),
+    supabase
+      .from("point_events")
+      .select("id, profile_id, event_type, entity_type, entity_id, points_delta, status, created_at")
+      .eq("profile_id", normalizedProfileId)
+      .eq("status", "awarded"),
     supabase
       .from("point_events")
       .select("id, profile_id, event_type, entity_type, entity_id, points_delta, status, created_at")
@@ -255,14 +289,16 @@ export const getProfilePointsSummary = async (profileId: string, recentLimit = 5
 
   const leaderboardTotal = toNumber((leaderboardSummaryResponse.data as { total_points?: number | string | null } | null)?.total_points);
   const hasLeaderboardSummary = Boolean(leaderboardSummaryResponse.data);
-  const eventTotal = ((totalsResponse.data ?? []) as Array<{ points_delta: number | string | null }>).reduce(
+  const totalPointEvents = await filterPointEventsForActiveListingContributions(supabase, (totalsResponse.data ?? []) as PointEventRow[]);
+  const recentPointEvents = await filterPointEventsForActiveListingContributions(supabase, (recentResponse.data ?? []) as PointEventRow[]);
+  const eventTotal = totalPointEvents.reduce(
     (sum, row) => sum + toNumber(row.points_delta),
     0
   );
 
   return {
     totalPoints: hasLeaderboardSummary ? leaderboardTotal : eventTotal,
-    recentEvents: ((recentResponse.data ?? []) as PointEventRow[]).map(toPointEventSummary)
+    recentEvents: recentPointEvents.map(toPointEventSummary)
   };
 };
 

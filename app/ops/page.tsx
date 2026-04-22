@@ -1,13 +1,14 @@
 import Link from "next/link";
 import {
+  disableReportedListingAction,
   loginOpsAction,
   logoutOpsAction,
   markReportReviewedAction,
-  moderateDuplicateWarningAction,
   moderateBathroomAction,
   moderatePhotoAction,
   moderateReviewAction,
-  removeDuplicateListingAction
+  resolveListingReportsForBathroomAction,
+  restoreReportedListingAction
 } from "@/app/ops/actions";
 import { getSupabaseAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase/admin";
 import { getOpsDashboardPassword, isOpsSessionAuthenticated } from "@/lib/ops/auth";
@@ -23,9 +24,11 @@ import { BathroomSource, ModerationStatus } from "@/types";
 export const dynamic = "force-dynamic";
 
 const REVIEWED_REPORT_PREFIX = "reviewed:v1:";
-const DUPLICATE_ISSUE_CODE = "duplicate_listing";
 const MAX_QUEUE_ITEMS = 120;
 const COMMUNITY_SOURCES: BathroomSource[] = ["user", "other"];
+const OPS_TABS = ["reports", "history", "restrooms", "reviews", "photos"] as const;
+
+type OpsTab = (typeof OPS_TABS)[number];
 
 interface OpsPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -113,6 +116,15 @@ interface ReviewLookupRow {
   review_text: string | null;
 }
 
+interface ListingReportCase {
+  bathroomId: string;
+  bathroom: BathroomReferenceRow | null;
+  reports: Array<ReportRow & ParsedRestroomIssue & { storedReason: string; isReviewed: boolean; note: string | null; bathroom: BathroomReferenceRow | null }>;
+  issueCodes: string[];
+  notes: string[];
+  latestCreatedAt: string;
+}
+
 const toStringParam = (value: string | string[] | undefined) => {
   if (Array.isArray(value)) {
     return value[0] ?? "";
@@ -120,6 +132,8 @@ const toStringParam = (value: string | string[] | undefined) => {
 
   return value ?? "";
 };
+
+const isOpsTab = (value: string): value is OpsTab => OPS_TABS.includes(value as OpsTab);
 
 const normalizeBathroomReference = (value: BathroomReferenceRow | BathroomReferenceRow[] | null) => {
   if (!value) {
@@ -327,12 +341,147 @@ function ReportNoteBlock({ comment }: { comment?: string | null }) {
   );
 }
 
+function OpsTabNav({
+  activeTab,
+  tabs
+}: {
+  activeTab: OpsTab;
+  tabs: Array<{ id: OpsTab; label: string; count: number }>;
+}) {
+  return (
+    <nav className="mb-5 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1 shadow-sm" aria-label="Ops dashboard sections">
+      <div className="flex min-w-max gap-1">
+        {tabs.map((tab) => {
+          const isActive = tab.id === activeTab;
+          return (
+            <Link
+              key={tab.id}
+              href={`/ops?tab=${tab.id}`}
+              className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition ${
+                isActive ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+              }`}
+            >
+              {tab.label}
+              <span className={`rounded-full px-2 py-0.5 text-[11px] ${isActive ? "bg-white/15 text-white" : "bg-slate-100 text-slate-600"}`}>
+                {tab.count}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+function ListingReportCaseCard({
+  reportCase,
+  canModerate,
+  mode = "queue"
+}: {
+  reportCase: ListingReportCase;
+  canModerate: boolean;
+  mode?: "queue" | "history";
+}) {
+  const isDisabled = reportCase.bathroom?.status === "removed";
+  const reportStateLabel = mode === "history" ? "resolved report" : "open report";
+  const shouldShowResolveAction = mode === "queue";
+  const shouldShowDisableAction = mode === "queue" && !isDisabled;
+  const shouldShowRestoreAction = isDisabled;
+
+  return (
+    <article className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-semibold text-slate-900">{reportCase.bathroom?.name ?? "Unknown restroom"}</p>
+          <p className="text-xs text-slate-600">
+            {reportCase.bathroom?.address ?? "Address unavailable"} • {reportCase.bathroom?.city ?? "Unknown city"}
+          </p>
+        </div>
+        {reportCase.bathroom?.status ? <StatusBadge status={reportCase.bathroom.status} /> : null}
+      </div>
+
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {reportCase.issueCodes.map((issueCode) => (
+          <span key={issueCode} className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+            {issueReasonLabelByCode.get(issueCode) ?? issueCode}
+          </span>
+        ))}
+      </div>
+
+      <p className="mt-2 text-xs text-slate-500">
+        {reportCase.reports.length} {reportStateLabel}
+        {reportCase.reports.length === 1 ? "" : "s"} • Latest report {formatDateTime(reportCase.latestCreatedAt)}
+      </p>
+
+      {reportCase.notes.length > 0 ? (
+        <div className="mt-2 space-y-2">
+          {reportCase.notes.map((note, index) => (
+            <ReportNoteBlock key={`${reportCase.bathroomId}-note-${index}`} comment={note} />
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Link
+          href={`/restroom/${reportCase.bathroomId}`}
+          className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+        >
+          Open listing
+        </Link>
+
+        {canModerate ? (
+          <>
+            {shouldShowResolveAction ? (
+              <form action={resolveListingReportsForBathroomAction}>
+                <input type="hidden" name="bathroom_id" value={reportCase.bathroomId} />
+                <button
+                  type="submit"
+                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  Resolve reports
+                </button>
+              </form>
+            ) : null}
+
+            {shouldShowRestoreAction ? (
+              <form action={restoreReportedListingAction}>
+                <input type="hidden" name="bathroom_id" value={reportCase.bathroomId} />
+                {mode === "history" ? <input type="hidden" name="return_tab" value="history" /> : null}
+                <button
+                  type="submit"
+                  className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                >
+                  Restore listing
+                </button>
+              </form>
+            ) : null}
+
+            {shouldShowDisableAction ? (
+              <form action={disableReportedListingAction}>
+                <input type="hidden" name="bathroom_id" value={reportCase.bathroomId} />
+                <button
+                  type="submit"
+                  className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                >
+                  Disable listing
+                </button>
+              </form>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
 export default async function OpsPage({ searchParams }: OpsPageProps) {
   const resolvedSearchParams = await searchParams;
   const authState = toStringParam(resolvedSearchParams.auth).trim();
   const opsAction = toStringParam(resolvedSearchParams.ops_action).trim();
   const opsResult = toStringParam(resolvedSearchParams.ops_result).trim();
   const opsMessage = toStringParam(resolvedSearchParams.ops_message).trim();
+  const requestedTab = toStringParam(resolvedSearchParams.tab).trim();
+  const activeTab: OpsTab = isOpsTab(requestedTab) ? requestedTab : "reports";
 
   const configuredPassword = getOpsDashboardPassword();
   const hasOpsPasswordConfigured = configuredPassword.length > 0;
@@ -553,10 +702,42 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
     })
     .filter((row): row is NonNullable<typeof row> => row !== null);
 
-  const pendingDuplicateReports = listingReports.filter((report) => report.issueCode === DUPLICATE_ISSUE_CODE && !report.isReviewed);
-  const reviewedDuplicateReports = listingReports.filter((report) => report.issueCode === DUPLICATE_ISSUE_CODE && report.isReviewed);
-  const openListingReports = listingReports.filter((report) => report.issueCode !== DUPLICATE_ISSUE_CODE && !report.isReviewed);
+  const openListingReports = listingReports.filter((report) => !report.isReviewed);
   const openReviewReports = reviewReports.filter((report) => !report.isReviewed);
+
+  const buildListingReportCases = (reportsToGroup: typeof listingReports) =>
+    Array.from(
+      reportsToGroup
+      .reduce((casesByBathroomId, report) => {
+        const currentReports = casesByBathroomId.get(report.bathroom_id) ?? [];
+        currentReports.push(report);
+        casesByBathroomId.set(report.bathroom_id, currentReports);
+        return casesByBathroomId;
+      }, new Map<string, typeof reportsToGroup>())
+      .entries()
+  )
+    .map(([bathroomId, reports]) => {
+      const sortedReports = [...reports].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime());
+      const latestReport = sortedReports[0];
+      return {
+        bathroomId,
+        bathroom: latestReport?.bathroom ?? null,
+        reports: sortedReports,
+        issueCodes: [...new Set(sortedReports.map((report) => report.issueCode))],
+        notes: sortedReports.map((report) => report.note).filter((note): note is string => Boolean(note?.trim())),
+        latestCreatedAt: latestReport?.created_at ?? new Date(0).toISOString()
+      };
+    })
+    .sort((left, right) => new Date(right.latestCreatedAt).getTime() - new Date(left.latestCreatedAt).getTime()) satisfies ListingReportCase[];
+
+  const listingReportCases = buildListingReportCases(openListingReports);
+  const reviewedListingReports = listingReports.filter((report) => report.isReviewed);
+  const disabledListingHistoryCases = buildListingReportCases(
+    reviewedListingReports.filter((report) => report.bathroom?.status === "removed")
+  );
+  const resolvedListingHistoryCases = buildListingReportCases(
+    reviewedListingReports.filter((report) => report.bathroom?.status !== "removed")
+  );
 
   const reportReviewIds = [...new Set(openReviewReports.map((report) => report.reviewId))];
   const reviewLookupById = new Map<string, ReviewLookupRow>();
@@ -581,6 +762,13 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
 
   const canModerate = isSupabaseAdminConfigured;
   const showActionResult = opsResult === "success" || opsResult === "error";
+  const tabItems = [
+    { id: "reports", label: "Reports", count: listingReportCases.length + openReviewReports.length },
+    { id: "history", label: "History", count: disabledListingHistoryCases.length + resolvedListingHistoryCases.length },
+    { id: "restrooms", label: "Restrooms", count: pendingBathrooms.length + activeBathrooms.length + removedBathrooms.length },
+    { id: "reviews", label: "Reviews", count: activeReviews.length + moderatedReviews.length },
+    { id: "photos", label: "Photos", count: pendingPhotos.length + activePhotos.length + removedPhotos.length }
+  ] satisfies Array<{ id: OpsTab; label: string; count: number }>;
 
   return (
     <main className="mx-auto w-full max-w-[1380px] px-4 py-6 sm:px-6 lg:py-8">
@@ -590,7 +778,7 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-600">Internal Ops</p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">Beta moderation dashboard</h1>
             <p className="mt-1 text-sm text-slate-600">
-              Review pending intake, audit approved content, and remove low-quality data quickly.
+              Review reports, disable bad listings, and audit community content quickly.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -601,7 +789,7 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
               {pendingPhotos.length} pending photos
             </span>
             <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-              {openReviewReports.length + openListingReports.length + pendingDuplicateReports.length} open reports
+              {listingReportCases.length + openReviewReports.length} open report cases
             </span>
             <form action={logoutOpsAction}>
               <button
@@ -647,11 +835,14 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
         ) : null}
       </section>
 
+      <OpsTabNav activeTab={activeTab} tabs={tabItems} />
+
       <section className="space-y-5">
+        {activeTab === "restrooms" ? (
         <section>
           <div className="mb-3">
             <h2 className="text-lg font-semibold text-slate-900">Restroom submissions</h2>
-            <p className="text-xs text-slate-500">Track pending, approved, and removed community restroom submissions.</p>
+            <p className="text-xs text-slate-500">Track pending, active, and disabled community restroom submissions.</p>
           </div>
 
           <div className="grid gap-4 xl:grid-cols-3">
@@ -757,15 +948,14 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                             Open listing
                           </Link>
                           {canModerate ? (
-                            <form action={moderateBathroomAction} className="flex flex-wrap items-center gap-2">
+                            <form action={disableReportedListingAction} className="flex flex-wrap items-center gap-2">
                               <input type="hidden" name="bathroom_id" value={bathroom.id} />
+                              <input type="hidden" name="return_tab" value="restrooms" />
                               <button
                                 type="submit"
-                                name="status"
-                                value="removed"
                                 className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
                               >
-                                Remove
+                                Disable listing
                               </button>
                             </form>
                           ) : null}
@@ -775,9 +965,9 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                   })}
             </QueueColumn>
 
-            <QueueColumn title="Rejected / removed" subtitle="Restore if removed in error." count={removedBathrooms.length}>
+            <QueueColumn title="Rejected / disabled" subtitle="Restore if disabled in error." count={removedBathrooms.length}>
               {removedBathrooms.length === 0
-                ? renderEmptyState("No removed restroom submissions.")
+                ? renderEmptyState("No disabled restroom submissions.")
                 : removedBathrooms.map((bathroom) => (
                     <article key={bathroom.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
                       <div className="flex items-start justify-between gap-3">
@@ -790,7 +980,7 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                         <StatusBadge status={bathroom.status} />
                       </div>
 
-                      <p className="mt-2 text-xs text-slate-500">Submitted {formatDateTime(bathroom.created_at)} • Currently removed</p>
+                      <p className="mt-2 text-xs text-slate-500">Submitted {formatDateTime(bathroom.created_at)} • Currently disabled</p>
 
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <Link
@@ -800,15 +990,14 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
                           Open listing
                         </Link>
                         {canModerate ? (
-                          <form action={moderateBathroomAction} className="flex flex-wrap items-center gap-2">
+                          <form action={restoreReportedListingAction} className="flex flex-wrap items-center gap-2">
                             <input type="hidden" name="bathroom_id" value={bathroom.id} />
+                            <input type="hidden" name="return_tab" value="restrooms" />
                             <button
                               type="submit"
-                              name="status"
-                              value="active"
                               className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
                             >
-                              Restore
+                              Restore listing
                             </button>
                           </form>
                         ) : null}
@@ -818,7 +1007,9 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
             </QueueColumn>
           </div>
         </section>
+        ) : null}
 
+        {activeTab === "photos" ? (
         <section>
           <div className="mb-3">
             <h2 className="text-lg font-semibold text-slate-900">Photo moderation</h2>
@@ -973,7 +1164,9 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
             </QueueColumn>
           </div>
         </section>
+        ) : null}
 
+        {activeTab === "reviews" ? (
         <section>
           <div className="mb-3">
             <h2 className="text-lg font-semibold text-slate-900">Review moderation</h2>
@@ -1080,191 +1273,68 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
             </QueueColumn>
           </div>
         </section>
+        ) : null}
 
+        {activeTab === "history" ? (
         <section>
           <div className="mb-3">
-            <h2 className="text-lg font-semibold text-slate-900">Duplicate warnings</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Listing moderation history</h2>
             <p className="text-xs text-slate-500">
-              Keep duplicate decisions reversible with clear pending and reviewed queues.
+              Review resolved listing reports separately from the active moderation queue.
             </p>
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
-            <QueueColumn title="Pending duplicate warnings" subtitle="Review and choose keep or remove." count={pendingDuplicateReports.length}>
-              {pendingDuplicateReports.length === 0
-                ? renderEmptyState("No pending duplicate warnings.")
-                : pendingDuplicateReports.map((report) => (
-                    <article key={report.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-semibold text-slate-900">{report.bathroom?.name ?? "Unknown restroom"}</p>
-                          <p className="text-xs text-slate-600">
-                            {report.bathroom?.address ?? "Address unavailable"} • {report.bathroom?.city ?? "Unknown city"}
-                          </p>
-                        </div>
-                        {report.bathroom?.status ? <StatusBadge status={report.bathroom.status} /> : null}
-                      </div>
-
-                      <p className="mt-2 text-xs text-slate-500">Warning opened {formatDateTime(report.created_at)}</p>
-                      <ReportNoteBlock comment={report.note} />
-
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <Link
-                          href={`/restroom/${report.bathroom_id}`}
-                          className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                        >
-                          Open listing
-                        </Link>
-
-                        {canModerate ? (
-                          <>
-                            <form action={moderateDuplicateWarningAction}>
-                              <input type="hidden" name="report_id" value={report.id} />
-                              <input type="hidden" name="reason" value={report.storedReason} />
-                              <input type="hidden" name="bathroom_id" value={report.bathroom_id} />
-                              <button
-                                type="submit"
-                                name="decision"
-                                value="keep"
-                                className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
-                              >
-                                Keep listing
-                              </button>
-                            </form>
-
-                            <form action={removeDuplicateListingAction}>
-                              <input type="hidden" name="report_id" value={report.id} />
-                              <input type="hidden" name="reason" value={report.storedReason} />
-                              <input type="hidden" name="bathroom_id" value={report.bathroom_id} />
-                              <button
-                                type="submit"
-                                className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                              >
-                                Remove listing
-                              </button>
-                            </form>
-                          </>
-                        ) : null}
-                      </div>
-                    </article>
+            <QueueColumn
+              title="Disabled listings"
+              subtitle="Resolved listing reports whose restroom is currently disabled."
+              count={disabledListingHistoryCases.length}
+            >
+              {disabledListingHistoryCases.length === 0
+                ? renderEmptyState("No disabled listing history yet.")
+                : disabledListingHistoryCases.map((reportCase) => (
+                    <ListingReportCaseCard
+                      key={`disabled-history-${reportCase.bathroomId}`}
+                      reportCase={reportCase}
+                      canModerate={canModerate}
+                      mode="history"
+                    />
                   ))}
             </QueueColumn>
 
-            <QueueColumn title="Reviewed duplicate decisions" subtitle="Audit, reopen, or remove later." count={reviewedDuplicateReports.length}>
-              {reviewedDuplicateReports.length === 0
-                ? renderEmptyState("No reviewed duplicate decisions yet.")
-                : reviewedDuplicateReports.map((report) => (
-                    <article key={report.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-semibold text-slate-900">{report.bathroom?.name ?? "Unknown restroom"}</p>
-                          <p className="text-xs text-slate-600">
-                            {report.bathroom?.address ?? "Address unavailable"} • {report.bathroom?.city ?? "Unknown city"}
-                          </p>
-                        </div>
-                        {report.bathroom?.status ? <StatusBadge status={report.bathroom.status} /> : null}
-                      </div>
-
-                      <p className="mt-2 text-xs text-slate-500">Decision recorded {formatDateTime(report.created_at)}</p>
-                      <ReportNoteBlock comment={report.note} />
-
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <Link
-                          href={`/restroom/${report.bathroom_id}`}
-                          className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                        >
-                          Open listing
-                        </Link>
-
-                        {canModerate ? (
-                          <>
-                            <form action={moderateDuplicateWarningAction}>
-                              <input type="hidden" name="report_id" value={report.id} />
-                              <input type="hidden" name="reason" value={report.storedReason} />
-                              <input type="hidden" name="bathroom_id" value={report.bathroom_id} />
-                              <button
-                                type="submit"
-                                name="decision"
-                                value="reopen"
-                                className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                              >
-                                Reopen warning
-                              </button>
-                            </form>
-
-                            {report.bathroom?.status === "removed" ? (
-                              <form action={moderateBathroomAction}>
-                                <input type="hidden" name="bathroom_id" value={report.bathroom_id} />
-                                <button
-                                  type="submit"
-                                  name="status"
-                                  value="active"
-                                  className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
-                                >
-                                  Restore listing
-                                </button>
-                              </form>
-                            ) : (
-                              <form action={removeDuplicateListingAction}>
-                                <input type="hidden" name="report_id" value={report.id} />
-                                <input type="hidden" name="reason" value={report.storedReason} />
-                                <input type="hidden" name="bathroom_id" value={report.bathroom_id} />
-                                <button
-                                  type="submit"
-                                  className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                                >
-                                  Remove listing
-                                </button>
-                              </form>
-                            )}
-                          </>
-                        ) : null}
-                      </div>
-                    </article>
+            <QueueColumn
+              title="Resolved / restored reports"
+              subtitle="Reviewed listing reports for restrooms that are not currently disabled."
+              count={resolvedListingHistoryCases.length}
+            >
+              {resolvedListingHistoryCases.length === 0
+                ? renderEmptyState("No resolved listing report history yet.")
+                : resolvedListingHistoryCases.map((reportCase) => (
+                    <ListingReportCaseCard
+                      key={`resolved-history-${reportCase.bathroomId}`}
+                      reportCase={reportCase}
+                      canModerate={canModerate}
+                      mode="history"
+                    />
                   ))}
             </QueueColumn>
           </div>
         </section>
+        ) : null}
 
+        {activeTab === "reports" ? (
         <section>
           <div className="mb-3">
             <h2 className="text-lg font-semibold text-slate-900">Reports queue</h2>
-            <p className="text-xs text-slate-500">Handle listing and review reports and apply moderation actions as needed.</p>
+            <p className="text-xs text-slate-500">Review grouped listing reports and take reversible moderation actions directly.</p>
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
-            <QueueColumn title="Reported listings" subtitle="User-submitted listing issues." count={openListingReports.length}>
-              {openListingReports.length === 0
-                ? renderEmptyState("No open listing reports.")
-                : openListingReports.map((report) => (
-                    <article key={report.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                      <p className="font-semibold text-slate-900">{report.bathroom?.name ?? "Unknown restroom"}</p>
-                      <p className="mt-1 text-xs text-slate-600">
-                        {issueReasonLabelByCode.get(report.issueCode) ?? report.issueCode} • {formatDateTime(report.created_at)}
-                      </p>
-                      <ReportNoteBlock comment={report.note} />
-
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <Link
-                          href={`/restroom/${report.bathroom_id}`}
-                          className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                        >
-                          Open restroom
-                        </Link>
-                        {canModerate ? (
-                          <form action={markReportReviewedAction}>
-                            <input type="hidden" name="report_id" value={report.id} />
-                            <input type="hidden" name="reason" value={report.storedReason} />
-                            <button
-                              type="submit"
-                              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                            >
-                              Resolve report
-                            </button>
-                          </form>
-                        ) : null}
-                      </div>
-                    </article>
+            <QueueColumn title="Reported listing cases" subtitle="Grouped by restroom so repeated reports are handled together." count={listingReportCases.length}>
+              {listingReportCases.length === 0
+                ? renderEmptyState("No open listing report cases.")
+                : listingReportCases.map((reportCase) => (
+                    <ListingReportCaseCard key={reportCase.bathroomId} reportCase={reportCase} canModerate={canModerate} />
                   ))}
             </QueueColumn>
 
@@ -1351,6 +1421,7 @@ export default async function OpsPage({ searchParams }: OpsPageProps) {
             </QueueColumn>
           </div>
         </section>
+        ) : null}
       </section>
     </main>
   );

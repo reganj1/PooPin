@@ -21,6 +21,11 @@ export interface CollectibleProgressSummary {
   progressPercent: number;
 }
 
+interface PointEventContributionRow {
+  event_type?: string | null;
+  entity_id?: string | null;
+}
+
 const emptyCounts: CollectibleContributionCounts = {
   reviewCount: 0,
   photoCount: 0,
@@ -36,7 +41,12 @@ const loadDirectContributionCounts = async (profileId: string): Promise<Collecti
   }
 
   const [reviewResponse, photoResponse, restroomResponse] = await Promise.all([
-    supabase.from("reviews").select("id", { count: "exact", head: true }).eq("profile_id", profileId).eq("status", "active"),
+    supabase
+      .from("reviews")
+      .select("id, bathrooms!inner(id)", { count: "exact", head: true })
+      .eq("profile_id", profileId)
+      .eq("status", "active")
+      .eq("bathrooms.status", "active"),
     supabase.from("photos").select("id", { count: "exact", head: true }).eq("profile_id", profileId).in("status", ["active", "pending"]),
     supabase
       .from("bathrooms")
@@ -70,7 +80,7 @@ const loadContributionCountsFromPointEvents = async (profileId: string): Promise
 
   const { data, error } = await supabase
     .from("point_events")
-    .select("event_type")
+    .select("event_type, entity_id")
     .eq("profile_id", profileId)
     .eq("status", "awarded");
 
@@ -79,11 +89,42 @@ const loadContributionCountsFromPointEvents = async (profileId: string): Promise
     return emptyCounts;
   }
 
-  return ((data ?? []) as Array<{ event_type?: string | null }>).reduce<CollectibleContributionCounts>(
+  const pointEvents = (data ?? []) as PointEventContributionRow[];
+  const reviewEventIds = [
+    ...new Set(
+      pointEvents
+        .filter((row) => row.event_type === "review_created" && typeof row.entity_id === "string")
+        .map((row) => row.entity_id as string)
+    )
+  ];
+  const activeReviewIds = new Set<string>();
+
+  if (reviewEventIds.length > 0) {
+    const { data: activeReviews, error: activeReviewError } = await supabase
+      .from("reviews")
+      .select("id, bathrooms!inner(id)")
+      .in("id", reviewEventIds)
+      .eq("status", "active")
+      .eq("bathrooms.status", "active");
+
+    if (activeReviewError) {
+      console.warn("[Poopin] Could not filter collectible review progress by active listings.", activeReviewError.message);
+    } else {
+      for (const row of (activeReviews ?? []) as Array<{ id?: string | null }>) {
+        if (row.id) {
+          activeReviewIds.add(row.id);
+        }
+      }
+    }
+  }
+
+  return pointEvents.reduce<CollectibleContributionCounts>(
     (counts, row) => {
       switch (row.event_type) {
         case "review_created":
-          counts.reviewCount += 1;
+          if (row.entity_id && activeReviewIds.has(row.entity_id)) {
+            counts.reviewCount += 1;
+          }
           break;
         case "photo_uploaded":
           counts.photoCount += 1;
